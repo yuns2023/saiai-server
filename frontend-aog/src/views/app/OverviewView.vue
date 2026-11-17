@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChargeTable from '@/components/ChargeTable.vue'
 import Icon from '@/components/Icon.vue'
@@ -34,10 +34,12 @@ const hostedCurrent = computed(() => hosted.accounts.filter((a) => a.current).le
 
 /** Invitation status; stays null (row hidden) when the site has invites off or the request fails. */
 const invites = ref<UserInviteOverview | null>(null)
-/** One line in the order the invitations page explains it; the reasons themselves live there. */
+/** While the first answer is pending the row holds its place, so the charges below do not jump. */
+const invitesPending = ref(false)
+/** One short status; the exact reason (and every other limit) is explained on /invites. */
 const inviteLine = computed(() => {
   const d = invites.value
-  if (!d?.enabled) return null
+  if (!app.settings?.user_invite_enabled || !d?.enabled) return null
   if (!d.eligible) return { text: t('overview.inviteLocked'), to: '/billing', link: t('overview.inviteTopUp') }
   const view = { to: '/invites', link: t('overview.inviteView') }
   const weekLeft = d.max_per_week > 0 ? Math.max(0, d.max_per_week - (d.created_this_week || 0)) : null
@@ -47,10 +49,22 @@ const inviteLine = computed(() => {
   return { text, to: '/invites', link: t('overview.inviteGo') }
 })
 
-async function loadInvites(): Promise<void> {
-  if (!app.settings?.user_invite_enabled) return
-  invites.value = await invitesApi.overview(1, 1).catch(() => null)
+/** Follows the public switch like the nav does; an answer that lands after it changed is dropped. */
+let invitesSeq = 0
+async function loadInvites(on: boolean | undefined): Promise<void> {
+  const mine = ++invitesSeq
+  if (!on) {
+    invites.value = null
+    invitesPending.value = false
+    return
+  }
+  invitesPending.value = true
+  const res = await invitesApi.overview(1, 1).catch(() => null)
+  if (mine !== invitesSeq) return
+  invites.value = res
+  invitesPending.value = false
 }
+watch(() => app.settings?.user_invite_enabled, loadInvites, { immediate: true })
 
 async function load(): Promise<void> {
   loading.value = true
@@ -74,10 +88,7 @@ async function load(): Promise<void> {
   loading.value = false
 }
 
-onMounted(() => {
-  load()
-  loadInvites()
-})
+onMounted(load)
 </script>
 
 <template>
@@ -138,22 +149,25 @@ onMounted(() => {
     <!-- Account services: lines that only exist for some accounts. -->
     <!-- Phones: one aligned label column (wrappers dissolve into the grid); wider: one inline line. -->
     <dl
-      v-if="hosted.hasAny || inviteLine"
+      v-if="hosted.hasAny || inviteLine || invitesPending"
       class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2 border-b border-rule-soft py-3 text-sm sm:flex sm:flex-wrap sm:gap-x-10"
       data-testid="overview-services"
     >
       <div v-if="hosted.hasAny" class="contents sm:flex sm:min-w-0 sm:flex-wrap sm:items-baseline sm:gap-x-3" data-testid="overview-hosted">
         <dt class="label">{{ t('nav.hosted') }}</dt>
         <dd class="flex flex-wrap items-baseline gap-x-3">
-          <span class="num">{{ hostedCurrent > 0 ? t('overview.hostedCount', { n: hostedCurrent }) : t('overview.hostedPast') }}</span>
-          <RouterLink to="/hosted">{{ t('overview.hostedGo') }}</RouterLink>
+          <span>{{ hostedCurrent > 0 ? t('overview.hostedCount', { n: hostedCurrent }) : t('overview.hostedPast') }}</span>
+          <RouterLink to="/hosted">{{ hostedCurrent > 0 ? t('overview.hostedGo') : t('overview.hostedGoPast') }}</RouterLink>
         </dd>
       </div>
-      <div v-if="inviteLine" class="contents sm:flex sm:min-w-0 sm:flex-wrap sm:items-baseline sm:gap-x-3" data-testid="overview-invites">
+      <div v-if="inviteLine || invitesPending" class="contents sm:flex sm:min-w-0 sm:flex-wrap sm:items-baseline sm:gap-x-3" data-testid="overview-invites">
         <dt class="label">{{ t('overview.invites') }}</dt>
-        <dd class="flex flex-wrap items-baseline gap-x-3">
-          <span class="num">{{ inviteLine.text }}</span>
-          <RouterLink :to="inviteLine.to">{{ inviteLine.link }}</RouterLink>
+        <dd class="flex flex-wrap items-baseline gap-x-3" :aria-busy="!inviteLine">
+          <template v-if="inviteLine">
+            <span>{{ inviteLine.text }}</span>
+            <RouterLink :to="inviteLine.to">{{ inviteLine.link }}</RouterLink>
+          </template>
+          <span v-else class="skeleton inline-block h-4 w-40 align-middle" />
         </dd>
       </div>
     </dl>

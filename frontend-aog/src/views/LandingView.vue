@@ -46,12 +46,22 @@ const steps = computed(() => {
 })
 
 /**
- * Ways to add balance, one statement line each (key prefix → Title / Body / Time).
- * Only methods live on the site; a new method is one more entry here plus its copy.
+ * Ways to add balance, one statement line each: the method, an optional note
+ * under it, and when it lands. Only methods live on the site; a new method is
+ * one more entry here plus its copy.
  */
-const payMethods = ['landing.payArbitrum', 'landing.paySolana', 'landing.payRedeem']
+const payMethods: Array<{ title: string; body?: string; time: string }> = [
+  { title: 'landing.paySolanaTitle', time: 'landing.paySolanaTime' },
+  { title: 'landing.payArbitrumTitle', time: 'landing.payArbitrumTime' },
+  { title: 'landing.payRedeemTitle', body: 'landing.payRedeemBody', time: 'landing.payRedeemTime' }
+]
 
-const hostedLines = ['landing.hosted1', 'landing.hosted2']
+/** Hosting as ruled key-value lines; the last one (how to start) carries the site contact. */
+const hostedRows = [
+  { label: 'landing.hostedSeeLabel', value: 'landing.hostedSee' },
+  { label: 'landing.hostedFeeLabel', value: 'landing.hostedFee' },
+  { label: 'landing.hostedHowLabel', value: 'landing.hostedHow', contact: true }
+]
 
 const billing = ['landing.bill1', 'landing.bill2', 'landing.bill3']
 
@@ -122,34 +132,54 @@ const sample = [
         </section>
       </section>
 
-      <!-- After connecting: how balance gets in, and hosting your own account. Same statement blocks as the steps. -->
+      <!-- After connecting: how balance gets in (a small statement) and hosting your own account (ruled key-value lines). -->
       <section class="grid items-start gap-x-16 gap-y-12 border-t border-rule py-12 lg:grid-cols-[1.05fr_1fr] lg:py-16">
-        <section aria-labelledby="pay-title" data-testid="landing-pay">
+        <section aria-labelledby="pay-title" class="min-w-0" data-testid="landing-pay">
           <h2 id="pay-title" class="rule-double pb-2.5 text-lg font-semibold">{{ t('landing.payTitle') }}</h2>
-          <ul class="mt-1">
-            <li v-for="m in payMethods" :key="m" class="flex items-baseline justify-between gap-x-6 border-b border-rule-soft py-3.5">
-              <div class="min-w-0">
-                <h3 class="text-base font-semibold">{{ t(`${m}Title`) }}</h3>
-                <p class="mt-0.5 text-sm text-ink-2">{{ t(`${m}Body`) }}</p>
-              </div>
-              <span class="num shrink-0 text-right text-sm">{{ t(`${m}Time`) }}</span>
-            </li>
-          </ul>
-          <div class="rule-double" />
-          <p class="mt-3 text-xs leading-relaxed text-ink-3">{{ t('landing.payNote') }}</p>
+          <table class="ledger mt-1 text-sm">
+            <thead>
+              <tr>
+                <th scope="col">{{ t('landing.payColMethod') }}</th>
+                <th scope="col" class="amount">{{ t('landing.payColTime') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in payMethods" :key="m.title">
+                <td>
+                  <span class="font-medium text-ink">{{ t(m.title) }}</span>
+                  <span v-if="m.body" class="mt-0.5 block text-ink-2">{{ t(m.body) }}</span>
+                </td>
+                <td class="amount">{{ t(m.time) }}</td>
+              </tr>
+            </tbody>
+            <!-- One cell, so the long conversion never widens the time column. -->
+            <tfoot>
+              <tr>
+                <td colspan="2">
+                  <div class="flex flex-wrap items-baseline justify-between gap-x-4">
+                    <span class="text-ink-2">{{ t('landing.payRateLabel') }}</span>
+                    <span class="num font-medium">{{ t('landing.payRate') }}</span>
+                  </div>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+          <p class="mt-3 text-sm leading-relaxed text-ink-2">{{ t('landing.payNote') }}</p>
           <RouterLink v-if="auth.isAuthenticated" to="/billing" class="mt-2 inline-block text-sm">{{ t('landing.payGo') }}</RouterLink>
         </section>
 
-        <section aria-labelledby="hosted-title" data-testid="landing-hosted">
+        <section aria-labelledby="hosted-title" class="min-w-0" data-testid="landing-hosted">
           <h2 id="hosted-title" class="rule-double pb-2.5 text-lg font-semibold">{{ t('landing.hostedTitle') }}</h2>
           <p class="border-b border-rule-soft py-3.5 text-sm leading-relaxed text-ink">{{ t('landing.hostedSub') }}</p>
-          <ul>
-            <li v-for="key in hostedLines" :key="key" class="border-b border-rule-soft py-3 text-sm leading-relaxed text-ink-2">{{ t(key) }}</li>
-          </ul>
-          <div class="rule-double" />
-          <p class="mt-3 text-sm text-ink-2">
-            {{ t('landing.hostedHow') }}<span v-if="contact" class="ml-1 text-ink">{{ t('landing.contact') }} {{ contact }}</span>
-          </p>
+          <dl class="grid grid-cols-[max-content_1fr] text-sm">
+            <template v-for="row in hostedRows" :key="row.label">
+              <dt class="label border-b border-rule-soft py-3 pr-5 leading-relaxed">{{ t(row.label) }}</dt>
+              <dd class="min-w-0 border-b border-rule-soft py-3 leading-relaxed text-ink-2">
+                {{ t(row.value) }}
+                <span v-if="row.contact && contact" class="block text-ink [overflow-wrap:anywhere]">{{ t('landing.contact') }} {{ contact }}</span>
+              </dd>
+            </template>
+          </dl>
         </section>
       </section>
 
@@ -200,7 +230,7 @@ const sample = [
           <RouterLink to="/key-usage">{{ t('landing.lookup') }}</RouterLink>
           <a :href="AITP_URL" target="_blank" rel="noopener noreferrer">{{ t('landing.aitpGithub') }}</a>
           <a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer">{{ t('landing.docs') }}</a>
-          <span v-if="contact">{{ t('landing.contact') }} {{ contact }}</span>
+          <span v-if="contact" class="min-w-0 [overflow-wrap:anywhere]">{{ t('landing.contact') }} {{ contact }}</span>
         </nav>
         <p class="num">© {{ year }} {{ app.siteName }}</p>
       </div>

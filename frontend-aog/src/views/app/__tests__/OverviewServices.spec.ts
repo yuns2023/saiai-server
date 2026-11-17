@@ -105,13 +105,15 @@ describe('OverviewView account service lines', () => {
   it('links current hosted accounts to /hosted', async () => {
     const w = await mountOverview({ inviteSetting: false, owned: [account(), account({ account_id: 13 })] })
     const row = w.find('[data-testid=overview-hosted]')
-    expect(row.text()).toContain('名下 2 个')
+    expect(row.text()).toContain('当前 2 个')
+    expect(row.text()).toContain('查看额度与用量')
     expect(links(w, 'overview-hosted')).toEqual(['/hosted'])
   })
 
   it('still links past-only hosted accounts, worded as history', async () => {
     const w = await mountOverview({ inviteSetting: false, owned: [account({ current: false, status: null })] })
     expect(w.find('[data-testid=overview-hosted]').text()).toContain('仅有历史记录')
+    expect(w.find('[data-testid=overview-hosted]').text()).toContain('查看历史用量')
     expect(links(w, 'overview-hosted')).toEqual(['/hosted'])
   })
 
@@ -141,7 +143,7 @@ describe('OverviewView account service lines', () => {
     api.invites.overview.mockResolvedValue(invites({ created_this_week: 5, weekly_limit_reached: true, can_create: false }))
     const w = await mountOverview()
     const text = w.find('[data-testid=overview-invites]').text()
-    expect(text).toContain('本周的邀请码已用完')
+    expect(text).toContain('本周（滚动 7 天）的邀请码已用完')
     expect(text).not.toContain('0 个')
     expect(links(w, 'overview-invites')).toEqual(['/invites'])
   })
@@ -149,7 +151,7 @@ describe('OverviewView account service lines', () => {
   it('does not promise a code when another limit blocks it', async () => {
     api.invites.overview.mockResolvedValue(invites({ unused: 5, can_create: false }))
     const w = await mountOverview()
-    expect(w.find('[data-testid=overview-invites]').text()).toContain('暂时不能生成新的邀请码')
+    expect(w.find('[data-testid=overview-invites]').text()).toContain('现在不能生成新的邀请码')
   })
 
   it('sends users who have not topped up to /billing', async () => {
@@ -168,10 +170,47 @@ describe('OverviewView account service lines', () => {
     expect(failed.find('[role=alert]').exists()).toBe(false)
   })
 
+  it('holds the invitation row while the request is pending, then fills it', async () => {
+    let resolve: (v: UserInviteOverview) => void = () => undefined
+    api.invites.overview.mockReturnValue(new Promise<UserInviteOverview>((r) => (resolve = r)))
+    const w = await mountOverview()
+    const row = w.find('[data-testid=overview-invites]')
+    expect(row.find('.skeleton').exists()).toBe(true)
+    expect(row.find('dd').attributes('aria-busy')).toBe('true')
+    resolve(invites())
+    await flushPromises()
+    expect(w.find('[data-testid=overview-invites] .skeleton').exists()).toBe(false)
+    expect(w.find('[data-testid=overview-invites]').text()).toContain('本周还可生成 3 个邀请码')
+  })
+
+  it('follows the public invite switch after mount', async () => {
+    const w = await mountOverview({ inviteSetting: false })
+    expect(api.invites.overview).not.toHaveBeenCalled()
+    const app = useAppStore()
+    app.settings = { user_invite_enabled: true } as PublicSettings
+    await flushPromises()
+    expect(api.invites.overview).toHaveBeenCalledTimes(1)
+    expect(w.find('[data-testid=overview-invites]').exists()).toBe(true)
+    app.settings = { user_invite_enabled: false } as PublicSettings
+    await flushPromises()
+    expect(w.find('[data-testid=overview-invites]').exists()).toBe(false)
+  })
+
+  it('drops an answer that arrives after invites were switched off', async () => {
+    let resolve: (v: UserInviteOverview) => void = () => undefined
+    api.invites.overview.mockReturnValue(new Promise<UserInviteOverview>((r) => (resolve = r)))
+    const w = await mountOverview()
+    useAppStore().settings = { user_invite_enabled: false } as PublicSettings
+    await flushPromises()
+    resolve(invites())
+    await flushPromises()
+    expect(w.find('[data-testid=overview-invites]').exists()).toBe(false)
+  })
+
   it('shows both lines together, in English too', async () => {
     const w = await mountOverview({ owned: [account()], locale: 'en' })
     const services = w.find('[data-testid=overview-services]')
-    expect(services.text()).toContain('1 in your name')
+    expect(services.text()).toContain('1 current')
     expect(services.text()).toContain('Codes left this week: 3')
     i18n.global.locale.value = 'zh'
   })
