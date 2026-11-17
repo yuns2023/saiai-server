@@ -1056,7 +1056,8 @@
               </div>
             </div>
 
-            <!-- Client brand used in client-facing error messages -->
+            <!-- Client brand used in client-facing error messages. maxlength counts
+                 UTF-16 units; the server enforces the exact character limits. -->
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div>
                 <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1065,7 +1066,7 @@
                 <input
                   v-model="form.client_brand_name"
                   type="text"
-                  maxlength="32"
+                  maxlength="64"
                   class="input"
                   data-testid="client-brand-name"
                   :placeholder="t('admin.settings.site.clientBrandNamePlaceholder')"
@@ -1081,7 +1082,7 @@
                 <input
                   v-model="form.client_setup_command"
                   type="text"
-                  maxlength="64"
+                  maxlength="128"
                   class="input font-mono text-sm"
                   data-testid="client-setup-command"
                   :placeholder="t('admin.settings.site.clientSetupCommandPlaceholder')"

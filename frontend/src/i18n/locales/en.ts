@@ -5309,7 +5309,7 @@ export default {
         clientBrandName: 'Client Brand Name',
         clientBrandNamePlaceholder: 'e.g. CCYou',
         clientBrandNameHint:
-          'Used in error messages returned to clients (e.g. "use the official client"). Leave empty to keep the original SAIAI wording; once either field is set, messages no longer mention SAIAI. Up to 32 characters.',
+          'Used in error messages returned to clients (e.g. "use the official client"). Leave empty to keep the original SAIAI wording; once either field is set, messages no longer mention SAIAI (so neither field may contain it). Up to 32 characters.',
         clientSetupCommand: 'Client Setup Command',
         clientSetupCommandPlaceholder: 'e.g. aitp init',
         clientSetupCommandHint:

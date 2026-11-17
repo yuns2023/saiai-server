@@ -1533,7 +1533,10 @@ const (
 	// codexLocalProxyNeutralWSReason is used when the branded reason would
 	// not fit a WebSocket close frame (closeOpenAIClientWS cuts at 120 bytes).
 	codexLocalProxyNeutralWSReason = "Local proxy with official Codex required"
-	openAIWSCloseReasonMaxBytes    = 120
+	// codexLocalProxyIdentityIncompleteWSReason is the short WS variant of the
+	// identity text; it names no brand and stays when no command fits.
+	codexLocalProxyIdentityIncompleteWSReason = "本地代理身份信息不完整，请重新初始化并重启代理及 Codex。"
+	openAIWSCloseReasonMaxBytes               = 120
 )
 
 func codexLocalProxyIdentityIncompleteMessageFor(brand service.ClientBrand) string {
@@ -1556,6 +1559,15 @@ func codexLocalProxyRequiredMessageFor(brand service.ClientBrand) string {
 	default:
 		return "此分组仅允许通过本地代理使用官方 Codex 客户端。"
 	}
+}
+
+func codexLocalProxyIdentityIncompleteWSReasonFor(brand service.ClientBrand) string {
+	if brand.SetupCommand() != "" {
+		if reason := "本地代理身份信息不完整，请重新运行 " + brand.SetupCommand() + " 并重启代理及 Codex。"; len(reason) <= openAIWSCloseReasonMaxBytes {
+			return reason
+		}
+	}
+	return codexLocalProxyIdentityIncompleteWSReason
 }
 
 func codexLocalProxyRequiredWSReasonFor(brand service.ClientBrand) string {
@@ -2004,10 +2016,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		logCodexClientPolicyRejection(c, apiKey.Group)
 		reason := "approved Codex client required"
 		if strings.EqualFold(strings.TrimSpace(apiKey.Group.CodexClientPolicy), "local_proxy_only") {
-			reason = codexLocalProxyRequiredWSReasonFor(service.ClientBrandFromGin(c))
+			brand := service.ClientBrandFromGin(c)
+			reason = codexLocalProxyRequiredWSReasonFor(brand)
 			if pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) {
 				// WS close reasons must fit the protocol's 123-byte UTF-8 limit.
-				reason = "本地代理身份信息不完整，请重新初始化并重启代理及 Codex。"
+				reason = codexLocalProxyIdentityIncompleteWSReasonFor(brand)
 			}
 		}
 		closeOpenAIClientWSWithOps(c, wsConn, coderws.StatusPolicyViolation, reason)

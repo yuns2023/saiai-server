@@ -5468,7 +5468,7 @@ export default {
         clientBrandName: '客户端品牌名',
         clientBrandNamePlaceholder: '例如：CCYou',
         clientBrandNameHint:
-          '用于返回给客户端的错误提示（如“请使用官方客户端”）。留空 = 保持原 SAIAI 文案；任一项填写后提示中不再出现 SAIAI。最多 32 个字符。',
+          '用于返回给客户端的错误提示（如“请使用官方客户端”）。留空 = 保持原 SAIAI 文案；任一项填写后提示中不再出现 SAIAI（因此不能填写 SAIAI）。最多 32 个字符。',
         clientSetupCommand: '客户端初始化命令',
         clientSetupCommandPlaceholder: '例如：aitp init',
         clientSetupCommandHint:

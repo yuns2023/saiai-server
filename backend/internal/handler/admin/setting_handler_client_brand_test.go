@@ -61,6 +61,8 @@ func TestUpdateSettings_ClientBrandKeepsPreviousAndValidates(t *testing.T) {
 		{"client_brand_name": "ReClaude"},
 		{"client_setup_command": strings.Repeat("x", service.MaxClientSetupCommandRunes+1)},
 		{"client_setup_command": "aitp\tinit"},
+		{"client_brand_name": "SAiAi"},
+		{"client_setup_command": "saiai init"},
 	} {
 		w = priceHandlerRequest(router, http.MethodPut, "/settings", body)
 		require.Equal(t, http.StatusBadRequest, w.Code, "%v: %s", body, w.Body.String())

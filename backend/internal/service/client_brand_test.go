@@ -144,6 +144,9 @@ func TestNewClientBrandValidation(t *testing.T) {
 		{name: "CC\xffYou"},
 		{name: "ReClaude"},
 		{command: "reclaude init"},
+		{name: "SAIAI"},
+		{name: "MySaiAiBrand"},
+		{command: "saiai init"},
 	} {
 		_, err := NewClientBrand(tc.name, tc.command)
 		require.Error(t, err, "%q / %q", tc.name, tc.command)
@@ -311,16 +314,80 @@ func TestSettingServiceClientBrandSaveRefreshesAndInstancesAreIsolated(t *testin
 	require.Equal(t, ClientBrand{}, siteA.ClientBrand(context.Background()))
 }
 
+// blockingClientBrandRepo signals when a read starts and answers only when released.
+type blockingClientBrandRepo struct {
+	SettingRepository
+	values  map[string]string
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (r *blockingClientBrandRepo) GetMultiple(ctx context.Context, _ []string) (map[string]string, error) {
+	r.calls.Add(1)
+	select {
+	case r.started <- struct{}{}:
+	default:
+	}
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return r.values, nil
+}
+
 func TestSettingServiceClientBrandSaveWinsOverInFlightLoad(t *testing.T) {
-	repo := &clientBrandRepoStub{values: map[string]string{SettingKeyClientBrandName: "Old"}}
+	repo := &blockingClientBrandRepo{
+		values:  map[string]string{SettingKeyClientBrandName: "Old"},
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
 	svc := NewSettingService(repo, &config.Config{})
-	require.Equal(t, "Old", svc.ClientBrand(context.Background()).Name())
-	expireClientBrandCache(svc)
-	previous := svc.clientBrandCache.Load()
-	svc.storeClientBrand("New", "")
-	// A load that started from the expired value cannot overwrite the save.
-	require.False(t, svc.clientBrandCache.CompareAndSwap(previous, &cachedClientBrand{}))
-	require.Equal(t, "New", svc.loadClientBrand(context.Background(), time.Second).Name())
+	loaded := make(chan ClientBrand, 1)
+	go func() { loaded <- svc.loadClientBrand(context.Background(), 5*time.Second) }()
+	<-repo.started // the load has read nothing yet and holds the old (empty) snapshot
+	svc.storeClientBrand("New", "aitp init")
+	close(repo.release) // the in-flight load now returns the stale "Old" row
+	got := <-loaded
+	require.Equal(t, "New", got.Name(), "the in-flight load reports the saved value")
+	require.Equal(t, "New", svc.ClientBrand(context.Background()).Name(), "and never overwrites it")
+	require.Equal(t, int32(1), repo.calls.Load())
+}
+
+func TestSettingServiceClientBrandConcurrentColdLoadReadsOnce(t *testing.T) {
+	repo := &blockingClientBrandRepo{
+		values:  map[string]string{SettingKeyClientBrandName: "CCYou"},
+		started: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	svc := NewSettingService(repo, &config.Config{})
+	const callers = 8
+	results := make(chan ClientBrand, callers)
+	for i := 0; i < callers; i++ {
+		go func() { results <- svc.ClientBrand(context.Background()) }()
+	}
+	<-repo.started
+	// Callers that arrive after the read completes are served from the cache;
+	// either way only one read reaches the store.
+	close(repo.release)
+	for i := 0; i < callers; i++ {
+		require.Equal(t, "CCYou", (<-results).Name())
+	}
+	require.Equal(t, int32(1), repo.calls.Load(), "cold callers share one read")
+}
+
+func TestSettingServiceClientBrandColdLoadIsBounded(t *testing.T) {
+	repo := &blockingClientBrandRepo{started: make(chan struct{}, 1), release: make(chan struct{})}
+	defer close(repo.release)
+	svc := NewSettingService(repo, &config.Config{})
+	start := time.Now()
+	brand := svc.loadClientBrand(context.Background(), 50*time.Millisecond)
+	require.Less(t, time.Since(start), 2*time.Second)
+	require.Equal(t, ClientBrand{}, brand, "a timed-out first read falls back to the original texts")
+	cached := svc.clientBrandCache.Load()
+	require.NotNil(t, cached)
+	require.False(t, cached.loaded)
 }
 
 // --- Exit paths -----------------------------------------------------------
@@ -604,4 +671,9 @@ func TestBalanceRechargeSubjectFollowsRequestBrand(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.Equal(t, []string{baselineRechargeSubject, "CCYou Balance Recharge", "Balance Recharge"}, capturing.subjects)
+}
+
+func TestUnbrandedCodexCapacityBodyIsByteIdentical(t *testing.T) {
+	got := normalizeOpenAICodexCapacityError(ClientBrand{}, auditOAuthPolicyAccount(), []byte(`{"error":{"type":"usage_limit_reached","plan_type":"plus"}}`))
+	require.Equal(t, `{"error":{"code":"saiai_upstream_capacity_unavailable","message":"`+baselineCodexCapacity+`","type":"server_error"}}`, string(got))
 }

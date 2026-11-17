@@ -84,6 +84,7 @@ func NormalizeClientSetupCommand(value string) (string, error) {
 // spliced into: JSON built with strconv.Quote (no control characters), single
 // line SSE/WebSocket frames (no line breaks), and the client-safe upstream
 // message, which must never name the restricted upstream identity itself.
+// It also rejects SAIAI, so a customized site's texts never name it.
 func normalizeClientBrandField(value string, maxRunes int, code, field string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -102,6 +103,11 @@ func normalizeClientBrandField(value string, maxRunes int, code, field string) (
 	}
 	if containsRestrictedUpstreamIdentity(value) {
 		return "", infraerrors.BadRequest(code, field+" contains a reserved word")
+	}
+	// A customized site never names SAIAI; leaving both settings empty is how
+	// a site keeps the original SAIAI wording.
+	if strings.Contains(strings.ToLower(value), "saiai") {
+		return "", infraerrors.BadRequest(code, field+" must not contain SAIAI; leave both fields empty to keep the original SAIAI wording")
 	}
 	return value, nil
 }

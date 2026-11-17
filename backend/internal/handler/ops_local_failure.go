@@ -39,7 +39,9 @@ func setOpsLocalFailure(c *gin.Context, failure opsLocalFailure) {
 	if _, exists := c.Get(opsLocalFailureKey); exists {
 		return
 	}
-	// Ops record only: an unbranded replacement keeps the original wording.
+	// Ops record only. Text already worded for the client is recorded as
+	// sent; raw upstream text that still names the restricted identity gets
+	// the unbranded replacement.
 	failure.message = service.ClientSafeUpstreamErrorMessage(service.ClientBrand{}, failure.message)
 	c.Set(opsLocalFailureKey, failure)
 }

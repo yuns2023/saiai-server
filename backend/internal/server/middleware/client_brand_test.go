@@ -83,6 +83,7 @@ func TestClientBrandMiddlewareBrandsInvalidKeyRejection(t *testing.T) {
 			require.Equal(t, "authentication_error", body.Error.Type)
 			require.Equal(t, tc.want, body.Message)
 			require.Equal(t, tc.want, body.Error.Message)
+			require.Equal(t, `{"code":"INVALID_API_KEY","error":{"code":"INVALID_API_KEY","message":"`+tc.want+`","type":"authentication_error"},"message":"`+tc.want+`"}`, w.Body.String())
 		})
 	}
 }

@@ -98,6 +98,22 @@ func TestLocalProxyMessagesFollowBrand(t *testing.T) {
 	}
 }
 
+func TestLocalProxyIdentityWSReasonNamesCommandWhenItFits(t *testing.T) {
+	const original = "本地代理身份信息不完整，请重新初始化并重启代理及 Codex。"
+	for _, brand := range []service.ClientBrand{{}, handlerTestBrand(t, "CCYou", "")} {
+		require.Equal(t, original, codexLocalProxyIdentityIncompleteWSReasonFor(brand))
+	}
+	require.Equal(t, "本地代理身份信息不完整，请重新运行 aitp init 并重启代理及 Codex。",
+		codexLocalProxyIdentityIncompleteWSReasonFor(handlerTestBrand(t, "CCYou", "aitp init")))
+	longest := codexLocalProxyIdentityIncompleteWSReasonFor(handlerTestBrand(t, "", strings.Repeat("x", service.MaxClientSetupCommandRunes)))
+	require.Equal(t, original, longest, "a command that does not fit falls back to the neutral text")
+	for _, command := range []string{strings.Repeat("x", 60), strings.Repeat("令", service.MaxClientSetupCommandRunes)} {
+		reason := codexLocalProxyIdentityIncompleteWSReasonFor(handlerTestBrand(t, "", command))
+		require.LessOrEqual(t, len(reason), openAIWSCloseReasonMaxBytes)
+		require.True(t, utf8.ValidString(reason))
+	}
+}
+
 func TestLocalProxyWSReasonFitsCloseFrameForLongestBrand(t *testing.T) {
 	for _, tc := range []struct {
 		brand   string
@@ -168,6 +184,16 @@ func TestLocalProxyRejectionHTTPAndWSUseRequestBrand(t *testing.T) {
 	var closeErr coderws.CloseError
 	require.ErrorAs(t, err, &closeErr)
 	require.Equal(t, "CCYou local proxy with official Codex required", closeErr.Reason)
+
+	headers.Set("User-Agent", "Codex Desktop/0.162.0-alpha.17.2 (Windows 10.0.26200; x86_64)")
+	official, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/responses", &coderws.DialOptions{HTTPHeader: headers})
+	require.NoError(t, err)
+	defer func() { _ = official.CloseNow() }()
+	require.NoError(t, official.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"TEST_ONLY_MODEL","input":"TEST_ONLY_INPUT"}`)))
+	_, _, err = official.Read(ctx)
+	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, "本地代理身份信息不完整，请重新运行 aitp init 并重启代理及 Codex。", closeErr.Reason)
 	require.Zero(t, slotCalls.Load())
 }
 
@@ -297,4 +323,19 @@ func TestBrandedSSEErrorStaysValidJSONForUnicodeBrand(t *testing.T) {
 	data := strings.TrimSpace(strings.TrimPrefix(recorder.Body.String(), "data: "))
 	require.True(t, json.Valid([]byte(data)), data)
 	require.Equal(t, brand.DeviceAuthorizationUnavailableMessage(), gjson.Get(data, "error.message").String())
+}
+
+// With no brand settings the wire bytes are exactly what they were before.
+func TestUnbrandedErrorBodiesAreByteIdentical(t *testing.T) {
+	h := &GatewayHandler{}
+	c, recorder := brandedTestContext(t, http.MethodPost, "/v1/messages", service.ClientBrand{})
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "reclaude: client state unavailable", false)
+	require.Equal(t, `{"error":{"message":"SAIAI 服务通道暂时不可用，请稍后重试；如持续出现，请联系支持。","type":"upstream_error"},"type":"error"}`, recorder.Body.String())
+
+	c, recorder = brandedTestContext(t, http.MethodPost, "/v1/messages", service.ClientBrand{})
+	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "reclaude: client state unavailable", true)
+	require.Equal(t, `data: {"type":"error","error":{"type":"upstream_error","message":"SAIAI 服务通道暂时不可用，请稍后重试；如持续出现，请联系支持。"}}`+"\n\n", recorder.Body.String())
+
+	frame := codexTimezoneGuardRejection(codexTimezoneGuardMessageFor(service.ClientBrand{}, "codex_cli_rs/0.170.0 (Ubuntu 24.4.0; x86_64) xterm-256color")).frame()
+	require.Equal(t, `{"error":{"code":"codex_timezone_reinit_required","message":"`+baselineCodexReinitGeneric+`","type":"invalid_request_error"},"status":400,"type":"error"}`, string(frame))
 }
