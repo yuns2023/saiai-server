@@ -2507,7 +2507,12 @@ func (h *OpenAIGatewayHandler) checkOpenAIWSTurnBilling(
 	}
 	reqLog := requestLogger(c, "handler.openai_gateway.responses_ws", zap.Int("turn", turn))
 	if errors.Is(err, service.ErrBillingServiceUnavailable) {
-		reqLog.Warn("openai.websocket_turn_billing_check_unavailable_allowed", zap.Error(err))
+		// An outage hits every turn of every session; log once a minute.
+		now := time.Now().UnixNano()
+		last := openAIWSTurnBillingFailOpenLastLog.Load()
+		if now-last >= int64(time.Minute) && openAIWSTurnBillingFailOpenLastLog.CompareAndSwap(last, now) {
+			reqLog.Warn("openai.websocket_turn_billing_check_unavailable_allowed", zap.Error(err))
+		}
 		return nil
 	}
 	reqLog.Info("openai.websocket_turn_billing_rejected", zap.Error(err))
@@ -2537,6 +2542,10 @@ func (h *OpenAIGatewayHandler) loadOpenAIWSSessionKey(ctx context.Context, apiKe
 	}
 	return freshAPIKey, nil
 }
+
+// openAIWSTurnBillingFailOpenLastLog throttles the fail-open warning of
+// checkOpenAIWSTurnBilling (unix nanos).
+var openAIWSTurnBillingFailOpenLastLog atomic.Int64
 
 // openAIWSBillingMode is how the session's turns are settled: by
 // subscription, free hosting, or the wallet (standard or charged hosting).

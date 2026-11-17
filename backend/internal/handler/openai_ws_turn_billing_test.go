@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,11 +39,14 @@ func (s *wsTurnBillingUserRepoStub) GetByID(_ context.Context, id int64) (*servi
 
 type wsTurnBillingSubRepoStub struct {
 	service.UserSubscriptionRepository
+	mu  sync.Mutex
 	sub *service.UserSubscription
 	err error
 }
 
 func (s *wsTurnBillingSubRepoStub) GetActiveByUserIDAndGroupID(context.Context, int64, int64) (*service.UserSubscription, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -51,6 +55,45 @@ func (s *wsTurnBillingSubRepoStub) GetActiveByUserIDAndGroupID(context.Context, 
 	}
 	copy := *s.sub
 	return &copy, nil
+}
+
+func (s *wsTurnBillingSubRepoStub) update(f func(sub *service.UserSubscription)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f(s.sub)
+}
+
+// wsTurnWindowMaintenance records SubscriptionService.DoWindowMaintenance
+// calls and applies the reset to the stub's stored row.
+type wsTurnWindowMaintenance struct {
+	mu    sync.Mutex
+	calls []service.UserSubscription
+}
+
+func (m *wsTurnWindowMaintenance) install(h *OpenAIGatewayHandler, subs *wsTurnBillingSubRepoStub, block <-chan struct{}) {
+	h.billingCacheService.SetSubscriptionWindowMaintenance(func(sub *service.UserSubscription) {
+		if block != nil {
+			<-block
+		}
+		m.mu.Lock()
+		m.calls = append(m.calls, *sub)
+		m.mu.Unlock()
+		subs.update(func(stored *service.UserSubscription) {
+			now := time.Now()
+			if sub.NeedsDailyReset() {
+				stored.DailyWindowStart, stored.DailyUsageUSD = &now, 0
+			}
+			if sub.NeedsFiveHourReset() {
+				stored.FiveHourWindowStart, stored.FiveHourUsageUSD = &now, 0
+			}
+		})
+	})
+}
+
+func (m *wsTurnWindowMaintenance) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.calls)
 }
 
 // newWSTurnBillingHandler returns a handler whose billing check reads the
@@ -261,48 +304,118 @@ func TestOpenAIWSLaterTurnBillingModeChangeRequiresReconnect(t *testing.T) {
 	require.Zero(t, users.reads.Load())
 }
 
-// A session that crosses a daily boundary: the turn after the boundary passes
-// and persists the window reset (as the auth middleware would), so usage of
-// the new window is enforced on the following turns instead of being zeroed
-// in memory forever.
-func TestOpenAIWSLaterTurnPersistsEndedSubscriptionWindow(t *testing.T) {
+type wsTurnWindowFixture struct {
+	h           *OpenAIGatewayHandler
+	key         *service.APIKey
+	group       *service.Group
+	subs        *wsTurnBillingSubRepoStub
+	maintenance *wsTurnWindowMaintenance
+	sessionSub  service.UserSubscription
+}
+
+func newWSTurnWindowFixture(t *testing.T, group *service.Group, stored *service.UserSubscription, block <-chan struct{}) *wsTurnWindowFixture {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
-	daily := 5.0
-	group := &service.Group{
-		ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive,
-		SubscriptionType: service.SubscriptionTypeSubscription, DailyLimitUSD: &daily,
-	}
-	yesterday := time.Now().Add(-25 * time.Hour)
-	stored := &service.UserSubscription{
-		ID: 21, UserID: 2, GroupID: 11, Status: service.SubscriptionStatusActive,
-		ExpiresAt: time.Now().Add(24 * time.Hour), DailyUsageUSD: 6, DailyWindowStart: &yesterday,
-	}
 	subs := &wsTurnBillingSubRepoStub{sub: stored}
 	users := &wsTurnBillingUserRepoStub{}
 	users.balance.Store(float64(0))
 	h, key := newWSTurnBillingHandler(t, group, users, subs)
-	var maintained []*service.UserSubscription
-	h.billingCacheService.SetSubscriptionWindowMaintenance(func(sub *service.UserSubscription) {
-		maintained = append(maintained, sub)
-		now := time.Now()
-		stored.DailyWindowStart = &now
-		stored.DailyUsageUSD = 0
-	})
-	sessionSub := *stored
+	maintenance := &wsTurnWindowMaintenance{}
+	maintenance.install(h, subs, block)
+	return &wsTurnWindowFixture{h: h, key: key, group: group, subs: subs, maintenance: maintenance, sessionSub: *stored}
+}
+
+func (f *wsTurnWindowFixture) admit(turn int) error {
 	c := wsTurnBillingTestContext()
 	var sessionGroup atomic.Pointer[service.Group]
-	sessionGroup.Store(group)
-	admit := func(turn int) error {
-		return h.admitOpenAIWSLaterTurn(c.Request.Context(), c, nil, key, &sessionGroup, &sessionSub, key.UserID, turn, []byte(wsTurnBillingPayload))
+	sessionGroup.Store(f.group)
+	return f.h.admitOpenAIWSLaterTurn(c.Request.Context(), c, nil, f.key, &sessionGroup, &f.sessionSub, f.key.UserID, turn, []byte(wsTurnBillingPayload))
+}
+
+func wsTurnDailyGroup() *service.Group {
+	daily := 5.0
+	return &service.Group{
+		ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeSubscription, DailyLimitUSD: &daily,
 	}
+}
 
-	require.NoError(t, admit(2))
-	require.Len(t, maintained, 1)
-	require.Equal(t, int64(21), maintained[0].ID)
+func wsTurnStoredSub(dailyUsage float64, dailyStart time.Time) *service.UserSubscription {
+	return &service.UserSubscription{
+		ID: 21, UserID: 2, GroupID: 11, Status: service.SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(48 * time.Hour), DailyUsageUSD: dailyUsage, DailyWindowStart: &dailyStart,
+	}
+}
 
-	stored.DailyUsageUSD = 6 // spent in the new window
+// A session that crosses a daily boundary with yesterday's window already
+// exhausted: the turn after the boundary passes and persists the window
+// reset (as the auth middleware would), so usage of the new window is
+// enforced on the following turns instead of being zeroed in memory forever.
+func TestOpenAIWSLaterTurnPersistsEndedSubscriptionWindow(t *testing.T) {
+	f := newWSTurnWindowFixture(t, wsTurnDailyGroup(), wsTurnStoredSub(6, time.Now().Add(-25*time.Hour)), nil)
+
+	require.NoError(t, f.admit(2))
+	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, int64(21), f.maintenance.calls[0].ID)
+
+	f.subs.update(func(stored *service.UserSubscription) { stored.DailyUsageUSD = 6 }) // spent in the new window
 	var rejection *openAIWSSessionRejection
-	require.ErrorAs(t, admit(3), &rejection)
+	require.ErrorAs(t, f.admit(3), &rejection)
 	require.Equal(t, "billing_error", rejection.code)
-	require.Len(t, maintained, 1)
+	require.Equal(t, 1, f.maintenance.count())
+}
+
+// Crossing a boundary while the ended window is still under its limit must
+// also reset the window, before new-window usage is added to the old one.
+func TestOpenAIWSLaterTurnMaintainsEndedWindowUnderLimit(t *testing.T) {
+	f := newWSTurnWindowFixture(t, wsTurnDailyGroup(), wsTurnStoredSub(4, time.Now().Add(-25*time.Hour)), nil)
+
+	require.NoError(t, f.admit(2))
+	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
+	// Later turns within the interval do not schedule it again.
+	require.NoError(t, f.admit(3))
+	require.NoError(t, f.admit(4))
+	require.Never(t, func() bool { return f.maintenance.count() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
+}
+
+func TestOpenAIWSLaterTurnMaintainsEndedFiveHourWindow(t *testing.T) {
+	fiveHour := 3.0
+	group := &service.Group{
+		ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeSubscription, FiveHourLimitUSD: &fiveHour,
+	}
+	started := time.Now().Add(-6 * time.Hour)
+	stored := &service.UserSubscription{
+		ID: 21, UserID: 2, GroupID: 11, Status: service.SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(48 * time.Hour), FiveHourUsageUSD: 1, FiveHourWindowStart: &started,
+	}
+	f := newWSTurnWindowFixture(t, group, stored, nil)
+
+	require.NoError(t, f.admit(2))
+	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
+	require.True(t, f.maintenance.calls[0].NeedsFiveHourReset())
+}
+
+// No maintenance when the windows are current.
+func TestOpenAIWSLaterTurnSkipsMaintenanceForCurrentWindows(t *testing.T) {
+	f := newWSTurnWindowFixture(t, wsTurnDailyGroup(), wsTurnStoredSub(1, time.Now().Add(-time.Hour)), nil)
+	require.NoError(t, f.admit(2))
+	require.Never(t, func() bool { return f.maintenance.count() > 0 }, 100*time.Millisecond, 10*time.Millisecond)
+}
+
+// Window maintenance may run synchronously (no queue) with a 5 s timeout;
+// the turn must not wait for it.
+func TestOpenAIWSLaterTurnDoesNotBlockOnWindowMaintenance(t *testing.T) {
+	block := make(chan struct{})
+	f := newWSTurnWindowFixture(t, wsTurnDailyGroup(), wsTurnStoredSub(4, time.Now().Add(-25*time.Hour)), block)
+	admitted := make(chan error, 1)
+	go func() { admitted <- f.admit(2) }()
+	select {
+	case err := <-admitted:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("turn admission waited for window maintenance")
+	}
+	close(block)
+	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
 }
