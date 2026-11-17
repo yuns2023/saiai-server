@@ -45,7 +45,7 @@ func (r *settlementReconcileRepository) Reconcile(ctx context.Context, q service
 
 func mapSettlementReconcileError(err error) error {
 	var pqErr *pq.Error
-	if errors.As(err, &pqErr) && pqErr.Code == "57014" { // query_canceled (statement_timeout)
+	if errors.As(err, &pqErr) && pqErr.Code == "57014" { // query_canceled: statement_timeout, or a cancel request
 		return service.ErrSettlementReconcileTimeout
 	}
 	return err

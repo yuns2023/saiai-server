@@ -51,8 +51,8 @@ var (
 	ErrSettlementReconcileInvalidWindow = infraerrors.BadRequest("INVALID_RECONCILE_WINDOW", "from and to are required RFC3339 times with from < to and a window of at most 7 days")
 	ErrSettlementReconcileCoverage      = infraerrors.BadRequest("INVALID_RECONCILE_COVERAGE_START", "coverage_start is a required RFC3339 time")
 	ErrSettlementReconcileInvalidPage   = infraerrors.BadRequest("INVALID_RECONCILE_PAGE", "page must be 1-1000 and page_size 1-500")
-	// ErrSettlementReconcileTimeout is a database-side statement timeout:
-	// narrow the window and retry.
+	// ErrSettlementReconcileTimeout is a cancelled reconcile query (normally
+	// the database-side statement timeout): narrow the window and retry.
 	ErrSettlementReconcileTimeout = infraerrors.ServiceUnavailable("SETTLEMENT_RECONCILE_TIMEOUT", "settlement reconcile query timed out; narrow the time window and retry")
 )
 

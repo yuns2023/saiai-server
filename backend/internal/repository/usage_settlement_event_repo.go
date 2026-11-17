@@ -16,12 +16,14 @@ import (
 
 // Shadow settlement event write inside the billing transaction (P2b).
 //
-// The segment runs under SAVEPOINT settlement_evt with a total time budget
-// (at most 2s, and always leaving a reserve of the billing context for
-// ROLLBACK TO and COMMIT). Before each segment statement the local
+// The segment runs under SAVEPOINT settlement_evt with one shared deadline
+// (2s, earlier if needed to keep a reserve of the billing context for
+// ROLLBACK TO and COMMIT). Before each owner read / INSERT the local
 // statement_timeout is set to the remaining budget and lock_timeout to the
-// smaller of 1s and that budget, so a slow event table can never drag the
-// charge into a timeout; an exhausted budget skips straight to ROLLBACK TO. Any failure rolls back to the savepoint and billing still commits
+// smaller of 1s and that budget, which bounds the cumulative wait of the
+// segment's queries; an exhausted budget skips straight to ROLLBACK TO. This
+// is a wait budget, not a wall-clock guarantee: if ROLLBACK TO still fails
+// (dead connection, cancelled context) billing returns an error. Any failure rolls back to the savepoint and billing still commits
 // (error log + counter); only a failed ROLLBACK TO (the transaction is no
 // longer usable) is returned. The one fatal outcome is an existing event for
 // an identity the dedup claim just accepted: that means the dedup/archive
