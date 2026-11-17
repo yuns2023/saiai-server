@@ -75,9 +75,6 @@ func (m *wsTurnWindowMaintenance) install(h *OpenAIGatewayHandler, subs *wsTurnB
 		if block != nil {
 			<-block
 		}
-		m.mu.Lock()
-		m.calls = append(m.calls, *sub)
-		m.mu.Unlock()
 		subs.update(func(stored *service.UserSubscription) {
 			now := time.Now()
 			if sub.NeedsDailyReset() {
@@ -87,7 +84,18 @@ func (m *wsTurnWindowMaintenance) install(h *OpenAIGatewayHandler, subs *wsTurnB
 				stored.FiveHourWindowStart, stored.FiveHourUsageUSD = &now, 0
 			}
 		})
+		// Published once the reset is applied, so tests that wait for it
+		// never race the stored row.
+		m.mu.Lock()
+		m.calls = append(m.calls, *sub)
+		m.mu.Unlock()
 	})
+}
+
+func (m *wsTurnWindowMaintenance) first() service.UserSubscription {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls[0]
 }
 
 func (m *wsTurnWindowMaintenance) count() int {
@@ -356,7 +364,7 @@ func TestOpenAIWSLaterTurnPersistsEndedSubscriptionWindow(t *testing.T) {
 
 	require.NoError(t, f.admit(2))
 	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
-	require.Equal(t, int64(21), f.maintenance.calls[0].ID)
+	require.Equal(t, int64(21), f.maintenance.first().ID)
 
 	f.subs.update(func(stored *service.UserSubscription) { stored.DailyUsageUSD = 6 }) // spent in the new window
 	var rejection *openAIWSSessionRejection
@@ -393,7 +401,8 @@ func TestOpenAIWSLaterTurnMaintainsEndedFiveHourWindow(t *testing.T) {
 
 	require.NoError(t, f.admit(2))
 	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
-	require.True(t, f.maintenance.calls[0].NeedsFiveHourReset())
+	maintained := f.maintenance.first()
+	require.True(t, maintained.NeedsFiveHourReset())
 }
 
 // No maintenance when the windows are current.
@@ -418,4 +427,20 @@ func TestOpenAIWSLaterTurnDoesNotBlockOnWindowMaintenance(t *testing.T) {
 	}
 	close(block)
 	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
+}
+
+// Concurrent sessions of one subscription schedule its maintenance once.
+func TestOpenAIWSLaterTurnWindowMaintenanceDedupedAcrossSessions(t *testing.T) {
+	f := newWSTurnWindowFixture(t, wsTurnDailyGroup(), wsTurnStoredSub(4, time.Now().Add(-25*time.Hour)), nil)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = f.admit(2)
+		}()
+	}
+	wg.Wait()
+	require.Eventually(t, func() bool { return f.maintenance.count() == 1 }, 2*time.Second, 5*time.Millisecond)
+	require.Never(t, func() bool { return f.maintenance.count() > 1 }, 100*time.Millisecond, 10*time.Millisecond)
 }

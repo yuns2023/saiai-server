@@ -113,7 +113,8 @@ type BillingCacheService struct {
 	subscriptionWindowMaintenance atomic.Pointer[func(*UserSubscription)]
 	// sessionWindowMaintenance: subscription ID -> unix nanos of the last
 	// window maintenance scheduled from a session turn.
-	sessionWindowMaintenance sync.Map
+	sessionWindowMaintenance       sync.Map
+	sessionWindowMaintenanceClaims atomic.Uint64
 	// rateLimitLoadErrLastLog throttles the fail-open warning (unix nanos).
 	rateLimitLoadErrLastLog atomic.Int64
 }
@@ -754,6 +755,37 @@ func (s *BillingCacheService) CheckSessionTurnEligibility(ctx context.Context, u
 // windows are maintained from session turns.
 const sessionWindowMaintenanceInterval = time.Minute
 
+// claimSessionWindowMaintenance atomically takes the per-subscription slot
+// for this interval. Every sessionWindowMaintenanceSweep claims it drops
+// entries older than the interval, so the map holds only recent ones.
+func (s *BillingCacheService) claimSessionWindowMaintenance(subscriptionID int64) bool {
+	now := time.Now().UnixNano()
+	for {
+		last, loaded := s.sessionWindowMaintenance.LoadOrStore(subscriptionID, now)
+		if !loaded {
+			break
+		}
+		lastNanos, _ := last.(int64)
+		if now-lastNanos < int64(sessionWindowMaintenanceInterval) {
+			return false
+		}
+		if s.sessionWindowMaintenance.CompareAndSwap(subscriptionID, last, now) {
+			break
+		}
+	}
+	if s.sessionWindowMaintenanceClaims.Add(1)%sessionWindowMaintenanceSweep == 0 {
+		s.sessionWindowMaintenance.Range(func(key, value any) bool {
+			if lastNanos, _ := value.(int64); now-lastNanos >= int64(sessionWindowMaintenanceInterval) {
+				s.sessionWindowMaintenance.CompareAndDelete(key, value)
+			}
+			return true
+		})
+	}
+	return true
+}
+
+const sessionWindowMaintenanceSweep = 256
+
 // subscriptionWindowsNeedMaintenance applies the auth middleware's window
 // check (ValidateAndCheckLimits) to a copy of sub.
 func subscriptionWindowsNeedMaintenance(sub *UserSubscription, group *Group) bool {
@@ -773,13 +805,9 @@ func (s *BillingCacheService) scheduleSessionWindowMaintenance(userID int64, gro
 	if maintain == nil {
 		return
 	}
-	now := time.Now().UnixNano()
-	if last, ok := s.sessionWindowMaintenance.Load(subscriptionID); ok {
-		if lastNanos, isInt := last.(int64); isInt && now-lastNanos < int64(sessionWindowMaintenanceInterval) {
-			return
-		}
+	if !s.claimSessionWindowMaintenance(subscriptionID) {
+		return
 	}
-	s.sessionWindowMaintenance.Store(subscriptionID, now)
 	run := s.runAsync
 	if run == nil {
 		run = func(f func()) { go f() }
@@ -790,7 +818,12 @@ func (s *BillingCacheService) scheduleSessionWindowMaintenance(userID int64, gro
 			loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
 			row, err := s.subRepo.GetActiveByUserIDAndGroupID(loadCtx, userID, group.ID)
 			cancel()
-			if err != nil || row == nil || row.ID != subscriptionID {
+			if err != nil {
+				// Let the next turn retry instead of waiting out the interval.
+				s.sessionWindowMaintenance.Delete(subscriptionID)
+				return
+			}
+			if row == nil || row.ID != subscriptionID {
 				return
 			}
 			if !subscriptionWindowsNeedMaintenance(row, group) {
