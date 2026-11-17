@@ -9386,6 +9386,9 @@ type postUsageBillingParams struct {
 	IsSubscriptionBill    bool
 	AccountRateMultiplier float64 // Upstream account quota basis, separate from reporting snapshots.
 	APIKeyService         APIKeyQuotaUpdater
+	// PriceMissing marks a cost built by the missing-price branch (zero cost
+	// because the model has no price), for the settlement zero_reason.
+	PriceMissing bool
 }
 
 // postUsageBilling 统一处理使用量记录后的扣费逻辑：
@@ -9554,8 +9557,50 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	if p.APIKey.SmartSwitchOriginalGroupID != nil && cmd.BalanceCost > 0 {
 		cmd.SmartSwitchPaygCost = cmd.BalanceCost
 	}
+	cmd.Settlement = buildUsageSettlementInput(cmd, usageLog, p)
 	cmd.Normalize()
 	return cmd
+}
+
+// buildUsageSettlementInput freezes the settlement inputs of every completed
+// sale; the repository decides whether the sale gets a shadow event.
+func buildUsageSettlementInput(cmd *UsageBillingCommand, usageLog *UsageLog, p *postUsageBillingParams) *UsageSettlementInput {
+	group := p.APIKey.Group
+	in := &UsageSettlementInput{
+		GroupID:      cloneInt64Ptr(p.APIKey.GroupID),
+		StandardCost: p.Cost.TotalCost,
+		ChargeSource: SettlementChargeSourceNone,
+		MissingPrice: p.PriceMissing,
+	}
+	if p.APIKey.SmartSwitchOriginalGroupID != nil {
+		in.OriginalGroupID = cloneInt64Ptr(p.APIKey.SmartSwitchOriginalGroupID)
+	}
+	if group.UsesHostedUsage() {
+		in.Hosted = true
+		rate := group.HostedFeeRate()
+		in.FeeRate = &rate
+		// Every hosted-aware recording path sets MeteredCost via
+		// applyHostedUsage; a hosted sale without it was not priced as hosted.
+		in.HostedNotMetered = p.MeteredCost == nil
+	}
+	switch {
+	case cmd.SubscriptionCost > 0:
+		in.ChargeInput = cmd.SubscriptionCost
+		in.ChargeSource = SettlementChargeSourceSubscription
+		in.SubscriptionID = cloneInt64Ptr(cmd.SubscriptionID)
+	case cmd.BalanceCost > 0:
+		in.ChargeInput = cmd.BalanceCost
+		in.ChargeSource = SettlementChargeSourceBalance
+	}
+	in.FreeGroup = group.HostedChargeFree()
+	if usageLog != nil {
+		if usageLog.RateMultiplier == 0 {
+			in.FreeGroup = true
+		}
+		in.ZeroUsage = usageLog.InputTokens == 0 && usageLog.OutputTokens == 0 &&
+			usageLog.CacheCreationTokens == 0 && usageLog.CacheReadTokens == 0 && usageLog.ImageCount == 0
+	}
+	return in
 }
 
 func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog, p *postUsageBillingParams, deps *billingDeps, repo UsageBillingRepository) (bool, error) {
@@ -9565,6 +9610,12 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
+		// The non-transactional fallback writes no settlement event.
+		logger.L().Error("usage billing without transactional repository: settlement event not recorded",
+			zap.String("request_id", requestID),
+			zap.Bool("command_built", cmd != nil),
+			zap.Bool("repository_present", repo != nil),
+		)
 		postUsageBilling(ctx, p, deps)
 		return true, nil
 	}
@@ -9713,6 +9764,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	}
 
 	var cost *CostBreakdown
+	priceMissing := false
 	billingModel := resolveGatewayBillingModel(result)
 
 	// 根据请求类型选择计费方式
@@ -9759,6 +9811,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		if err != nil {
 			logger.LegacyPrintf("service.gateway", "Calculate cost failed (model=%s): %v", billingModel, err)
 			cost = &CostBreakdown{ActualCost: 0}
+			priceMissing = true
 		}
 	}
 
@@ -9868,6 +9921,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 			AccountRateMultiplier: account.BillingRateMultiplier(),
 			MeteredCost:           meteredCost,
 			APIKeyService:         input.APIKeyService,
+			PriceMissing:          priceMissing,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()
@@ -9937,6 +9991,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	}
 
 	var cost *CostBreakdown
+	priceMissing := false
 	billingModel := resolveGatewayBillingModel(result)
 
 	// 根据请求类型选择计费方式
@@ -9966,6 +10021,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		if err != nil {
 			logger.LegacyPrintf("service.gateway", "Calculate cost failed (model=%s): %v", billingModel, err)
 			cost = &CostBreakdown{ActualCost: 0}
+			priceMissing = true
 		}
 	}
 
@@ -10066,6 +10122,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 			IsSubscriptionBill:    isSubscriptionBilling,
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
+			PriceMissing:          priceMissing,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

@@ -33,6 +33,7 @@ func ProvideAdminHandlers(
 	apiKeyHandler *admin.AdminAPIKeyHandler,
 	paymentHandler *admin.PaymentHandler,
 	cryptoPayHandler *admin.CryptoPayHandler,
+	settlementHandler *admin.SettlementHandler,
 	hostedOwnerService *service.HostedOwnerService,
 ) *AdminHandlers {
 	accountHandler.SetHostedOwnerService(hostedOwnerService)
@@ -62,6 +63,7 @@ func ProvideAdminHandlers(
 		APIKey:           apiKeyHandler,
 		Payment:          paymentHandler,
 		CryptoPay:        cryptoPayHandler,
+		Settlement:       settlementHandler,
 	}
 }
 
@@ -188,6 +190,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAdminAPIKeyHandler,
 	admin.NewPaymentHandler,
 	admin.NewCryptoPayHandler,
+	admin.NewSettlementHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

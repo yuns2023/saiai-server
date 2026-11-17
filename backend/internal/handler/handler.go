@@ -30,6 +30,7 @@ type AdminHandlers struct {
 	APIKey           *admin.AdminAPIKeyHandler
 	Payment          *admin.PaymentHandler
 	CryptoPay        *admin.CryptoPayHandler
+	Settlement       *admin.SettlementHandler
 }
 
 // Handlers contains all HTTP handlers
