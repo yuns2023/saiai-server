@@ -2183,10 +2183,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if apiKey.Group != nil && apiKey.Group.IsModelBlocked(turnModel) {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("model %s is not allowed for this group", turnModel), nil)
 			}
-			// Turn 1 (the possibly rebuilt first frame) was revalidated and
-			// scanned before account selection. Later turns re-read the key.
+			// Turn 1 (the possibly rebuilt first frame) was revalidated,
+			// scanned and billing-checked before account selection. Later
+			// turns re-read the key and re-run the billing check.
 			if turn > 1 {
-				if err := h.checkOpenAIWSSessionPayload(ctx, c, wsConn, apiKey, &sessionGroup, subject.UserID, turn, rawPayload); err != nil {
+				if err := h.admitOpenAIWSLaterTurn(ctx, c, wsConn, apiKey, &sessionGroup, subscription, subject.UserID, turn, rawPayload); err != nil {
 					return err
 				}
 			}
@@ -2289,7 +2290,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			// Replays are byte-identical to an already scanned client frame, but
 			// the key/group may have changed while the turn waited upstream, and
 			// the replacement connection's first turn skips OnClientTurn.
-			if err := h.checkOpenAIWSSessionPayload(ctx, c, wsConn, apiKey, &sessionGroup, subject.UserID, failure.Turn(), failoverPayload); err != nil {
+			// No billing re-check: the replayed turn was already admitted.
+			if _, err := h.checkOpenAIWSSessionPayload(ctx, c, wsConn, apiKey, &sessionGroup, subject.UserID, failure.Turn(), failoverPayload); err != nil {
 				releaseTurnSlots()
 				return nil, err
 			}
@@ -2420,6 +2422,7 @@ func (h *OpenAIGatewayHandler) revalidateOpenAIWSTurnKey(ctx context.Context, ap
 // payload is sent upstream: the session ends if the key is no longer active
 // or was rebound to another group; otherwise the group's current settings
 // are stored in sessionGroup and the timezone guard is applied to payload.
+// It returns the freshly loaded key on success.
 func (h *OpenAIGatewayHandler) checkOpenAIWSSessionPayload(
 	ctx context.Context,
 	c *gin.Context,
@@ -2429,19 +2432,77 @@ func (h *OpenAIGatewayHandler) checkOpenAIWSSessionPayload(
 	userID int64,
 	turn int,
 	payload []byte,
-) error {
+) (*service.APIKey, error) {
 	fresh, err := h.loadOpenAIWSSessionKey(ctx, connectKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !sameOpenAIWSGroup(connectKey, fresh) {
 		requestLogger(c, "handler.openai_gateway.responses_ws", zap.Int("turn", turn)).Info("openai.websocket_api_key_group_changed")
-		return rejectOpenAIWSSession(ctx, c, conn, openAIWSGroupChangedRejection())
+		return nil, rejectOpenAIWSSession(ctx, c, conn, openAIWSGroupChangedRejection())
 	}
 	if sessionGroup != nil {
 		sessionGroup.Store(fresh.Group)
 	}
-	return checkCodexTimezoneGuardWS(ctx, c, conn, fresh.Group, userID, turn, payload)
+	if err := checkCodexTimezoneGuardWS(ctx, c, conn, fresh.Group, userID, turn, payload); err != nil {
+		return nil, err
+	}
+	return fresh, nil
+}
+
+// admitOpenAIWSLaterTurn is the admission of a new client turn (turn > 1) on
+// a long-lived Responses WebSocket session, called from OnClientTurn in both
+// the v1 ingress and v2 passthrough adapters: the session/key checks of
+// checkOpenAIWSSessionPayload, then the billing eligibility check that the
+// handshake ran once (balance, subscription limits, Key rate limits).
+func (h *OpenAIGatewayHandler) admitOpenAIWSLaterTurn(
+	ctx context.Context,
+	c *gin.Context,
+	conn *coderws.Conn,
+	connectKey *service.APIKey,
+	sessionGroup *atomic.Pointer[service.Group],
+	subscription *service.UserSubscription,
+	userID int64,
+	turn int,
+	payload []byte,
+) error {
+	fresh, err := h.checkOpenAIWSSessionPayload(ctx, c, conn, connectKey, sessionGroup, userID, turn, payload)
+	if err != nil {
+		return err
+	}
+	return h.checkOpenAIWSTurnBilling(ctx, c, conn, fresh, subscription, turn)
+}
+
+// checkOpenAIWSTurnBilling re-runs CheckBillingEligibility for a later turn
+// with the freshly loaded key (current group settings, e.g. a free hosted
+// group stays exempt) and the session's subscription. Balance and
+// subscription usage are read through the billing cache that usage
+// deductions update, as on every HTTP request. A definite rejection ends the
+// session with the same error the handshake check sends. A lookup failure
+// (cache/DB error, open breaker) lets the turn through: the session was
+// admitted at the handshake and availability wins over strictness here.
+func (h *OpenAIGatewayHandler) checkOpenAIWSTurnBilling(
+	ctx context.Context,
+	c *gin.Context,
+	conn *coderws.Conn,
+	key *service.APIKey,
+	subscription *service.UserSubscription,
+	turn int,
+) error {
+	if h.billingCacheService == nil || key == nil || key.User == nil {
+		return nil
+	}
+	err := h.billingCacheService.CheckBillingEligibility(ctx, key.User, key, key.Group, subscription)
+	if err == nil {
+		return nil
+	}
+	reqLog := requestLogger(c, "handler.openai_gateway.responses_ws", zap.Int("turn", turn))
+	if errors.Is(err, service.ErrBillingServiceUnavailable) {
+		reqLog.Warn("openai.websocket_turn_billing_check_unavailable_allowed", zap.Error(err))
+		return nil
+	}
+	reqLog.Info("openai.websocket_turn_billing_rejected", zap.Error(err))
+	return rejectOpenAIWSSession(ctx, c, conn, openAIWSBillingRejection(c, err))
 }
 
 // loadOpenAIWSSessionKey freshly loads (auth-cached) and revalidates the key.
