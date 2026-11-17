@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** How to point Claude Code at this key: one AITP command, with the raw values tucked away. */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { keysApi } from '@/api'
 import { errorMessage, type ApiError } from '@/api/client'
@@ -74,27 +74,53 @@ watch(
 const now = ref(monotonic())
 const wallNow = ref(Date.now())
 let ticker: number | undefined
+let deadlineTimer: number | undefined
 let disposed = false
 const tick = () => {
   now.value = monotonic()
   wallNow.value = Date.now()
 }
-/** Re-check expiry while a code is shown; started by the first code, so the off state runs no timer. */
+/**
+ * Backup re-checks while a code is shown (the deadline timer below is the primary one);
+ * started by the first code, so the off state runs no timer.
+ */
 function startTicker(): void {
   if (ticker !== undefined || disposed) return
   ticker = window.setInterval(tick, 5000)
   // Background tabs throttle timers: re-check as soon as the page is visible again.
   document.addEventListener('visibilitychange', tick)
 }
+function clearDeadlineTimer(): void {
+  window.clearTimeout(deadlineTimer)
+  deadlineTimer = undefined
+}
 onBeforeUnmount(() => {
   disposed = true
   window.clearInterval(ticker)
+  clearDeadlineTimer()
   document.removeEventListener('visibilitychange', tick)
 })
 
 const expired = computed(
   () => !!current.value?.code && (now.value >= current.value.deadline || wallNow.value >= current.value.expiresAt)
 )
+
+// One-shot timer at the shown code's earliest deadline, so the command disappears right
+// then. Re-armed whenever the shown slot changes (generate, regenerate, shell or key switch)
+// or the clocks are refreshed; nothing is armed without a live code.
+watchEffect(() => {
+  clearDeadlineTimer()
+  const slot = current.value
+  if (disposed || !slot?.code || expired.value) return
+  const delay = Math.min(slot.deadline - monotonic(), slot.expiresAt - Date.now())
+  deadlineTimer = window.setTimeout(tick, Math.max(0, Math.ceil(delay)))
+})
+
+/** Copy guard: re-read both clocks at click time; an expired command is not copied (and disappears). */
+function shortCommandStillValid(): boolean {
+  tick()
+  return !expired.value
+}
 const shortCommand = computed(() =>
   current.value?.code && !expired.value ? installCodeCommand(shell.value, window.location.origin, current.value.code) : null
 )
@@ -181,7 +207,7 @@ async function generate(): Promise<void> {
       <div v-if="shortCommand" class="mt-3" data-testid="connect-code-command">
         <div class="flex items-baseline justify-between gap-3">
           <p class="text-xs text-ink-2" data-testid="connect-code-expiry">{{ t('connect.codeExpiresAt', { time: expiresText }) }}</p>
-          <CopyButton :value="shortCommand" small />
+          <CopyButton :value="shortCommand" :guard="shortCommandStillValid" small />
         </div>
         <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded border border-rule bg-shell px-3 py-2.5 font-mono text-xs leading-5 text-ink">{{ shortCommand }}</pre>
         <p class="mt-2 text-xs text-ink-3">{{ t('connect.codeValidity') }} {{ t('connect.codeOlderStillValid') }}</p>

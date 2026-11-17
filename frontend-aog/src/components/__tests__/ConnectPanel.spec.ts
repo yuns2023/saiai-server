@@ -248,6 +248,68 @@ describe('ConnectPanel install codes', () => {
     expect(w.find('[data-testid=connect-code-expired]').exists()).toBe(true)
   })
 
+  it('hides the command exactly at the deadline (one-shot timer, not the 5 s ticker)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] })
+    const pending = deferred<InstallCodeResponse>()
+    api.installCode.mockReturnValueOnce(pending.promise)
+    const w = mountPanel({ codes: true })
+    await w.find('[data-testid=connect-code-generate]').trigger('click') // request starts: deadline = now + 10 min
+    // The response comes 1234 ms later, so the 5 s ticker never fires exactly at the deadline.
+    vi.advanceTimersByTime(1234)
+    pending.resolve(reply('Q7M2K9XW4TRB'))
+    await flushPromises()
+    expect(shortCommand(w).exists()).toBe(true)
+
+    vi.advanceTimersByTime(10 * 60 * 1000 - 1234 - 1)
+    await w.vm.$nextTick()
+    expect(shortCommand(w).exists()).toBe(true)
+    vi.advanceTimersByTime(1)
+    await w.vm.$nextTick()
+    expect(shortCommand(w).exists()).toBe(false)
+    expect(w.find('[data-testid=connect-code-expired]').exists()).toBe(true)
+  })
+
+  it('leaves no timer behind after unmount', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'] })
+    api.installCode.mockResolvedValueOnce(reply('Q7M2K9XW4TRB'))
+    const w = mountPanel({ codes: true })
+    await w.find('[data-testid=connect-code-generate]').trigger('click')
+    await flushPromises()
+    expect(shortCommand(w).exists()).toBe(true)
+    expect(vi.getTimerCount()).toBe(2) // 5 s ticker + deadline timer
+    w.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not copy a command whose deadline passed 1 ms ago, even before any timer ran', async () => {
+    // Only the clocks are fake: no ticker or deadline timer can fire during this test.
+    vi.useFakeTimers({ toFake: ['Date', 'performance'] })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      api.installCode.mockResolvedValueOnce(reply('Q7M2K9XW4TRB'))
+      const w = mountPanel({ codes: true })
+      await w.find('[data-testid=connect-code-generate]').trigger('click')
+      await flushPromises()
+      const copy = () => w.find('[data-testid=connect-code-command] button')
+
+      await copy().trigger('click')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledTimes(1)
+      expect(writeText).toHaveBeenLastCalledWith(`curl -fsSL -X POST ${origin()}/i/Q7M2K9XW4TRB | bash`)
+
+      vi.advanceTimersByTime(10 * 60 * 1000 + 1)
+      expect(shortCommand(w).exists()).toBe(true) // stale until something re-reads the clocks
+      await copy().trigger('click')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledTimes(1)
+      expect(shortCommand(w).exists()).toBe(false)
+      expect(w.find('[data-testid=connect-code-expired]').exists()).toBe(true)
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
   it('a response that arrives after the panel closed changes nothing', async () => {
     const pending = deferred<InstallCodeResponse>()
     api.installCode.mockReturnValueOnce(pending.promise)
