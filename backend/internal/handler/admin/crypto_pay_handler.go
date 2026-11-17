@@ -140,7 +140,7 @@ func (h *CryptoPayHandler) ImportSolanaKeyset(c *gin.Context) {
 
 func (h *CryptoPayHandler) ListDeposits(c *gin.Context) {
 	page, pageSize := cryptoPayAdminPagination(c)
-	f := service.CryptoPayAdminDepositFilter{Status: c.Query("status"), Network: c.Query("network")}
+	f := service.CryptoPayAdminDepositFilter{Status: c.Query("status"), Network: c.Query("network"), Hold: c.Query("hold")}
 	if raw := c.Query("user_id"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || id <= 0 {

@@ -49,12 +49,26 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const opsRealtimeMonitoringEnabled = ref(readCachedBool('ops_realtime_monitoring_enabled_cached', true))
   const opsQueryModeDefault = ref(readCachedString('ops_query_mode_default_cached', 'auto'))
   const customMenuItems = ref<CustomMenuItem[]>([])
+  // Stablecoin top-up is configured only on some deployments (ccyou.dev); hide its admin page elsewhere.
+  const cryptoPayConfigured = ref(readCachedBool('crypto_pay_configured_cached', false))
+
+  async function fetchCryptoPayConfigured(): Promise<void> {
+    try {
+      const settings = await adminAPI.cryptoPay.getSettings()
+      cryptoPayConfigured.value = settings?.feature_configured === true
+      writeCachedBool('crypto_pay_configured_cached', cryptoPayConfigured.value)
+    } catch (err) {
+      // Keep the cached value on a transient failure.
+      console.error('[adminSettings] Failed to fetch crypto pay settings:', err)
+    }
+  }
 
   async function fetch(force = false): Promise<void> {
     if (loaded.value && !force) return
     if (loading.value) return
 
     loading.value = true
+    const cryptoPay = fetchCryptoPayConfigured()
     try {
       const settings = await adminAPI.settings.getSettings()
       opsMonitoringEnabled.value = settings.ops_monitoring_enabled ?? true
@@ -74,6 +88,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
       loaded.value = true
       console.error('[adminSettings] Failed to fetch settings:', err)
     } finally {
+      await cryptoPay
       loading.value = false
     }
   }
@@ -127,6 +142,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     opsRealtimeMonitoringEnabled,
     opsQueryModeDefault,
     customMenuItems,
+    cryptoPayConfigured,
     fetch,
     setOpsMonitoringEnabledLocal,
     setOpsRealtimeMonitoringEnabledLocal,

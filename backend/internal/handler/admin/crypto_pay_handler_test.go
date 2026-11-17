@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -21,6 +22,7 @@ type fakeCryptoPayAdminService struct {
 	gotManifest []byte
 	gotSettings service.UpdateCryptoPaySettingsRequest
 	gotFilter   service.CryptoPayAdminDepositFilter
+	deposits    []service.CryptoPayAdminDeposit
 }
 
 func (f *fakeCryptoPayAdminService) GetAdminSettings(context.Context) (*service.CryptoPayAdminSettings, error) {
@@ -43,7 +45,7 @@ func (f *fakeCryptoPayAdminService) ImportSolanaKeyset(_ context.Context, raw []
 }
 func (f *fakeCryptoPayAdminService) AdminListDeposits(_ context.Context, flt service.CryptoPayAdminDepositFilter, _, _ int) ([]service.CryptoPayAdminDeposit, int64, error) {
 	f.gotFilter = flt
-	return nil, 0, nil
+	return f.deposits, int64(len(f.deposits)), nil
 }
 func (f *fakeCryptoPayAdminService) ReleaseDeposit(_ context.Context, id int64, op string) (*service.CryptoPayCreditOutcome, error) {
 	f.gotOperator = op
@@ -130,4 +132,56 @@ func TestCryptoPayAdminManifestAndLists(t *testing.T) {
 	require.Contains(t, body, `"deposit_id":7`)
 	code, _ = cryptoPayAdminDo(t, r, http.MethodPost, "/rescan", `{"network":"arbitrum-one"}`)
 	require.Equal(t, http.StatusBadRequest, code, "tx_hash is required")
+}
+
+// The admin held-deposits page (frontend/src/api/admin/cryptoPay.ts) reads
+// these exact keys; a missing json tag would silently blank a column.
+func TestCryptoPayAdminDepositListJSONFields(t *testing.T) {
+	credited := time.Date(2026, 11, 17, 1, 2, 3, 0, time.UTC)
+	fake := &fakeCryptoPayAdminService{deposits: []service.CryptoPayAdminDeposit{{
+		ID: 9, UserID: 5, UserEmail: "u@example.test", UserName: "alice", UserStatus: "active",
+		Network: "arbitrum-one", Asset: "USDT", Address: "0xabc", Amount: "6000", TxHash: "0xtx",
+		Status: "credited", HoldReason: "amount_over_threshold", ObservedAt: credited, BlockTime: credited,
+		CreditedAt: &credited, CreditedBy: "admin:1", ExplorerTxURL: "https://arbiscan.io/tx/{tx}", ExplorerAddressURL: "https://arbiscan.io/address/{addr}",
+	}}}
+	r := cryptoPayAdminRouter(&CryptoPayHandler{svc: fake})
+	code, body := cryptoPayAdminDo(t, r, http.MethodGet, "/deposits?hold=released&page=2&page_size=10", "")
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, service.CryptoPayHoldFilterReleased, fake.gotFilter.Hold)
+
+	var env struct {
+		Data struct {
+			Items    []map[string]any `json:"items"`
+			Total    *int64           `json:"total"`
+			Page     *int             `json:"page"`
+			PageSize *int             `json:"page_size"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &env))
+	require.NotNil(t, env.Data.Total)
+	require.NotNil(t, env.Data.Page)
+	require.NotNil(t, env.Data.PageSize)
+	require.Equal(t, 2, *env.Data.Page)
+	require.Len(t, env.Data.Items, 1)
+	item := env.Data.Items[0]
+	for _, k := range []string{"id", "user_id", "user_email", "user_name", "user_status", "user_deleted", "network", "asset",
+		"address", "amount", "tx_hash", "status", "hold_reason", "observed_at", "block_time", "credited_at", "credited_by", "explorer_tx_url", "explorer_address_url"} {
+		require.Contains(t, item, k)
+	}
+	require.Equal(t, "alice", item["user_name"])
+	require.Equal(t, "admin:1", item["credited_by"])
+	require.Equal(t, "amount_over_threshold", item["hold_reason"])
+	require.Equal(t, "6000", item["amount"], "amounts stay decimal strings")
+
+	code, body = cryptoPayAdminDo(t, r, http.MethodPost, "/deposits/9/release", "")
+	require.Equal(t, http.StatusOK, code)
+	var rel struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &rel))
+	for _, k := range []string{"deposit_id", "status", "hold_reason", "credited"} {
+		require.Contains(t, rel.Data, k)
+	}
+	code, _ = cryptoPayAdminDo(t, r, http.MethodPost, "/deposits/abc/release", "")
+	require.Equal(t, http.StatusBadRequest, code)
 }

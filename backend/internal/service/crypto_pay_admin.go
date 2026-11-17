@@ -17,6 +17,9 @@ type CryptoPayAdminDeposit struct {
 	ID            int64      `json:"id"`
 	UserID        int64      `json:"user_id"`
 	UserEmail     string     `json:"user_email"`
+	UserName      string     `json:"user_name"`
+	UserStatus    string     `json:"user_status"`
+	UserDeleted   bool       `json:"user_deleted"`
 	Network       string     `json:"network"`
 	Asset         string     `json:"asset"`
 	AssetContract string     `json:"asset_contract"`
@@ -36,6 +39,13 @@ type CryptoPayAdminDeposit struct {
 	FinalizedAt   *time.Time `json:"finalized_at"`
 	CreditedAt    *time.Time `json:"credited_at"`
 	OrphanedAt    *time.Time `json:"orphaned_at"`
+	// CreditedBy is the ledger operator ("admin:<id>" for a release, "system"
+	// for auto credit); "" while not credited.
+	CreditedBy string `json:"credited_by"`
+	// Explorer templates of the configured network ("{tx}" / "{addr}");
+	// "" when the network is no longer configured on this deployment.
+	ExplorerTxURL      string `json:"explorer_tx_url"`
+	ExplorerAddressURL string `json:"explorer_address_url"`
 }
 
 // CryptoPayAdminDepositFilter filters the admin deposit list.
@@ -43,7 +53,17 @@ type CryptoPayAdminDepositFilter struct {
 	Status  string
 	Network string
 	UserID  int64
+	// Hold narrows to deposits that were ever held: "held" (still held),
+	// "released" (held, then credited by an admin release), "any" (both).
+	Hold string
 }
+
+// Hold filter values for CryptoPayAdminDepositFilter.Hold.
+const (
+	CryptoPayHoldFilterHeld     = "held"
+	CryptoPayHoldFilterReleased = "released"
+	CryptoPayHoldFilterAny      = "any"
+)
 
 var cryptoPayDepositStatuses = map[string]bool{
 	cryptoDepositObserved: true, cryptoDepositFinalized: true, cryptoDepositCredited: true,
@@ -77,6 +97,19 @@ func (s *CryptoPayService) AdminListDeposits(ctx context.Context, f CryptoPayAdm
 		args = append(args, f.UserID)
 		conds = append(conds, fmt.Sprintf("d.user_id = $%d", len(args)))
 	}
+	// hold_reason is only ever set when a deposit is held and is kept when an
+	// admin release credits it, so "ever held" = hold_reason <> ''.
+	switch f.Hold = strings.TrimSpace(f.Hold); f.Hold {
+	case "":
+	case CryptoPayHoldFilterHeld:
+		conds = append(conds, "d.status = 'held'")
+	case CryptoPayHoldFilterReleased:
+		conds = append(conds, "d.status = 'credited' AND d.hold_reason <> ''")
+	case CryptoPayHoldFilterAny:
+		conds = append(conds, "d.hold_reason <> ''")
+	default:
+		return nil, 0, infraerrors.BadRequest("CRYPTO_PAY_HOLD_FILTER_INVALID", "invalid hold filter")
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = " WHERE " + strings.Join(conds, " AND ")
@@ -87,10 +120,13 @@ func (s *CryptoPayService) AdminListDeposits(ctx context.Context, f CryptoPayAdm
 	}
 	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT d.id, d.user_id, COALESCE(u.email, ''), d.network, d.asset_symbol, d.asset_contract, d.address, d.token_account,
+		SELECT d.id, d.user_id, COALESCE(u.email, ''), COALESCE(u.username, ''), COALESCE(u.status, ''),
+		       (u.id IS NULL OR u.deleted_at IS NOT NULL), d.network, d.asset_symbol, d.asset_contract, d.address, d.token_account,
 		       d.from_address, d.units::text, d.amount, d.tx_hash, d.event_key, d.block_number, d.block_hash, d.block_time,
-		       d.status, d.hold_reason, d.observed_at, d.finalized_at, d.credited_at, d.orphaned_at
-		FROM crypto_pay_deposits d LEFT JOIN users u ON u.id = d.user_id`+where+
+		       d.status, d.hold_reason, d.observed_at, d.finalized_at, d.credited_at, d.orphaned_at,
+		       COALESCE(c.operator, '')
+		FROM crypto_pay_deposits d LEFT JOIN users u ON u.id = d.user_id
+		LEFT JOIN crypto_pay_credits c ON c.deposit_id = d.id`+where+
 		fmt.Sprintf(` ORDER BY d.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list deposits: %w", err)
@@ -100,14 +136,17 @@ func (s *CryptoPayService) AdminListDeposits(ctx context.Context, f CryptoPayAdm
 		var d CryptoPayAdminDeposit
 		var amount decimal.Decimal
 		var fin, cred, orph sql.NullTime
-		if err := rows.Scan(&d.ID, &d.UserID, &d.UserEmail, &d.Network, &d.Asset, &d.AssetContract, &d.Address, &d.TokenAccount,
+		if err := rows.Scan(&d.ID, &d.UserID, &d.UserEmail, &d.UserName, &d.UserStatus, &d.UserDeleted, &d.Network, &d.Asset, &d.AssetContract, &d.Address, &d.TokenAccount,
 			&d.FromAddress, &d.Units, &amount, &d.TxHash, &d.EventKey, &d.BlockNumber, &d.BlockHash, &d.BlockTime,
-			&d.Status, &d.HoldReason, &d.ObservedAt, &fin, &cred, &orph); err != nil {
+			&d.Status, &d.HoldReason, &d.ObservedAt, &fin, &cred, &orph, &d.CreditedBy); err != nil {
 			_ = rows.Close()
 			return nil, 0, err
 		}
 		d.Amount = formatCryptoAmount(amount)
 		d.FinalizedAt, d.CreditedAt, d.OrphanedAt = nullTimePtr(fin), nullTimePtr(cred), nullTimePtr(orph)
+		if n, ok := s.network(d.Network); ok {
+			d.ExplorerTxURL, d.ExplorerAddressURL = n.ExplorerTxURL, n.ExplorerAddressURL
+		}
 		out = append(out, d)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {

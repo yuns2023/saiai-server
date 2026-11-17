@@ -465,6 +465,7 @@ export default {
     mySubscriptions: '我的订阅',
     hostedAccounts: '托管账号',
     buySubscription: '购买与充值',
+    cryptoDeposits: '稳定币待审充值',
     docs: '文档'
   },
 
@@ -4093,6 +4094,59 @@ export default {
       failedToDelete: '删除公告失败',
       failedToLoadReadStatus: '加载已读情况失败',
       deleteConfirm: '确定要删除该公告吗？此操作无法撤销。'
+    },
+
+    // Held stablecoin deposits
+    cryptoDeposits: {
+      title: '稳定币待审充值',
+      description: '金额达到人工审核阈值、用户未启用或资产不在白名单的链上充值会被暂扣，需人工放行后才入账。拒绝或退款请线下处理。',
+      filterHeld: '待放行',
+      filterReleased: '已放行',
+      filterAll: '全部',
+      columns: {
+        user: '用户',
+        chain: '链 / 资产',
+        amount: '金额',
+        address: '充值地址',
+        txHash: '交易哈希',
+        holdReason: '暂扣原因',
+        detectedAt: '检测时间',
+        status: '状态',
+        actions: '操作'
+      },
+      holdReasons: {
+        amount_over_threshold: '超过人工审核阈值',
+        user_inactive: '用户未启用',
+        asset_not_whitelisted: '资产不在白名单'
+      },
+      statuses: {
+        held: '待放行',
+        credited: '已入账',
+        observed: '确认中',
+        finalized: '待入账',
+        orphaned: '已失效'
+      },
+      userDeleted: '用户已删除',
+      userNotActive: '用户状态：{status}',
+      releasedBy: '放行人：{operator}',
+      release: '放行入账',
+      releaseTitle: '确认放行入账',
+      releaseMessage: '将把 {amount} {asset}（{chain}）计入用户 {user} 的余额。此操作会直接增加余额，无法在此撤销。',
+      releaseInactiveWarning: '该用户当前状态为「{status}」。放行不会重新检查用户状态，仍会入账。',
+      releaseThreshold: '人工审核阈值：{amount}',
+      releasing: '放行中…',
+      releaseSuccess: '已放行，{amount} {asset} 已入账',
+      releaseAlready: '该充值此前已入账，本次未重复入账',
+      releaseFailed: '放行失败',
+      errors: {
+        CRYPTO_PAY_USER_DELETED: '用户已删除，无法放行',
+        CRYPTO_PAY_SETTINGS_INVALID: '稳定币充值设置无效，修复设置后才能放行',
+        CRYPTO_PAY_DISABLED: '本站未启用稳定币充值',
+        CRYPTO_PAY_DEPOSIT_NOT_CREDITABLE: '该充值尚未最终确认，无法放行',
+        CRYPTO_PAY_DEPOSIT_NOT_FOUND: '充值记录不存在'
+      },
+      empty: '没有符合条件的充值',
+      failedToLoad: '加载充值列表失败'
     },
 
     // Promo Codes

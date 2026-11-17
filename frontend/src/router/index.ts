@@ -380,6 +380,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/crypto-deposits',
+    name: 'AdminCryptoDeposits',
+    component: () => import('@/views/admin/CryptoDepositsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Held Stablecoin Deposits',
+      titleKey: 'admin.cryptoDeposits.title',
+      descriptionKey: 'admin.cryptoDeposits.description'
+    }
+  },
+  {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/admin/SettingsView.vue'),
