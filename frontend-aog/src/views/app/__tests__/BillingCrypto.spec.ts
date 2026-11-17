@@ -12,6 +12,15 @@ vi.mock('@/api', async (importOriginal) => {
     ...actual,
     cryptoPayApi: { ...actual.cryptoPayApi, ...crypto },
     redeemApi: { redeem: vi.fn(), history: vi.fn().mockResolvedValue([]) },
+    redeemPurchaseApi: {
+      overview: vi.fn().mockResolvedValue({
+        config: { enabled: false, min_amount: 1, max_amount: 500, remaining_amount_24h: 1000, remaining_count_24h: 20 },
+        items: [],
+        pagination: { total: 0, page: 1, page_size: 10, pages: 1 }
+      }),
+      purchase: vi.fn(),
+      revoke: vi.fn()
+    },
     subscriptionsApi: { summary: vi.fn().mockResolvedValue(null) },
     paymentAPI: {
       getConfig: vi.fn().mockResolvedValue({

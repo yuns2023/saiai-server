@@ -3,15 +3,19 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import QRCode from 'qrcode'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import CopyButton from '@/components/CopyButton.vue'
 import Pager from '@/components/Pager.vue'
 import SealStamp from '@/components/SealStamp.vue'
 import {
   cryptoOrderError,
   cryptoPayApi,
   explorerUrl,
+  newRequestId,
   pageCount,
   paymentAPI,
   redeemApi,
+  redeemPurchaseApi,
   subscriptionsApi,
   type CryptoDeposit,
   type CryptoDepositStatus,
@@ -21,13 +25,15 @@ import {
   type PaymentOrder,
   type PaymentOrderStatus,
   type RedeemHistoryItem,
+  type RedeemPurchase,
+  type RedeemPurchaseConfig,
   type SubscriptionPlan,
   type SubscriptionSummary
 } from '@/api'
-import { errorMessage } from '@/api/client'
+import { errorMessage, type ApiError } from '@/api/client'
 import { intlLocale } from '@/i18n'
 import { currency, dateOnly, dateTime, money } from '@/lib/format'
-import { normaliseAmount, usd } from '@/lib/decimal'
+import { compareDecimal, normaliseAmount, usd } from '@/lib/decimal'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 
@@ -72,7 +78,16 @@ function redeemSummary(type: string, value: number): string {
   return t('billing.creditedGeneric')
 }
 
+/** Purchase debit / refund records are history lines, not redeemable codes. */
+function historyRecordLabel(h: RedeemHistoryItem): string {
+  if (h.type === 'purchase_debit') return t('purchase.recordDebit')
+  if (h.type === 'purchase_refund') return t('purchase.recordRefund')
+  return ''
+}
+
 function historyValue(h: RedeemHistoryItem): string {
+  if (h.type === 'purchase_debit') return `−${money(Math.abs(h.value))}`
+  if (h.type === 'purchase_refund') return `+${money(Math.abs(h.value))}`
   if (h.type === 'balance') return money(h.value)
   if (h.type === 'concurrency') return `+${h.value}`
   if (h.type === 'subscription') return `${h.group?.name ?? ''} · ${t('billing.days', { n: h.validity_days ?? 0 })}`
@@ -425,12 +440,188 @@ async function createCryptoOrder(): Promise<void> {
   }
 }
 
+/* ---------- Buy a redeem code (independent of the payment switches) ---------- */
+const PURCHASE_PAGE_SIZE = 10
+const purchaseConfig = ref<RedeemPurchaseConfig | null>(null)
+const purchases = ref<RedeemPurchase[]>([])
+const purchasesPage = ref(1)
+const purchasesPages = ref(1)
+const purchasesTotal = ref(0)
+const purchasesFailed = ref(false)
+const purchaseAmount = ref('10')
+const purchasing = ref(false)
+const purchaseError = ref('')
+/** The code just bought; shown once in full with a copy button. */
+const bought = ref<RedeemPurchase | null>(null)
+const toRevoke = ref<RedeemPurchase | null>(null)
+const revoking = ref(false)
+/**
+ * One request id per purchase intent (amount). A retry, a double click or a
+ * lost response reuses it, so the server charges at most once; it is
+ * replaced only after a success or when the amount changes.
+ */
+const intent = ref<{ id: string; amount: string } | null>(null)
+const confirmOpen = ref(false)
+/**
+ * The last attempt got no answer (network / timeout / 5xx): it may have been
+ * charged. Retrying sends the same request id, so it is answered with the
+ * original purchase instead of a second charge; it skips the client-side
+ * blockers, which a charged attempt itself may have tripped (balance, caps).
+ */
+const outcomeUnknown = ref(false)
+
+/** Shown when buying is on, or there is history (or we could not tell). */
+const showPurchase = computed(
+  () => purchasesFailed.value || !!purchaseConfig.value?.enabled || purchasesTotal.value > 0 || (outcomeUnknown.value && !!intent.value)
+)
+/** As typed: at most two decimals ("10.500" is refused, like the server does). */
+const PURCHASE_AMOUNT_RE = /^\d+(\.\d{1,2})?$/
+const purchaseAmountValue = computed(() => {
+  const c = purchaseConfig.value
+  const raw = purchaseAmount.value.trim()
+  if (!c || !PURCHASE_AMOUNT_RE.test(raw)) return null
+  return normaliseAmount(raw, String(c.min_amount), String(c.max_amount))
+})
+const purchaseQuick = computed(() => {
+  const c = purchaseConfig.value
+  return c ? ['10', '50', '100'].filter((v) => normaliseAmount(v, String(c.min_amount), String(c.max_amount)) !== null) : []
+})
+/** Why the button is off; the server re-checks everything under the account lock. */
+const purchaseBlocker = computed(() => {
+  const c = purchaseConfig.value
+  const v = purchaseAmountValue.value
+  if (!c || !v) return ''
+  if (c.remaining_count_24h <= 0) return t('purchase.noCount')
+  if (compareDecimal(v, c.remaining_amount_24h.toFixed(2)) > 0) return t('purchase.overRemaining')
+  const balance = auth.user?.balance
+  if (balance != null && Number(v) - balance > 1e-9) return t('purchase.overBalance')
+  return ''
+})
+const balanceAfter = computed(() => {
+  const balance = auth.user?.balance
+  return balance == null || !intent.value ? null : balance - Number(intent.value.amount)
+})
+
+function purchaseTag(p: RedeemPurchase): string {
+  if (p.status === 'unused') return 'tag-ok'
+  if (p.status === 'unknown') return 'tag-warn'
+  return 'tag-off'
+}
+
+function purchaseErrorText(e: unknown, fallback: string): string {
+  const c = purchaseConfig.value
+  switch ((e as Partial<ApiError>)?.reason) {
+    case 'REDEEM_PURCHASE_DISABLED':
+      return t('purchase.err_disabled')
+    case 'REDEEM_PURCHASE_INVALID_AMOUNT':
+      return t('purchase.err_amount')
+    case 'REDEEM_PURCHASE_AMOUNT_BELOW_MIN':
+    case 'REDEEM_PURCHASE_AMOUNT_ABOVE_MAX':
+      return t('purchase.err_range', { min: money(c?.min_amount), max: money(c?.max_amount) })
+    case 'REDEEM_PURCHASE_WINDOW_AMOUNT_LIMIT':
+      return t('purchase.err_windowAmount')
+    case 'REDEEM_PURCHASE_WINDOW_COUNT_LIMIT':
+      return t('purchase.err_windowCount')
+    case 'INSUFFICIENT_BALANCE':
+      return t('purchase.err_balance')
+    case 'REDEEM_PURCHASE_REQUEST_CONFLICT':
+      return t('purchase.err_conflict')
+    case 'REDEEM_PURCHASE_CODE_USED':
+      return t('purchase.err_used')
+    case 'REDEEM_PURCHASE_NOT_FOUND':
+      return t('purchase.err_notFound')
+    case 'USER_NOT_ACTIVE':
+      return t('purchase.err_inactive')
+    default:
+      return errorMessage(e, fallback)
+  }
+}
+
+/** Only the latest list request may write (pagination clicks can overlap). */
+let purchasesSeq = 0
+let purchaseAmountPicked = false
+
+async function loadPurchases(p = purchasesPage.value): Promise<void> {
+  const seq = ++purchasesSeq
+  try {
+    const res = await redeemPurchaseApi.overview(p, PURCHASE_PAGE_SIZE)
+    if (seq !== purchasesSeq) return
+    purchaseConfig.value = res.config
+    purchases.value = res.items ?? []
+    purchasesPage.value = res.pagination?.page || p
+    purchasesPages.value = res.pagination?.pages || 1
+    purchasesTotal.value = res.pagination?.total || 0
+    purchasesFailed.value = false
+    if (!purchaseAmountPicked && res.config.enabled) {
+      purchaseAmountPicked = true
+      if (!purchaseAmountValue.value) purchaseAmount.value = String(res.config.min_amount)
+    }
+  } catch {
+    if (seq !== purchasesSeq) return
+    // Unknown is not "none": show the failure with a retry instead of hiding the section.
+    purchasesFailed.value = true
+  }
+}
+
+function openPurchaseConfirm(): void {
+  const v = purchaseAmountValue.value
+  if (!v || purchasing.value || purchaseBlocker.value) return
+  if (!intent.value || intent.value.amount !== v) {
+    intent.value = { id: newRequestId(), amount: v }
+    outcomeUnknown.value = false
+  }
+  purchaseError.value = ''
+  confirmOpen.value = true
+}
+
+async function confirmPurchase(): Promise<void> {
+  const current = intent.value
+  if (!current || purchasing.value) return
+  purchasing.value = true
+  try {
+    const res = await redeemPurchaseApi.purchase(current.amount, current.id)
+    // Charged (or the original purchase came back): the next purchase is a new intent.
+    intent.value = null
+    outcomeUnknown.value = false
+    bought.value = res
+  } catch (e) {
+    const status = (e as Partial<ApiError>)?.status ?? 0
+    outcomeUnknown.value = status === 0 || status >= 500
+    purchaseError.value = outcomeUnknown.value ? '' : purchaseErrorText(e, t('purchase.failed'))
+    if ((e as Partial<ApiError>)?.reason === 'REDEEM_PURCHASE_REQUEST_CONFLICT') intent.value = null
+  } finally {
+    confirmOpen.value = false
+    purchasing.value = false
+  }
+  // Refresh balance, remaining limits, the list and the debit line (also after a failure:
+  // a lost response may still have been charged, and the list shows it).
+  await Promise.allSettled([auth.refreshUser(), loadPurchases(1), loadHistory()])
+}
+
+async function confirmRevoke(): Promise<void> {
+  const p = toRevoke.value
+  if (!p || revoking.value) return
+  revoking.value = true
+  try {
+    await redeemPurchaseApi.revoke(p.id)
+    app.notify('ok', t('purchase.revoked', { amount: money(p.amount) }))
+    if (bought.value?.id === p.id) bought.value = null
+  } catch (e) {
+    app.notify('error', purchaseErrorText(e, t('purchase.revokeFailed')))
+  } finally {
+    toRevoke.value = null
+    revoking.value = false
+  }
+  await Promise.allSettled([auth.refreshUser(), loadPurchases(), loadHistory()])
+}
+
 onMounted(() => {
   loadHistory()
   loadSubs()
   loadPayment()
   loadCrypto()
   loadDeposits(1)
+  loadPurchases(1)
 })
 onUnmounted(() => {
   unmounted = true
@@ -488,7 +679,8 @@ onUnmounted(() => {
           <tbody>
             <tr v-for="h in history.slice(0, 8)" :key="h.id">
               <td class="num whitespace-nowrap text-ink-2">{{ dateTime(h.used_at || h.created_at, intlLocale()) }}</td>
-              <td class="max-w-[9rem] truncate font-mono text-xs leading-5">{{ h.code }}</td>
+              <td v-if="historyRecordLabel(h)" class="text-sm" data-testid="history-record">{{ historyRecordLabel(h) }}</td>
+              <td v-else class="max-w-[9rem] truncate font-mono text-xs leading-5">{{ h.code }}</td>
               <td class="amount num">{{ historyValue(h) }}</td>
             </tr>
           </tbody>
@@ -700,6 +892,79 @@ onUnmounted(() => {
             <p v-if="cryptoError" class="mt-2 text-sm text-seal" role="alert">{{ cryptoError }}</p>
           </form>
         </section>
+
+        <!-- Buy a redeem code -->
+        <section v-if="showPurchase" aria-labelledby="purchase-title" data-testid="redeem-purchase">
+          <h2 id="purchase-title" class="text-md font-semibold">{{ t('purchase.title') }}</h2>
+          <p class="mt-1 text-sm text-ink-2">{{ t('purchase.lead') }}</p>
+
+          <p v-if="!purchaseConfig" class="mt-3 text-sm text-seal" role="alert">
+            {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadPurchases()">{{ t('common.retry') }}</button>
+          </p>
+          <form v-else-if="purchaseConfig.enabled" class="mt-4" novalidate data-testid="purchase-form" @submit.prevent="openPurchaseConfirm">
+            <label class="block">
+              <span class="label">{{ t('purchase.amount') }}</span>
+              <input
+                v-model.trim="purchaseAmount"
+                class="field num mt-1"
+                type="text"
+                inputmode="decimal"
+                autocomplete="off"
+                :aria-invalid="!purchaseAmountValue ? 'true' : undefined"
+                data-testid="purchase-amount"
+              />
+            </label>
+            <span class="mt-1 block text-xs text-ink-3">
+              {{ t('purchase.range', { min: money(purchaseConfig.min_amount), max: money(purchaseConfig.max_amount) }) }} ·
+              <span data-testid="purchase-remaining">{{ t('purchase.remaining', { amount: money(purchaseConfig.remaining_amount_24h), count: purchaseConfig.remaining_count_24h }) }}</span>
+            </span>
+            <div v-if="purchaseQuick.length" class="mt-2 flex flex-wrap gap-2">
+              <button
+                v-for="q in purchaseQuick"
+                :key="q"
+                type="button"
+                class="btn btn-sm num"
+                :class="purchaseAmountValue === q ? 'btn-primary' : 'btn-line'"
+                @click="purchaseAmount = q"
+              >
+                ${{ q }}
+              </button>
+            </div>
+            <p v-if="purchaseBlocker" class="mt-3 text-sm text-ink-2" role="status" data-testid="purchase-blocker">{{ purchaseBlocker }}</p>
+            <button
+              type="submit"
+              class="btn btn-primary mt-5 h-10 w-full"
+              :disabled="purchasing || !purchaseAmountValue || !!purchaseBlocker"
+              data-testid="purchase-submit"
+            >
+              {{ purchasing ? t('purchase.buying') : t('purchase.buy') }}
+            </button>
+            <p v-if="purchaseError" class="mt-2 text-sm text-seal" role="alert" data-testid="purchase-error">{{ purchaseError }}</p>
+          </form>
+          <p v-else class="mt-3 text-sm text-ink-2">{{ t('purchase.off') }}</p>
+
+          <!-- Outside the form on purpose: still offered if buying was switched off meanwhile. -->
+          <div v-if="outcomeUnknown && intent" class="mt-3" data-testid="purchase-unknown">
+            <p class="text-sm text-seal" role="alert">{{ t('purchase.unknownOutcome') }}</p>
+            <button type="button" class="btn btn-line btn-sm mt-2" :disabled="purchasing" data-testid="purchase-retry" @click="confirmPurchase">
+              {{ t('purchase.retrySame', { amount: money(Number(intent.amount)) }) }}
+            </button>
+          </div>
+
+          <!-- The code just bought, in full, once -->
+          <div v-if="bought" class="mt-6 border-t border-rule-strong pt-4" role="status" data-testid="purchase-done">
+            <div class="flex items-baseline justify-between gap-3">
+              <span class="text-sm font-medium">{{ t('purchase.doneTitle') }}</span>
+              <span class="num text-lg font-semibold">{{ money(bought.amount) }}</span>
+            </div>
+            <div class="mt-3 flex items-center gap-2 rounded bg-shell px-3 py-2">
+              <code class="min-w-0 flex-1 break-all font-mono text-sm" data-testid="purchase-done-code">{{ bought.code }}</code>
+              <CopyButton :value="bought.code" small />
+            </div>
+            <p class="mt-2 text-xs text-ink-3">{{ t('purchase.doneNote') }}</p>
+            <button type="button" class="btn btn-quiet btn-sm mt-1 -ml-2" @click="bought = null">{{ t('purchase.doneHide') }}</button>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -776,6 +1041,96 @@ onUnmounted(() => {
         <Pager :page="depositsPage" :pages="depositsPages" :total="depositsTotal" @go="loadDeposits" />
       </template>
     </section>
+
+    <!-- Codes bought with balance: shown whenever buying is on or there is history -->
+    <section v-if="showPurchase && purchaseConfig" class="mt-12" aria-labelledby="purchases-title" data-testid="purchases-section">
+      <h2 id="purchases-title" class="text-md font-semibold">{{ t('purchase.mine') }}</h2>
+      <p v-if="purchasesFailed" class="mt-3 border-t border-rule-strong py-4 text-sm text-seal" role="alert">
+        {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadPurchases()">{{ t('common.retry') }}</button>
+      </p>
+      <p v-else-if="!purchases.length" class="mt-3 border-t border-rule-strong py-4 text-sm text-ink-3">{{ t('purchase.none') }}</p>
+      <template v-else>
+        <table class="ledger mt-3">
+          <thead>
+            <tr>
+              <th class="hidden md:table-cell">{{ t('purchase.when') }}</th>
+              <!-- The hidden time column stays :first-child below md, so drop the indent here. -->
+              <th class="max-md:!pl-0">{{ t('purchase.code') }}</th>
+              <th class="hidden sm:table-cell">{{ t('purchase.status') }}</th>
+              <th class="amount">{{ t('purchase.face') }}</th>
+              <th class="amount"><span class="sr-only">{{ t('purchase.actions') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in purchases" :key="p.id" :data-testid="`purchase-row-${p.id}`">
+              <td class="num hidden whitespace-nowrap text-ink-2 md:table-cell">{{ dateTime(p.created_at, intlLocale()) }}</td>
+              <td class="min-w-0 max-md:!pl-0">
+                <code
+                  class="block max-w-[11rem] truncate font-mono text-xs leading-5 sm:max-w-[16rem] lg:max-w-none"
+                  :class="p.status === 'unused' ? 'text-ink' : 'text-ink-3 line-through decoration-ink-3/40'"
+                  :title="p.code"
+                >{{ p.code }}</code>
+                <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3 sm:hidden">
+                  <span class="tag" :class="purchaseTag(p)">{{ t(`purchase.status_${p.status}`) }}</span>
+                  <span class="num whitespace-nowrap">{{ dateTime(p.created_at, intlLocale()) }}</span>
+                </span>
+                <span class="mt-0.5 hidden text-xs text-ink-3 sm:block md:hidden num">{{ dateTime(p.created_at, intlLocale()) }}</span>
+              </td>
+              <td class="hidden sm:table-cell">
+                <span class="tag" :class="purchaseTag(p)">{{ t(`purchase.status_${p.status}`) }}</span>
+                <span v-if="p.status === 'used' && p.used_at" class="num mt-1 block whitespace-nowrap text-xs text-ink-3">{{ t('purchase.usedAt', { time: dateTime(p.used_at, intlLocale()) }) }}</span>
+                <span v-else-if="p.status === 'revoked' && p.revoked_at" class="num mt-1 block whitespace-nowrap text-xs text-ink-3">{{ t('purchase.revokedAt', { time: dateTime(p.revoked_at, intlLocale()) }) }}</span>
+                <span v-else-if="p.status === 'unknown'" class="mt-1 block text-xs text-warn">{{ t('purchase.unknownHint') }}</span>
+              </td>
+              <td class="amount num">{{ money(p.amount) }}</td>
+              <td class="amount">
+                <div v-if="p.status === 'unused'" class="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
+                  <CopyButton :value="p.code" small />
+                  <button type="button" class="btn btn-quiet btn-sm !text-seal hover:!bg-seal-wash" :data-testid="`purchase-revoke-${p.id}`" @click="toRevoke = p">
+                    {{ t('purchase.revoke') }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <Pager :page="purchasesPage" :pages="purchasesPages" :total="purchasesTotal" :busy="revoking" @go="loadPurchases" />
+      </template>
+    </section>
+
+    <ConfirmDialog
+      :open="confirmOpen"
+      :title="t('purchase.confirmTitle')"
+      :body="intent ? t('purchase.confirmBody', { amount: money(Number(intent.amount)) }) : ''"
+      :confirm-label="t('purchase.confirm')"
+      :busy="purchasing"
+      @confirm="confirmPurchase"
+      @cancel="confirmOpen = false"
+    >
+      <dl v-if="intent" class="mt-4 border-t border-rule-strong text-sm" data-testid="purchase-confirm">
+        <div class="flex justify-between border-b border-rule-soft py-2">
+          <dt class="text-ink-2">{{ t('purchase.confirmFace') }}</dt>
+          <dd class="num font-medium">{{ money(Number(intent.amount)) }}</dd>
+        </div>
+        <div v-if="balanceAfter !== null" class="flex justify-between py-2">
+          <dt class="text-ink-2">{{ t('purchase.confirmBalance') }}</dt>
+          <dd class="num">{{ money(balanceAfter) }}</dd>
+        </div>
+      </dl>
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="!!toRevoke"
+      :title="t('purchase.revokeTitle')"
+      :body="toRevoke ? t('purchase.revokeBody', { amount: money(toRevoke.amount) }) : ''"
+      :confirm-label="t('purchase.revoke')"
+      danger
+      :busy="revoking"
+      @confirm="confirmRevoke"
+      @cancel="toRevoke = null"
+    >
+      <code v-if="toRevoke" class="mt-3 block break-all rounded bg-shell px-3 py-2 font-mono text-xs">{{ toRevoke.code }}</code>
+    </ConfirmDialog>
 
     <!-- Orders -->
     <section v-if="config?.enabled" class="mt-12" aria-labelledby="orders-title">
