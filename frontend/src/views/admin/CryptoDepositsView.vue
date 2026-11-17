@@ -215,6 +215,12 @@ async function load() {
   try {
     const res = await adminAPI.cryptoPay.listDeposits(pagination.page, pagination.page_size, { hold: filter.value })
     if (seq !== loadSeq) return
+    const lastPage = Math.max(1, Math.ceil(res.total / pagination.page_size))
+    if (res.items.length === 0 && pagination.page > lastPage) {
+      // The page emptied (e.g. its last held deposit was released): go to the new last page.
+      pagination.page = lastPage
+      return load()
+    }
     deposits.value = res.items
     pagination.total = res.total
   } catch (err) {

@@ -1781,20 +1781,30 @@ func TestCryptoPay_ConcurrentReleaseOfHeldDepositAndHoldFilter(t *testing.T) {
 	var heldID int64
 	require.NoError(t, integrationDB.QueryRow(`SELECT id FROM crypto_pay_deposits WHERE tx_hash = $1`, large.TxHash).Scan(&heldID))
 
-	var credited int64
+	type releaseResult struct {
+		out *service.CryptoPayCreditOutcome
+		err error
+	}
+	results := make([]releaseResult, 8)
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
+	for i := range results {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			out, err := env.svc.ReleaseDeposit(ctx, heldID, "admin:7")
-			if err == nil && out.Credited {
-				atomic.AddInt64(&credited, 1)
-			}
-		}()
+			results[i] = releaseResult{out, err}
+		}(i)
 	}
 	wg.Wait()
-	require.Equal(t, int64(1), credited)
+	credited := 0
+	for _, r := range results {
+		require.NoError(t, r.err, "a repeated release is an idempotent success")
+		require.Equal(t, "credited", r.out.Status)
+		if r.out.Credited {
+			credited++
+		}
+	}
+	require.Equal(t, 1, credited)
 	require.Equal(t, "7.00000000", userBalance(t, user), "1 auto + 6 released")
 	require.Equal(t, 1, countRows(t, `SELECT COUNT(*) FROM crypto_pay_credits WHERE deposit_id = $1`, heldID))
 	require.Equal(t, 1, countRows(t, `SELECT COUNT(*) FROM crypto_pay_audit_logs WHERE action = 'DEPOSIT_CREDITED' AND deposit_id = $1`, heldID))
