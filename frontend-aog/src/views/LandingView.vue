@@ -45,6 +45,14 @@ const steps = computed(() => {
   ]
 })
 
+/**
+ * Ways to add balance, one statement line each (key prefix → Title / Body / Time).
+ * Only methods live on the site; a new method is one more entry here plus its copy.
+ */
+const payMethods = ['landing.payArbitrum', 'landing.paySolana', 'landing.payRedeem']
+
+const hostedLines = ['landing.hosted1', 'landing.hosted2']
+
 const billing = ['landing.bill1', 'landing.bill2', 'landing.bill3']
 
 /** Illustrative statement line (labelled as an example; not real prices). */
@@ -111,6 +119,37 @@ const sample = [
             <span class="text-sm text-ink-2">{{ t('landing.thenRun') }}</span>
             <code class="rounded-[4px] bg-shell px-2.5 py-1 font-mono text-sm text-ink">claude</code>
           </div>
+        </section>
+      </section>
+
+      <!-- After connecting: how balance gets in, and hosting your own account. Same statement blocks as the steps. -->
+      <section class="grid items-start gap-x-16 gap-y-12 border-t border-rule py-12 lg:grid-cols-[1.05fr_1fr] lg:py-16">
+        <section aria-labelledby="pay-title" data-testid="landing-pay">
+          <h2 id="pay-title" class="rule-double pb-2.5 text-lg font-semibold">{{ t('landing.payTitle') }}</h2>
+          <ul class="mt-1">
+            <li v-for="m in payMethods" :key="m" class="flex items-baseline justify-between gap-x-6 border-b border-rule-soft py-3.5">
+              <div class="min-w-0">
+                <h3 class="text-base font-semibold">{{ t(`${m}Title`) }}</h3>
+                <p class="mt-0.5 text-sm text-ink-2">{{ t(`${m}Body`) }}</p>
+              </div>
+              <span class="num shrink-0 text-right text-sm">{{ t(`${m}Time`) }}</span>
+            </li>
+          </ul>
+          <div class="rule-double" />
+          <p class="mt-3 text-xs leading-relaxed text-ink-3">{{ t('landing.payNote') }}</p>
+          <RouterLink v-if="auth.isAuthenticated" to="/billing" class="mt-2 inline-block text-sm">{{ t('landing.payGo') }}</RouterLink>
+        </section>
+
+        <section aria-labelledby="hosted-title" data-testid="landing-hosted">
+          <h2 id="hosted-title" class="rule-double pb-2.5 text-lg font-semibold">{{ t('landing.hostedTitle') }}</h2>
+          <p class="border-b border-rule-soft py-3.5 text-sm leading-relaxed text-ink">{{ t('landing.hostedSub') }}</p>
+          <ul>
+            <li v-for="key in hostedLines" :key="key" class="border-b border-rule-soft py-3 text-sm leading-relaxed text-ink-2">{{ t(key) }}</li>
+          </ul>
+          <div class="rule-double" />
+          <p class="mt-3 text-sm text-ink-2">
+            {{ t('landing.hostedHow') }}<span v-if="contact" class="ml-1 text-ink">{{ t('landing.contact') }} {{ contact }}</span>
+          </p>
         </section>
       </section>
 
