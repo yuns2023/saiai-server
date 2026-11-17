@@ -265,7 +265,8 @@ failover without replaying the request on the same broken account.
 The raw upstream recovery instruction is retained only in restricted operator
 diagnostics. It is never returned through a client error-passthrough rule. If
 all eligible accounts fail, the client receives HTTP `502` with a neutral SAIAI
-service-channel message.
+service-channel message (on a site with client brand settings, the site's
+brand or no brand; see [per-site client brand](CLIENT_BRAND_SETTINGS.md)).
 
 Restricted upstream provider identities are protected by a non-configurable
 final response boundary across JSON, SSE, raw `400`, and configurable

@@ -9,7 +9,10 @@ sufficient. The official `rust-v0.162.1` `codex-api/src/api_bridge.rs` and
 
 For OpenAI OAuth and native-relay accounts, downstream terminal errors with
 `usage_limit_reached` or `insufficient_quota` are mapped to `server_error`, code
-`saiai_upstream_capacity_unavailable`, with a SAIAI capacity message. The
+`saiai_upstream_capacity_unavailable`, with a SAIAI capacity message. A site
+with client brand settings names its own brand in that message, or no brand,
+while the code stays the same; see
+[per-site client brand](CLIENT_BRAND_SETTINGS.md). The
 replacement error does not include the upstream plan or reset/credit metadata.
 For terminal HTTP errors the downstream status is 503, rather than 429: Codex
 otherwise replaces the message with its generic retry-limit error. SSE and
