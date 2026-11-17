@@ -167,7 +167,7 @@ onMounted(load)
             <span>{{ inviteLine.text }}</span>
             <RouterLink :to="inviteLine.to">{{ inviteLine.link }}</RouterLink>
           </template>
-          <span v-else class="skeleton inline-block h-4 w-40 align-middle" />
+          <span v-else class="skeleton inline-block h-4 w-40 align-middle"><span class="sr-only">{{ t('overview.inviteLoading') }}</span></span>
         </dd>
       </div>
     </dl>

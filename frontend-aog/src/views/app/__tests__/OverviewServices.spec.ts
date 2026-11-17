@@ -125,10 +125,10 @@ describe('OverviewView account service lines', () => {
     expect(w.find('[data-testid=overview-hosted]').exists()).toBe(true)
   })
 
-  it('asks for one invitation page and shows what is left this week', async () => {
+  it('asks for one invitation page and shows what is left in the rolling 7 days', async () => {
     const w = await mountOverview()
     expect(api.invites.overview).toHaveBeenCalledWith(1, 1)
-    expect(w.find('[data-testid=overview-invites]').text()).toContain('本周还可生成 3 个邀请码')
+    expect(w.find('[data-testid=overview-invites]').text()).toContain('近 7 天还可生成 3 个邀请码')
     expect(links(w, 'overview-invites')).toEqual(['/invites'])
   })
 
@@ -143,7 +143,7 @@ describe('OverviewView account service lines', () => {
     api.invites.overview.mockResolvedValue(invites({ created_this_week: 5, weekly_limit_reached: true, can_create: false }))
     const w = await mountOverview()
     const text = w.find('[data-testid=overview-invites]').text()
-    expect(text).toContain('本周（滚动 7 天）的邀请码已用完')
+    expect(text).toContain('近 7 天的邀请码已用完')
     expect(text).not.toContain('0 个')
     expect(links(w, 'overview-invites')).toEqual(['/invites'])
   })
@@ -177,10 +177,11 @@ describe('OverviewView account service lines', () => {
     const row = w.find('[data-testid=overview-invites]')
     expect(row.find('.skeleton').exists()).toBe(true)
     expect(row.find('dd').attributes('aria-busy')).toBe('true')
+    expect(row.find('.skeleton .sr-only').text()).toBe('正在加载邀请情况…')
     resolve(invites())
     await flushPromises()
     expect(w.find('[data-testid=overview-invites] .skeleton').exists()).toBe(false)
-    expect(w.find('[data-testid=overview-invites]').text()).toContain('本周还可生成 3 个邀请码')
+    expect(w.find('[data-testid=overview-invites]').text()).toContain('近 7 天还可生成 3 个邀请码')
   })
 
   it('follows the public invite switch after mount', async () => {
@@ -211,7 +212,7 @@ describe('OverviewView account service lines', () => {
     const w = await mountOverview({ owned: [account()], locale: 'en' })
     const services = w.find('[data-testid=overview-services]')
     expect(services.text()).toContain('1 current')
-    expect(services.text()).toContain('Codes left this week: 3')
+    expect(services.text()).toContain('3 more in the last 7 days')
     i18n.global.locale.value = 'zh'
   })
 })
