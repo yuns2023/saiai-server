@@ -2595,11 +2595,11 @@ export default {
         },
         actions: {
           adjust: 'Adjust',
-          adjustDesc: 'Extend or shorten the subscription validity period',
+          adjustDesc: "Extend or shorten the subscription validity period; recorded in the user's redeem history",
           resetQuota: 'Reset Quota',
-          resetQuotaDesc: 'Reset daily/weekly/monthly usage to zero',
+          resetQuotaDesc: "Choose which of the 5-hour/daily/weekly/monthly quotas to zero and restart; recorded in the user's redeem history",
           revoke: 'Revoke',
-          revokeDesc: 'Immediately terminate the subscription (irreversible)'
+          revokeDesc: "Immediately terminate the subscription (irreversible); recorded in the user's redeem history"
         },
         tip: 'Tip: Only groups with billing type "Subscription" and status "Active" appear in the group dropdown. If no options are available, create one in Group Management first.'
       }

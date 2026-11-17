@@ -2672,11 +2672,11 @@ export default {
         },
         actions: {
           adjust: '调整',
-          adjustDesc: '延长或缩短订阅有效期',
+          adjustDesc: '延长或缩短订阅有效期，会记入用户的兑换记录',
           resetQuota: '重置配额',
-          resetQuotaDesc: '将日/周/月用量归零，重新开始计算',
+          resetQuotaDesc: '按 5 小时/日/周/月勾选要清零的额度并重新计周期，会记入用户的兑换记录',
           revoke: '撤销',
-          revokeDesc: '立即终止该用户的订阅，不可恢复'
+          revokeDesc: '立即终止该用户的订阅，不可恢复，会记入用户的兑换记录'
         },
         tip: '提示：订阅分组下拉列表中只会显示计费类型为「订阅」且状态为「正常」的分组。如果没有可选项，请先到分组管理中创建。'
       }
