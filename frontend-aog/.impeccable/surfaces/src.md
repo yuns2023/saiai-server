@@ -7,7 +7,7 @@ related_targets: []
 
 ## Scope
 
-AOGCode customer app (all signed-in pages plus login/register/key-usage). Mode: Operate. The landing page `/` is a tiny Persuade surface inside the same world: one positioning sentence and the sign-in entry, nothing else (PRODUCT.md: no evidence on hand).
+AOGCode customer app (all signed-in pages plus login/register/key-usage). Mode: Operate. The landing page `/` is a small Persuade surface inside the same world: the positioning headline and sign-in entry with the three-step connect list beside it, then how to top up (stablecoin networks and redeem codes as statement lines) next to hosted own-account, then the illustrative receipt. Only facts that are live today; no figures, fee rates or claims without evidence (PRODUCT.md: no evidence on hand).
 
 Audience/job: developers, small teams and resellers grab or rotate a key, check balance and what calls cost, top up, then leave.
 
