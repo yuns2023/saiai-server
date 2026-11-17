@@ -3,13 +3,19 @@ import { mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { i18n } from '@/i18n'
 import { useAppStore } from '@/stores/app'
-import type { PublicSettings } from '@/types'
+import { useAuthStore } from '@/stores/auth'
+import type { PublicSettings, User } from '@/types'
 import LandingView from '../LandingView.vue'
 
-function mountLanding(settings: Partial<PublicSettings>) {
+function mountLanding(settings: Partial<PublicSettings>, signedIn = false) {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAppStore().settings = settings as PublicSettings
+  if (signedIn) {
+    const auth = useAuthStore()
+    auth.token = 'token'
+    auth.user = { id: 1, email: 'a@b.c' } as User
+  }
   return mount(LandingView, { global: { plugins: [pinia, i18n], stubs: { RouterLink: RouterLinkStub } } })
 }
 
@@ -82,5 +88,47 @@ describe('LandingView', () => {
     expect(footer.findAllComponents(RouterLinkStub).map((l) => l.props('to'))).toContain('/key-usage')
     expect(footer.find('a[href="https://github.com/2742zdz/AITP"]').exists()).toBe(true)
     expect(footer.text()).toMatch(/© \d{4} CCYou\.dev/)
+  })
+
+  it('lists the live ways to add balance, with the console link only for signed-in visitors', () => {
+    const out = mountLanding({ registration_enabled: true })
+    const pay = out.find('[data-testid=landing-pay]')
+    const lines = pay.findAll('tbody tr').map((tr) => tr.text())
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toContain('Solana')
+    expect(lines[0]).toContain('约 1 分钟')
+    expect(lines[1]).toContain('Arbitrum')
+    expect(lines[1]).toContain('约 20 分钟')
+    expect(lines[2]).toContain('兑换码')
+    expect(pay.find('tfoot').text()).toContain('1 USDT / USDC = $1')
+    expect(pay.text()).toContain('不支持跨链')
+    expect(pay.findAllComponents(RouterLinkStub)).toHaveLength(0)
+    const signedIn = mountLanding({ registration_enabled: true }, true).find('[data-testid=landing-pay]')
+    expect(signedIn.findAllComponents(RouterLinkStub).map((l) => l.props('to'))).toEqual(['/billing'])
+  })
+
+  it('describes hosting as admin-assisted, without a fee figure', () => {
+    const hosted = (contact_info: string) => mountLanding({ registration_enabled: true, contact_info }).find('[data-testid=landing-hosted]')
+    const plain = hosted('')
+    expect(plain.text()).toContain('联系管理员')
+    expect(plain.text()).not.toMatch(/\d/)
+    expect(plain.text()).not.toContain('联系方式')
+    expect(hosted('微信 ccyou').text()).toContain('联系方式： 微信 ccyou')
+  })
+
+  it('keeps "Claude Code" unbroken in the hosting copy', () => {
+    for (const locale of ['zh', 'en'] as const) {
+      i18n.global.locale.value = locale
+      expect(mountLanding({ registration_enabled: true }).find('[data-testid=landing-hosted]').text()).toContain('Claude\u00a0Code')
+    }
+  })
+
+  it('advertises nothing that is not live yet', () => {
+    for (const locale of ['zh', 'en'] as const) {
+      i18n.global.locale.value = locale
+      const text = mountLanding({ registration_enabled: true, invitation_code_enabled: true }, true).text()
+      expect(text).not.toMatch(/收益|分成|共享|等级|状态页|支付宝|微信支付|购买兑换码/)
+      expect(text).not.toMatch(/earn|marketplace|loyalty|status page|Alipay|WeChat|buy (a )?redeem/i)
+    }
   })
 })

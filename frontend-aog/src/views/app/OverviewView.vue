@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChargeTable from '@/components/ChargeTable.vue'
 import Icon from '@/components/Icon.vue'
+import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useHostedStore } from '@/stores/hosted'
 import { useNoticesStore } from '@/stores/notices'
-import { keysApi, usageApi, type DashboardStats } from '@/api'
+import { invitesApi, keysApi, usageApi, type DashboardStats } from '@/api'
 import { intlLocale } from '@/i18n'
 import { count, dateTime, money, ymd } from '@/lib/format'
-import type { UsageLog } from '@/types'
+import type { UsageLog, UserInviteOverview } from '@/types'
 
 const { t } = useI18n()
+const app = useAppStore()
 const auth = useAuthStore()
+const hosted = useHostedStore()
 const notices = useNoticesStore()
 
 const stats = ref<DashboardStats | null>(null)
@@ -24,6 +28,43 @@ const recentFailed = ref(false)
 
 const user = computed(() => auth.user)
 const latestNotices = computed(() => notices.items.slice(0, 3))
+
+/** Hosted accounts in my name now; the shell keeps the store fresh, so this follows it. */
+const hostedCurrent = computed(() => hosted.accounts.filter((a) => a.current).length)
+
+/** Invitation status; stays null (row hidden) when the site has invites off or the request fails. */
+const invites = ref<UserInviteOverview | null>(null)
+/** While the answer is pending the row holds a placeholder, so the charges below jump less (it can still grow on phones or go away). */
+const invitesPending = ref(false)
+/** One short status; the exact reason (and every other limit) is explained on /invites. */
+const inviteLine = computed(() => {
+  const d = invites.value
+  if (!app.settings?.user_invite_enabled || !d?.enabled) return null
+  if (!d.eligible) return { text: t('overview.inviteLocked'), to: '/billing', link: t('overview.inviteTopUp') }
+  const view = { to: '/invites', link: t('overview.inviteView') }
+  const weekLeft = d.max_per_week > 0 ? Math.max(0, d.max_per_week - (d.created_this_week || 0)) : null
+  if (d.weekly_limit_reached || weekLeft === 0) return { text: t('overview.inviteWeekDone'), ...view }
+  if (!d.can_create) return { text: t('overview.inviteBlocked'), ...view }
+  const text = weekLeft === null ? t('overview.inviteOpen') : t('overview.inviteWeekLeft', { n: weekLeft })
+  return { text, to: '/invites', link: t('overview.inviteGo') }
+})
+
+/** Follows the public switch like the nav does; an answer that lands after it changed is dropped. */
+let invitesSeq = 0
+async function loadInvites(on: boolean | undefined): Promise<void> {
+  const mine = ++invitesSeq
+  if (!on) {
+    invites.value = null
+    invitesPending.value = false
+    return
+  }
+  invitesPending.value = true
+  const res = await invitesApi.overview(1, 1).catch(() => null)
+  if (mine !== invitesSeq) return
+  invites.value = res
+  invitesPending.value = false
+}
+watch(() => app.settings?.user_invite_enabled, loadInvites, { immediate: true })
 
 async function load(): Promise<void> {
   loading.value = true
@@ -104,6 +145,32 @@ onMounted(load)
         </dl>
       </div>
     </div>
+
+    <!-- Account services: lines that only exist for some accounts. -->
+    <!-- Phones: one aligned label column (wrappers dissolve into the grid); wider: one inline line. -->
+    <dl
+      v-if="hosted.hasAny || inviteLine || invitesPending"
+      class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2 border-b border-rule-soft py-3 text-sm sm:flex sm:flex-wrap sm:gap-x-10"
+      data-testid="overview-services"
+    >
+      <div v-if="hosted.hasAny" class="contents sm:flex sm:min-w-0 sm:flex-wrap sm:items-baseline sm:gap-x-3" data-testid="overview-hosted">
+        <dt class="label">{{ t('nav.hosted') }}</dt>
+        <dd class="flex flex-wrap items-baseline gap-x-3">
+          <span>{{ hostedCurrent > 0 ? t('overview.hostedCount', { n: hostedCurrent }) : t('overview.hostedPast') }}</span>
+          <RouterLink to="/hosted">{{ hostedCurrent > 0 ? t('overview.hostedGo') : t('overview.hostedGoPast') }}</RouterLink>
+        </dd>
+      </div>
+      <div v-if="inviteLine || invitesPending" class="contents sm:flex sm:min-w-0 sm:flex-wrap sm:items-baseline sm:gap-x-3" data-testid="overview-invites">
+        <dt class="label">{{ t('overview.invites') }}</dt>
+        <dd class="flex flex-wrap items-baseline gap-x-3" :aria-busy="!inviteLine">
+          <template v-if="inviteLine">
+            <span>{{ inviteLine.text }}</span>
+            <RouterLink :to="inviteLine.to">{{ inviteLine.link }}</RouterLink>
+          </template>
+          <span v-else class="skeleton inline-block h-4 w-40 align-middle"><span class="sr-only">{{ t('overview.inviteLoading') }}</span></span>
+        </dd>
+      </div>
+    </dl>
 
     <!-- First run: no key yet -->
     <div v-if="!loading && keyCount === 0" class="border-b border-rule py-6">

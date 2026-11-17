@@ -45,6 +45,24 @@ const steps = computed(() => {
   ]
 })
 
+/**
+ * Ways to add balance, one statement line each: the method, an optional note
+ * under it, and when it lands. Only methods live on the site; a new method is
+ * one more entry here plus its copy.
+ */
+const payMethods: Array<{ title: string; body?: string; time: string }> = [
+  { title: 'landing.paySolanaTitle', time: 'landing.paySolanaTime' },
+  { title: 'landing.payArbitrumTitle', time: 'landing.payArbitrumTime' },
+  { title: 'landing.payRedeemTitle', body: 'landing.payRedeemBody', time: 'landing.payRedeemTime' }
+]
+
+/** Hosting as ruled key-value lines; the last one (how to start) carries the site contact. */
+const hostedRows = [
+  { label: 'landing.hostedSeeLabel', value: 'landing.hostedSee' },
+  { label: 'landing.hostedFeeLabel', value: 'landing.hostedFee' },
+  { label: 'landing.hostedHowLabel', value: 'landing.hostedHow', contact: true }
+]
+
 const billing = ['landing.bill1', 'landing.bill2', 'landing.bill3']
 
 /** Illustrative statement line (labelled as an example; not real prices). */
@@ -114,6 +132,57 @@ const sample = [
         </section>
       </section>
 
+      <!-- After connecting: how balance gets in (a small statement) and hosting your own account (ruled key-value lines). -->
+      <section class="grid items-start gap-x-16 gap-y-12 border-t border-rule py-12 lg:grid-cols-[1.05fr_1fr] lg:py-16">
+        <section aria-labelledby="pay-title" class="min-w-0" data-testid="landing-pay">
+          <h2 id="pay-title" class="rule-double pb-2.5 text-lg font-semibold">{{ t('landing.payTitle') }}</h2>
+          <table class="ledger mt-1 text-sm">
+            <thead>
+              <tr>
+                <th scope="col">{{ t('landing.payColMethod') }}</th>
+                <th scope="col" class="amount">{{ t('landing.payColTime') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in payMethods" :key="m.title">
+                <td>
+                  <span class="font-medium text-ink">{{ t(m.title) }}</span>
+                  <span v-if="m.body" class="mt-0.5 block text-ink-2">{{ t(m.body) }}</span>
+                </td>
+                <td class="amount">{{ t(m.time) }}</td>
+              </tr>
+            </tbody>
+            <!-- One cell, so the long conversion never widens the time column. -->
+            <tfoot>
+              <tr>
+                <td colspan="2">
+                  <div class="flex flex-wrap items-baseline justify-between gap-x-4">
+                    <span class="text-ink-2">{{ t('landing.payRateLabel') }}</span>
+                    <span class="num font-medium">{{ t('landing.payRate') }}</span>
+                  </div>
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+          <p class="mt-3 text-sm leading-relaxed text-ink-2">{{ t('landing.payNote') }}</p>
+          <RouterLink v-if="auth.isAuthenticated" to="/billing" class="mt-2 inline-block text-sm">{{ t('landing.payGo') }}</RouterLink>
+        </section>
+
+        <section aria-labelledby="hosted-title" class="min-w-0" data-testid="landing-hosted">
+          <h2 id="hosted-title" class="rule-double pb-2.5 text-lg font-semibold">{{ t('landing.hostedTitle') }}</h2>
+          <p class="border-b border-rule-soft py-3.5 text-sm leading-relaxed text-ink">{{ t('landing.hostedSub') }}</p>
+          <dl class="grid grid-cols-[max-content_1fr] text-sm">
+            <template v-for="row in hostedRows" :key="row.label">
+              <dt class="label border-b border-rule-soft py-3 pr-5 leading-relaxed">{{ t(row.label) }}</dt>
+              <dd class="min-w-0 border-b border-rule-soft py-3 leading-relaxed text-ink-2">
+                {{ t(row.value) }}
+                <span v-if="row.contact && contact" class="block text-ink [overflow-wrap:anywhere]">{{ t('landing.contact') }} {{ contact }}</span>
+              </dd>
+            </template>
+          </dl>
+        </section>
+      </section>
+
       <!-- Transparent billing: the sample receipt is the page's one lifted sheet. -->
       <section aria-labelledby="billing-title" class="grid items-start gap-x-16 gap-y-10 border-t border-rule py-12 lg:grid-cols-[1.05fr_1fr] lg:py-16">
         <div class="lg:pt-5">
@@ -161,7 +230,7 @@ const sample = [
           <RouterLink to="/key-usage">{{ t('landing.lookup') }}</RouterLink>
           <a :href="AITP_URL" target="_blank" rel="noopener noreferrer">{{ t('landing.aitpGithub') }}</a>
           <a v-if="docUrl" :href="docUrl" target="_blank" rel="noopener noreferrer">{{ t('landing.docs') }}</a>
-          <span v-if="contact">{{ t('landing.contact') }} {{ contact }}</span>
+          <span v-if="contact" class="min-w-0 [overflow-wrap:anywhere]">{{ t('landing.contact') }} {{ contact }}</span>
         </nav>
         <p class="num">© {{ year }} {{ app.siteName }}</p>
       </div>
