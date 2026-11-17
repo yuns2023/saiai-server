@@ -141,3 +141,14 @@ func TestSettlementReconcileRepository_StatementTimeout(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrSettlementReconcileTimeout)
 	require.Less(t, time.Since(started), 3*time.Second)
 }
+
+// A request context that is already cancelled (client went away / handler
+// deadline) maps to the same 503 error instead of a generic 500.
+func TestSettlementReconcileRepository_ContextCancelled(t *testing.T) {
+	repo := NewSettlementReconcileRepository(integrationDB)
+	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := repo.Reconcile(ctx, service.SettlementReconcileQuery{From: from, To: from.Add(time.Hour), CoverageStart: from, Page: 1, PageSize: 10, Now: from})
+	require.ErrorIs(t, err, service.ErrSettlementReconcileTimeout)
+}

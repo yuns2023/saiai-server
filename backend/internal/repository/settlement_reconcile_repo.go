@@ -27,11 +27,11 @@ var settlementReconcileStatementTimeout = "15s"
 func (r *settlementReconcileRepository) Reconcile(ctx context.Context, q service.SettlementReconcileQuery) (*service.SettlementReconcileData, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
-		return nil, err
+		return nil, mapSettlementReconcileError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('statement_timeout', $1, true)`, settlementReconcileStatementTimeout); err != nil {
-		return nil, err
+		return nil, mapSettlementReconcileError(err)
 	}
 	out := &service.SettlementReconcileData{}
 	if out.Summary, err = settlementSummary(ctx, tx, q.From, q.To); err != nil {
@@ -46,6 +46,11 @@ func (r *settlementReconcileRepository) Reconcile(ctx context.Context, q service
 func mapSettlementReconcileError(err error) error {
 	var pqErr *pq.Error
 	if errors.As(err, &pqErr) && pqErr.Code == "57014" { // query_canceled: statement_timeout, or a cancel request
+		return service.ErrSettlementReconcileTimeout
+	}
+	// The request context was cancelled or hit its deadline before or while
+	// the driver talked to the database.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return service.ErrSettlementReconcileTimeout
 	}
 	return err
