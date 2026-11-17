@@ -74,6 +74,18 @@ const (
 const (
 	AdjustmentTypeAdminBalance     = "admin_balance"     // 管理员调整余额
 	AdjustmentTypeAdminConcurrency = "admin_concurrency" // 管理员调整并发数
+	// Admin subscription operations, recorded in redeem_codes like the two above.
+	AdjustmentTypeAdminSubAdjust = "admin_sub_adjust" // 管理员调整订阅时长：value = 天数（正延长，负缩短）
+	AdjustmentTypeAdminSubRevoke = "admin_sub_revoke" // 管理员撤销订阅：value = -撤销时剩余天数
+	AdjustmentTypeAdminSubReset  = "admin_sub_reset"  // 管理员重置订阅额度：value = 重置档位位掩码（1=5小时 2=日 4=周 8=月）
+)
+
+// Subscription usage windows reset by an admin, as bits of an admin_sub_reset record value.
+const (
+	SubscriptionResetFiveHour = 1
+	SubscriptionResetDaily    = 2
+	SubscriptionResetWeekly   = 4
+	SubscriptionResetMonthly  = 8
 )
 
 // Group subscription type constants

@@ -75,6 +75,18 @@ func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*se
 	return userSubscriptionEntityToService(m), nil
 }
 
+// LockByID takes a row lock (SELECT ... FOR UPDATE) on a live subscription
+// for the rest of the caller's transaction; without a transaction it is a
+// plain existence check.
+func (r *userSubscriptionRepository) LockByID(ctx context.Context, id int64) error {
+	client := clientFromContext(ctx, r.client)
+	_, err := client.UserSubscription.Query().
+		Where(usersubscription.IDEQ(id)).
+		ForUpdate().
+		Only(ctx)
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
 func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	m, err := client.UserSubscription.Query().

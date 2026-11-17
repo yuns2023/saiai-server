@@ -1240,6 +1240,14 @@ export interface AdminDataImportResult {
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation' | 'claude_device'
+// Rows in redeem_codes also record admin operations; these types are never generatable codes.
+export type AdminOperationRecordType =
+  | 'admin_balance'
+  | 'admin_concurrency'
+  | 'admin_sub_adjust'
+  | 'admin_sub_revoke'
+  | 'admin_sub_reset'
+export type RedeemRecordType = RedeemCodeType | AdminOperationRecordType
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
 
 export interface UsageLog {
@@ -1433,7 +1441,7 @@ export interface UsageCleanupTask {
 export interface RedeemCode {
   id: number
   code: string
-  type: RedeemCodeType
+  type: RedeemRecordType
   value: number
   status: 'active' | 'used' | 'expired' | 'unused'
   used_by: number | null
@@ -1776,6 +1784,7 @@ export interface BulkAssignSubscriptionRequest {
 
 export interface ExtendSubscriptionRequest {
   days: number
+  notes?: string // shown to the user in their redeem history
 }
 
 // ==================== Query Parameters ====================

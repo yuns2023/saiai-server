@@ -2829,13 +2829,51 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 	return codes, nil
 }
 
+// ErrAdminRecordImmutable rejects deleting or expiring the redeem history rows
+// written by admin balance/concurrency/subscription operations: they are the
+// only record that the operation happened.
+var ErrAdminRecordImmutable = infraerrors.BadRequest("ADMIN_RECORD_IMMUTABLE", "admin operation records cannot be deleted or expired")
+
+// IsAdminOperationRecordType reports whether a redeem_codes type is a record
+// of an admin operation rather than a redeemable code.
+func IsAdminOperationRecordType(codeType string) bool {
+	switch codeType {
+	case AdjustmentTypeAdminBalance, AdjustmentTypeAdminConcurrency,
+		AdjustmentTypeAdminSubAdjust, AdjustmentTypeAdminSubRevoke, AdjustmentTypeAdminSubReset:
+		return true
+	}
+	return false
+}
+
+// checkRedeemCodeDeletable returns ErrAdminRecordImmutable for admin
+// operation records. A missing code stays deletable (deleting it is a no-op).
+func (s *adminServiceImpl) checkRedeemCodeDeletable(ctx context.Context, id int64) error {
+	code, err := s.redeemCodeRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrRedeemCodeNotFound) {
+			return nil
+		}
+		return err
+	}
+	if IsAdminOperationRecordType(code.Type) {
+		return ErrAdminRecordImmutable
+	}
+	return nil
+}
+
 func (s *adminServiceImpl) DeleteRedeemCode(ctx context.Context, id int64) error {
+	if err := s.checkRedeemCodeDeletable(ctx, id); err != nil {
+		return err
+	}
 	return s.redeemCodeRepo.Delete(ctx, id)
 }
 
 func (s *adminServiceImpl) BatchDeleteRedeemCodes(ctx context.Context, ids []int64) (int64, error) {
 	var deleted int64
 	for _, id := range ids {
+		if s.checkRedeemCodeDeletable(ctx, id) != nil {
+			continue // admin operation records are kept; the count shows what was deleted
+		}
 		if err := s.redeemCodeRepo.Delete(ctx, id); err == nil {
 			deleted++
 		}
@@ -2847,6 +2885,9 @@ func (s *adminServiceImpl) ExpireRedeemCode(ctx context.Context, id int64) (*Red
 	code, err := s.redeemCodeRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if IsAdminOperationRecordType(code.Type) {
+		return nil, ErrAdminRecordImmutable
 	}
 	code.Status = StatusExpired
 	if err := s.redeemCodeRepo.Update(ctx, code); err != nil {

@@ -8,6 +8,7 @@ import type {
   RedeemCode,
   GenerateRedeemCodesRequest,
   RedeemCodeType,
+  RedeemRecordType,
   PaginatedResponse
 } from '@/types'
 
@@ -22,7 +23,7 @@ export async function list(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
-    type?: RedeemCodeType
+    type?: RedeemRecordType
     status?: 'active' | 'used' | 'expired' | 'unused'
     search?: string
   },
@@ -152,7 +153,7 @@ export async function getStats(): Promise<{
  * @returns CSV data as blob
  */
 export async function exportCodes(filters?: {
-  type?: RedeemCodeType
+  type?: RedeemRecordType
   status?: 'active' | 'used' | 'expired'
 }): Promise<Blob> {
   const response = await apiClient.get('/admin/redeem-codes/export', {

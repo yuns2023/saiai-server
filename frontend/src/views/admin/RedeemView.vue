@@ -92,6 +92,9 @@
           <template #cell-value="{ value, row }">
             <span class="text-sm font-medium text-gray-900 dark:text-white">
               <template v-if="row.type === 'balance'">${{ value.toFixed(2) }}</template>
+              <template v-else-if="isAdminSubscriptionRecord(row.type)">
+                {{ adminSubscriptionRecordValue(row, t) }}
+              </template>
               <template v-else-if="row.type === 'subscription'">
                 {{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}
                 <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
@@ -406,6 +409,7 @@
 </template>
 
 <script setup lang="ts">
+import { adminSubscriptionRecordValue, isAdminSubscriptionRecord } from '@/utils/adminSubscriptionRecords'
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -415,7 +419,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { adminAPI } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
-import type { RedeemCode, RedeemCodeType, Group, GroupPlatform, SubscriptionType } from '@/types'
+import type { RedeemCode, RedeemCodeType, RedeemRecordType, Group, GroupPlatform, SubscriptionType } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -533,7 +537,13 @@ const filterTypeOptions = computed(() => [
   { value: 'concurrency', label: t('admin.redeem.concurrency') },
   { value: 'subscription', label: t('admin.redeem.subscription') },
   { value: 'claude_device', label: t('admin.redeem.claudeDevice') },
-  { value: 'invitation', label: t('admin.redeem.invitation') }
+  { value: 'invitation', label: t('admin.redeem.invitation') },
+  // Records of admin operations (not generatable codes)
+  { value: 'admin_balance', label: t('admin.redeem.types.admin_balance') },
+  { value: 'admin_concurrency', label: t('admin.redeem.types.admin_concurrency') },
+  { value: 'admin_sub_adjust', label: t('admin.redeem.types.admin_sub_adjust') },
+  { value: 'admin_sub_revoke', label: t('admin.redeem.types.admin_sub_revoke') },
+  { value: 'admin_sub_reset', label: t('admin.redeem.types.admin_sub_reset') }
 ])
 
 const filterStatusOptions = computed(() => [
@@ -597,7 +607,7 @@ const loadCodes = async () => {
       pagination.page,
       pagination.page_size,
       {
-        type: filters.type as RedeemCodeType,
+        type: filters.type as RedeemRecordType,
         status: filters.status as any,
         search: searchQuery.value || undefined
       },
@@ -693,7 +703,7 @@ const copyToClipboard = async (text: string) => {
 const handleExportCodes = async () => {
   try {
     const blob = await adminAPI.redeem.exportCodes({
-      type: filters.type as RedeemCodeType,
+      type: filters.type as RedeemRecordType,
       status: filters.status as any
     })
 

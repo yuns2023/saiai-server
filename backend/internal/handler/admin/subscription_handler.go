@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"io"
 	"strconv"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -56,7 +58,8 @@ type BulkAssignSubscriptionRequest struct {
 
 // AdjustSubscriptionRequest represents adjust subscription request (extend or shorten)
 type AdjustSubscriptionRequest struct {
-	Days int `json:"days" binding:"required,min=-36500,max=36500"` // negative to shorten, positive to extend
+	Days  int    `json:"days" binding:"required,min=-36500,max=36500"` // negative to shorten, positive to extend
+	Notes string `json:"notes" binding:"max=500"`                      // optional, shown to the user in their redeem history
 }
 
 // List handles listing all subscriptions with pagination and filters
@@ -209,7 +212,7 @@ func (h *SubscriptionHandler) Extend(c *gin.Context) {
 		Body:           req,
 	}
 	executeAdminIdempotentJSON(c, "admin.subscriptions.extend", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
-		subscription, execErr := h.subscriptionService.ExtendSubscription(ctx, subscriptionID, req.Days)
+		subscription, execErr := h.subscriptionService.ExtendSubscription(ctx, subscriptionID, req.Days, req.Notes)
 		if execErr != nil {
 			return nil, execErr
 		}
@@ -219,10 +222,16 @@ func (h *SubscriptionHandler) Extend(c *gin.Context) {
 
 // ResetSubscriptionQuotaRequest represents the reset quota request
 type ResetSubscriptionQuotaRequest struct {
-	FiveHour bool `json:"five_hour"`
-	Daily    bool `json:"daily"`
-	Weekly   bool `json:"weekly"`
-	Monthly  bool `json:"monthly"`
+	FiveHour bool   `json:"five_hour"`
+	Daily    bool   `json:"daily"`
+	Weekly   bool   `json:"weekly"`
+	Monthly  bool   `json:"monthly"`
+	Notes    string `json:"notes" binding:"max=500"` // optional, shown to the user in their redeem history
+}
+
+// RevokeSubscriptionRequest is the optional body of a revoke request.
+type RevokeSubscriptionRequest struct {
+	Notes string `json:"notes" binding:"max=500"` // optional, shown to the user in their redeem history
 }
 
 // ResetQuota resets five-hour, daily, weekly, and/or monthly usage for a subscription.
@@ -242,12 +251,20 @@ func (h *SubscriptionHandler) ResetQuota(c *gin.Context) {
 		response.BadRequest(c, "At least one of 'five_hour', 'daily', 'weekly', or 'monthly' must be true")
 		return
 	}
-	sub, err := h.subscriptionService.AdminResetQuota(c.Request.Context(), subscriptionID, req.FiveHour, req.Daily, req.Weekly, req.Monthly)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
+	idempotencyPayload := struct {
+		SubscriptionID int64                         `json:"subscription_id"`
+		Body           ResetSubscriptionQuotaRequest `json:"body"`
+	}{
+		SubscriptionID: subscriptionID,
+		Body:           req,
 	}
-	response.Success(c, dto.UserSubscriptionFromServiceAdmin(sub))
+	executeAdminIdempotentJSON(c, "admin.subscriptions.reset_quota", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		sub, execErr := h.subscriptionService.AdminResetQuota(ctx, subscriptionID, req.FiveHour, req.Daily, req.Weekly, req.Monthly, req.Notes)
+		if execErr != nil {
+			return nil, execErr
+		}
+		return dto.UserSubscriptionFromServiceAdmin(sub), nil
+	})
 }
 
 // Revoke handles revoking a subscription
@@ -259,13 +276,26 @@ func (h *SubscriptionHandler) Revoke(c *gin.Context) {
 		return
 	}
 
-	err = h.subscriptionService.RevokeSubscription(c.Request.Context(), subscriptionID)
-	if err != nil {
-		response.ErrorFrom(c, err)
+	// The body is optional: older clients send DELETE without one.
+	var req RevokeSubscriptionRequest
+	if err := bindOptionalJSON(c, &req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
 
-	response.Success(c, gin.H{"message": "Subscription revoked successfully"})
+	idempotencyPayload := struct {
+		SubscriptionID int64                     `json:"subscription_id"`
+		Body           RevokeSubscriptionRequest `json:"body"`
+	}{
+		SubscriptionID: subscriptionID,
+		Body:           req,
+	}
+	executeAdminIdempotentJSON(c, "admin.subscriptions.revoke", idempotencyPayload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		if execErr := h.subscriptionService.RevokeSubscription(ctx, subscriptionID, req.Notes); execErr != nil {
+			return nil, execErr
+		}
+		return gin.H{"message": "Subscription revoked successfully"}, nil
+	})
 }
 
 // ListByGroup handles listing subscriptions for a specific group
@@ -312,6 +342,15 @@ func (h *SubscriptionHandler) ListByUser(c *gin.Context) {
 		out = append(out, *dto.UserSubscriptionFromServiceAdmin(&subscriptions[i]))
 	}
 	response.Success(c, out)
+}
+
+// bindOptionalJSON binds and validates a JSON body when the request has one;
+// an empty body leaves req at its zero value.
+func bindOptionalJSON(c *gin.Context, req any) error {
+	if err := c.ShouldBindJSON(req); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 // Helper function to get admin ID from context

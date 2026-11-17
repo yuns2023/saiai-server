@@ -351,6 +351,12 @@ import { redeemAPI, authAPI, type RedeemHistoryItem } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
+import {
+  adminSubscriptionRecordTitle,
+  adminSubscriptionRecordValue,
+  isAdminOperationRecord,
+  isAdminSubscriptionRecord
+} from '@/utils/adminSubscriptionRecords'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -383,11 +389,11 @@ const isBalanceType = (type: string) => {
 }
 
 const isSubscriptionType = (type: string) => {
-  return type === 'subscription'
+  return type === 'subscription' || isAdminSubscriptionRecord(type)
 }
 
 const isAdminAdjustment = (type: string) => {
-  return type === 'admin_balance' || type === 'admin_concurrency'
+  return isAdminOperationRecord(type)
 }
 
 const getHistoryItemTitle = (item: RedeemHistoryItem) => {
@@ -403,6 +409,8 @@ const getHistoryItemTitle = (item: RedeemHistoryItem) => {
     return t('redeem.subscriptionAssigned')
   } else if (item.type === 'claude_device') {
     return t('redeem.claudeDevicesAdded')
+  } else if (isAdminSubscriptionRecord(item.type)) {
+    return adminSubscriptionRecordTitle(item, t)
   }
   return t('common.unknown')
 }
@@ -411,6 +419,8 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
   if (isBalanceType(item.type)) {
     const sign = item.value >= 0 ? '+' : ''
     return `${sign}$${item.value.toFixed(2)}`
+  } else if (isAdminSubscriptionRecord(item.type)) {
+    return adminSubscriptionRecordValue(item, t)
   } else if (isSubscriptionType(item.type)) {
     // 订阅类型显示有效天数和分组名称
     const days = item.validity_days || Math.round(item.value)
