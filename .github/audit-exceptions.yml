@@ -15,3 +15,8 @@ exceptions:
     severity: "high"
     mitigation: "No 9.x fix exists (first patched is 11.4.14). Frontend never sets escapeParameter and no v-html renders vue-i18n output, so the bypassed escaping is not relied on. Remove by upgrading vue-i18n to >=11.4.14."
     expires_on: "2026-11-28"
+  - package: "picomatch"
+    advisory: "GHSA-fc5q-39xc-vjpf"
+    severity: "high"
+    mitigation: "No patched release exists (advisory covers <=4.0.7, latest is 4.0.7). picomatch is only a build/dev-time dependency (vite, tinyglobby, anymatch); it is not bundled into the browser apps and every glob it compiles comes from repository config, never from user input, so the ReDoS input path does not exist. Remove when a patched picomatch is published and pinned via pnpm.overrides."
+    expires_on: "2026-12-18"
