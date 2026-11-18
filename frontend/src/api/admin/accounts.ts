@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from '../client'
+import { i18n } from '@/i18n'
 import type {
   Account,
   CreateAccountRequest,
@@ -125,9 +126,30 @@ export async function getById(id: number): Promise<Account> {
  * @param accountData - Account data
  * @returns Created account
  */
+/**
+ * Account write errors from hosted self-onboarding rules, in the admin's
+ * language: callers show `message`, so it is replaced; `reason` stays.
+ */
+const LOCALIZED_ACCOUNT_REASONS: Record<string, string> = {
+  UPSTREAM_ACCOUNT_ALREADY_EXISTS: 'admin.accounts.errors.upstreamAccountAlreadyExists',
+  SELF_ONBOARDED_ACCOUNT_REQUIRES_PROXY: 'admin.accounts.errors.selfOnboardedRequiresProxy'
+}
+
+export function localizeAccountWriteError(err: unknown): unknown {
+  const reason = (err as { reason?: unknown } | null)?.reason
+  if (typeof reason === 'string' && LOCALIZED_ACCOUNT_REASONS[reason]) {
+    return { ...(err as object), message: i18n.global.t(LOCALIZED_ACCOUNT_REASONS[reason]) }
+  }
+  return err
+}
+
 export async function create(accountData: CreateAccountRequest): Promise<Account> {
-  const { data } = await apiClient.post<Account>('/admin/accounts', accountData)
-  return data
+  try {
+    const { data } = await apiClient.post<Account>('/admin/accounts', accountData)
+    return data
+  } catch (err) {
+    throw localizeAccountWriteError(err)
+  }
 }
 
 /**
@@ -137,8 +159,12 @@ export async function create(accountData: CreateAccountRequest): Promise<Account
  * @returns Updated account
  */
 export async function update(id: number, updates: UpdateAccountRequest): Promise<Account> {
-  const { data } = await apiClient.put<Account>(`/admin/accounts/${id}`, updates)
-  return data
+  try {
+    const { data } = await apiClient.put<Account>(`/admin/accounts/${id}`, updates)
+    return data
+  } catch (err) {
+    throw localizeAccountWriteError(err)
+  }
 }
 
 /**

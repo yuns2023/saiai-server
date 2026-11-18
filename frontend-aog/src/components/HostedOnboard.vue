@@ -16,6 +16,7 @@ import {
   emptyProxy,
   MAX_DISPLAY_NAME,
   normalizeAuthCode,
+  onboardCorrelationId,
   onboardErrorKey,
   PROXY_PROTOCOLS,
   proxyPayload,
@@ -67,6 +68,7 @@ async function generate(): Promise<void> {
   if (linking.value || submitting.value) return
   linking.value = true
   error.value = ''
+  correlationId.value = ''
   newLinkNeeded.value = false
   done.value = false
   // The old link is replaced either way; its code must not be reused.
@@ -110,6 +112,8 @@ function proxyMsg(field: ProxyField): string {
 const submitting = ref(false)
 const error = ref('')
 const newLinkNeeded = ref(false)
+/** Server log id of a failed exchange, shown so the user can quote it to an admin. */
+const correlationId = ref('')
 const done = ref(false)
 
 async function submit(): Promise<void> {
@@ -127,6 +131,7 @@ async function submit(): Promise<void> {
   code.value = ''
   submitting.value = true
   error.value = ''
+  correlationId.value = ''
   newLinkNeeded.value = false
   try {
     const app = await hostedApi.submitApplication(body)
@@ -140,6 +145,7 @@ async function submit(): Promise<void> {
   } catch (e) {
     if (!alive) return
     error.value = t(`onboard.errors.${onboardErrorKey(e)}`, { n: props.config.max_pending })
+    correlationId.value = onboardCorrelationId(e)
     if (submitNeedsNewLink(e)) {
       dropLink()
       proxy.password = ''
@@ -315,6 +321,9 @@ onUnmounted(() => {
             </div>
             <p v-if="error" class="mt-3 text-sm text-seal" role="alert" data-testid="onboard-error">
               {{ error }}<template v-if="newLinkNeeded"> {{ t('onboard.newLinkNeeded') }}</template>
+              <span v-if="correlationId" class="mt-1 block text-xs text-ink-3" data-testid="onboard-correlation">
+                {{ t('onboard.correlation') }} <span class="font-mono select-all">{{ correlationId }}</span>
+              </span>
             </p>
             <p v-else-if="done" class="mt-3 text-sm text-ok" role="status" data-testid="onboard-done">{{ t('onboard.submitted') }}</p>
           </div>

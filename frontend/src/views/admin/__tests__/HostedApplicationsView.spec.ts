@@ -46,7 +46,7 @@ vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => store })
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) => (params ? `${key} ${JSON.stringify(params)}` : key),
-    te: (key: string) => key.startsWith('admin.hostedApplications.statuses.') || key.startsWith('admin.hostedApplications.errors.SELF_ONBOARD_')
+    te: (key: string) => key.startsWith('admin.hostedApplications.statuses.') || (key.startsWith('admin.hostedApplications.errors.SELF_ONBOARD_') || key.startsWith('admin.hostedApplications.errors.UPSTREAM_'))
   })
 }))
 

@@ -180,11 +180,7 @@
               >
                 {{ row.extra.email_address }}
               </span>
-              <span v-if="row.identity_unknown || row.owner_paused || row.withdraw_requested" class="mt-0.5 flex flex-wrap gap-1">
-                <span v-if="row.identity_unknown" class="badge badge-gray" :title="t('admin.accounts.identityUnknownHint')" data-testid="account-identity-unknown">{{ t('admin.accounts.identityUnknown') }}</span>
-                <span v-if="row.owner_paused" class="badge badge-warning" data-testid="account-owner-paused">{{ t('admin.accounts.ownerPaused') }}</span>
-                <span v-if="row.withdraw_requested" class="badge badge-danger" data-testid="account-withdraw-requested">{{ t('admin.accounts.withdrawRequested') }}</span>
-              </span>
+              <AccountHostedBadges :account="row" />
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -351,6 +347,7 @@ import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vu
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import AccountOwnerCell from '@/components/account/AccountOwnerCell.vue'
+import AccountHostedBadges from '@/components/account/AccountHostedBadges.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
@@ -758,8 +755,9 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
     current.owner_user_id !== next.owner_user_id ||
     current.owner_email !== next.owner_email ||
-    current.owner_paused !== next.owner_paused ||
-    current.withdraw_requested !== next.withdraw_requested ||
+    current.owner_paused_at !== next.owner_paused_at ||
+    current.owner_withdraw_requested_at !== next.owner_withdraw_requested_at ||
+    current.self_onboarded !== next.self_onboarded ||
     current.identity_unknown !== next.identity_unknown ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next)
   )

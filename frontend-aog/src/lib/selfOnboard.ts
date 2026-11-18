@@ -7,8 +7,11 @@ import type { ProxyProtocol, SelfOnboardProxy } from '@/api/hosted'
 
 export const PROXY_PROTOCOLS: readonly ProxyProtocol[] = ['socks5h', 'socks5', 'http', 'https']
 export const MAX_DISPLAY_NAME = 64
-/** Bytes, per field (host, username, password). */
+/** Proxy username / password: at most this many characters and MAX_PROXY_FIELD_BYTES bytes each. */
+export const MAX_PROXY_CRED_CHARS = 100
 export const MAX_PROXY_FIELD_BYTES = 255
+/** Longest DNS name. */
+export const MAX_PROXY_HOST_BYTES = 253
 
 export interface ProxyForm {
   protocol: ProxyProtocol
@@ -64,16 +67,20 @@ export function checkProxy(p: ProxyForm, required: boolean): ProxyProblems {
 
   const host = bareHost(p.host)
   if (!host) out.host = 'hostRequired'
-  else if (/[\s/@?#\\]/.test(host) || hasControlChars(host) || host.includes('://') || utf8Bytes(host) > MAX_PROXY_FIELD_BYTES) out.host = 'hostInvalid'
+  else if (/[\s/@?#\\]/.test(host) || hasControlChars(host) || host.includes('://') || utf8Bytes(host) > MAX_PROXY_HOST_BYTES) out.host = 'hostInvalid'
 
   const port = p.port.trim()
   if (!port) out.port = 'portRequired'
   else if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) out.port = 'portInvalid'
 
   if (!!p.username !== !!p.password) out.auth = 'authPair'
-  if (p.username && (hasControlChars(p.username) || utf8Bytes(p.username) > MAX_PROXY_FIELD_BYTES)) out.username = 'credInvalid'
-  if (p.password && (hasControlChars(p.password) || utf8Bytes(p.password) > MAX_PROXY_FIELD_BYTES)) out.password = 'credInvalid'
+  if (p.username && !credOk(p.username)) out.username = 'credInvalid'
+  if (p.password && !credOk(p.password)) out.password = 'credInvalid'
   return out
+}
+
+function credOk(v: string): boolean {
+  return !hasControlChars(v) && [...v].length <= MAX_PROXY_CRED_CHARS && utf8Bytes(v) <= MAX_PROXY_FIELD_BYTES
 }
 
 /** The request body part for a valid, non-blank proxy form; undefined when blank. */
@@ -130,7 +137,9 @@ export const ONBOARD_ERROR_CODES = [
   'SELF_ONBOARD_PENDING_LIMIT',
   'SELF_ONBOARD_RATE_LIMITED',
   'SELF_ONBOARD_NOT_FOUND',
-  'SELF_ONBOARD_INVALID_STATE'
+  'SELF_ONBOARD_INVALID_STATE',
+  'SELF_ONBOARD_INVALID_INPUT',
+  'SELF_ONBOARD_UNAVAILABLE'
 ] as const
 export type OnboardErrorCode = (typeof ONBOARD_ERROR_CODES)[number]
 
@@ -143,7 +152,8 @@ const LINK_STILL_VALID: ReadonlySet<string> = new Set([
   'SELF_ONBOARD_PROXY_REQUIRED',
   'SELF_ONBOARD_PROXY_INVALID',
   'SELF_ONBOARD_PENDING_LIMIT',
-  'SELF_ONBOARD_RATE_LIMITED'
+  'SELF_ONBOARD_RATE_LIMITED',
+  'SELF_ONBOARD_INVALID_INPUT'
 ])
 
 /** The stable error code of a rejected API call (`reason` in the envelope), if any. */
@@ -163,6 +173,12 @@ export function onboardErrorKey(err: unknown): string {
   if (status === 0) return 'network'
   if (status === 429) return 'SELF_ONBOARD_RATE_LIMITED'
   return 'generic'
+}
+
+/** The id the server logged a failed exchange under (metadata.correlation_id), for the user to quote to an admin. */
+export function onboardCorrelationId(err: unknown): string {
+  const id = (err as { metadata?: Record<string, unknown> } | null)?.metadata?.correlation_id
+  return typeof id === 'string' && /^[\w.:-]{1,128}$/.test(id) ? id : ''
 }
 
 /** Whether a failed submission used up the authorisation link (the user must generate a new one). */

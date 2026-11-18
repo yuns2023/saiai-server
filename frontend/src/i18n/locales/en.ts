@@ -2632,6 +2632,11 @@ export default {
       currentlyInUse: 'In use',
       inProgress: 'In progress',
       inProgressHint: 'A request is currently in progress; the timestamp below is the last completed request.',
+      selfOnboarded: 'Self-onboarded',
+      errors: {
+        upstreamAccountAlreadyExists: 'This Claude account already exists (duplicate upstream identity)',
+        selfOnboardedRequiresProxy: 'A self-onboarded hosted account must keep a proxy; it cannot be switched to direct.'
+      },
       identityUnknown: 'Identity unknown',
       identityUnknownHint: 'No upstream account UUID is known for this account (it was imported without one), so duplicates cannot be detected automatically; make sure it is not hosted twice.',
       ownerPaused: 'Paused by owner',
@@ -4048,7 +4053,10 @@ export default {
         SELF_ONBOARD_ALREADY_HOSTED: 'This Claude account is already hosted (an account or pending application with the same upstream account exists).',
         SELF_ONBOARD_IDENTITY_MISSING: 'The application has no upstream identity and cannot be approved.',
         SELF_ONBOARD_NOT_FOUND: 'Application not found.',
-        SELF_ONBOARD_INVALID_STATE: 'The application changed (handled, cancelled or expired). Please refresh.'
+        SELF_ONBOARD_INVALID_STATE: 'The application changed (handled, cancelled or expired). Please refresh.',
+        SELF_ONBOARD_INVALID_INPUT: 'Invalid input. Please check and try again.',
+        SELF_ONBOARD_UNAVAILABLE: 'Temporarily unavailable. Please try again later.',
+        UPSTREAM_ACCOUNT_ALREADY_EXISTS: 'This Claude account already exists (duplicate upstream identity).'
       }
     },
 

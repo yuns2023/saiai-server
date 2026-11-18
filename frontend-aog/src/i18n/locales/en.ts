@@ -427,6 +427,7 @@ const en: typeof zh = {
     submit: 'Submit for review',
     submitting: 'Submitting…',
     submitted: 'Submitted. Waiting for an administrator to review it.',
+    correlation: 'If you contact an administrator, quote this reference:',
     newLinkNeeded: 'Generate a new link, sign in again and submit; the name and proxy address are kept, the proxy password needs to be entered again.',
     check: {
       proxyRequired: 'This site requires a proxy.',
@@ -436,7 +437,7 @@ const en: typeof zh = {
       portRequired: 'Enter the port.',
       portInvalid: 'The port is a whole number from 1 to 65535.',
       authPair: 'Fill in both username and password, or neither.',
-      credInvalid: 'Username and password cannot contain control characters and are at most 255 bytes each.',
+      credInvalid: 'Username and password cannot contain control characters and are at most 100 characters (and 255 bytes) each.',
       nameRequired: 'Enter a name.',
       nameTooLong: 'The name can be at most 64 characters.',
       nameInvalid: 'The name cannot contain control characters.',
@@ -455,6 +456,8 @@ const en: typeof zh = {
       SELF_ONBOARD_RATE_LIMITED: 'Too many attempts. Please try again later.',
       SELF_ONBOARD_NOT_FOUND: 'Not found; it may have been handled already.',
       SELF_ONBOARD_INVALID_STATE: 'Its state has changed. Please refresh and try again.',
+      SELF_ONBOARD_INVALID_INPUT: 'Some input is not valid. Check the name and other fields and try again.',
+      SELF_ONBOARD_UNAVAILABLE: 'Temporarily unavailable. Please try again later.',
       network: 'Network error. Please try again later.',
       generic: 'That did not work. Please try again later.'
     },

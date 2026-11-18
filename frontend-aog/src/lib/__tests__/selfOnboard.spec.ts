@@ -7,6 +7,7 @@ import {
   emptyProxy,
   normalizeAuthCode,
   ONBOARD_ERROR_CODES,
+  onboardCorrelationId,
   onboardErrorCode,
   onboardErrorKey,
   proxyPayload,
@@ -33,7 +34,7 @@ describe('checkProxy', () => {
   })
 
   it('rejects hosts with a scheme, path, credentials, spaces or control characters', () => {
-    for (const host of ['socks5://proxy.example.com', 'proxy.example.com/x', 'user@proxy.example.com', 'a b', 'a\u0000b', 'x'.repeat(256)]) {
+    for (const host of ['socks5://proxy.example.com', 'proxy.example.com/x', 'user@proxy.example.com', 'a b', 'a\u0000b', 'x'.repeat(254)]) {
       expect(checkProxy(proxy({ host }), false).host, host).toBe('hostInvalid')
     }
     expect(checkProxy(proxy({ host: '  ' , port: '1080' }), false).host).toBe('hostRequired')
@@ -52,7 +53,11 @@ describe('checkProxy', () => {
     expect(checkProxy(proxy({ username: 'u', password: 'p' }), false)).toEqual({})
   })
 
-  it('limits credentials to 255 bytes without control characters', () => {
+  it('limits credentials to 100 characters and 255 bytes without control characters', () => {
+    expect(checkProxy(proxy({ username: 'u'.repeat(100), password: 'p' }), false)).toEqual({})
+    expect(checkProxy(proxy({ username: 'u'.repeat(101), password: 'p' }), false).username).toBe('credInvalid')
+    // 4-byte characters: 64 of them = 256 bytes, under 100 characters.
+    expect(checkProxy(proxy({ username: 'u', password: '😀'.repeat(64) }), false).password).toBe('credInvalid')
     expect(checkProxy(proxy({ username: 'u\nx', password: 'p' }), false).username).toBe('credInvalid')
     // 86 three-byte characters = 258 bytes.
     expect(checkProxy(proxy({ username: 'u', password: '密'.repeat(86) }), false).password).toBe('credInvalid')
@@ -101,6 +106,15 @@ describe('normalizeAuthCode', () => {
   })
 })
 
+describe('onboardCorrelationId', () => {
+  it('reads metadata.correlation_id and ignores anything odd', () => {
+    expect(onboardCorrelationId({ metadata: { correlation_id: '9f2c4e1ab03d7781' } })).toBe('9f2c4e1ab03d7781')
+    expect(onboardCorrelationId({ metadata: { correlation_id: '<script>' } })).toBe('')
+    expect(onboardCorrelationId({ metadata: {} })).toBe('')
+    expect(onboardCorrelationId(null)).toBe('')
+  })
+})
+
 describe('error codes', () => {
   it('reads the code from `reason` (HTTP errors) or a string `code`', () => {
     expect(onboardErrorCode({ status: 409, code: 409, reason: 'SELF_ONBOARD_ALREADY_HOSTED', message: 'x' })).toBe('SELF_ONBOARD_ALREADY_HOSTED')
@@ -122,10 +136,10 @@ describe('error codes', () => {
   })
 
   it('keeps the link only for errors raised before the link is used', () => {
-    for (const code of ['SELF_ONBOARD_PROXY_REQUIRED', 'SELF_ONBOARD_PROXY_INVALID', 'SELF_ONBOARD_PENDING_LIMIT', 'SELF_ONBOARD_RATE_LIMITED']) {
+    for (const code of ['SELF_ONBOARD_PROXY_REQUIRED', 'SELF_ONBOARD_PROXY_INVALID', 'SELF_ONBOARD_PENDING_LIMIT', 'SELF_ONBOARD_RATE_LIMITED', 'SELF_ONBOARD_INVALID_INPUT']) {
       expect(submitNeedsNewLink({ reason: code }), code).toBe(false)
     }
-    for (const code of ['SELF_ONBOARD_SESSION_INVALID', 'SELF_ONBOARD_EXCHANGE_FAILED', 'SELF_ONBOARD_PROXY_UNAVAILABLE', 'SELF_ONBOARD_ALREADY_HOSTED']) {
+    for (const code of ['SELF_ONBOARD_SESSION_INVALID', 'SELF_ONBOARD_EXCHANGE_FAILED', 'SELF_ONBOARD_PROXY_UNAVAILABLE', 'SELF_ONBOARD_ALREADY_HOSTED', 'SELF_ONBOARD_UNAVAILABLE']) {
       expect(submitNeedsNewLink({ reason: code }), code).toBe(true)
     }
     expect(submitNeedsNewLink({ status: 0 })).toBe(true)

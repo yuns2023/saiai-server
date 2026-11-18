@@ -425,6 +425,7 @@ export default {
     submit: '提交审核',
     submitting: '提交中…',
     submitted: '已提交，等待管理员审核。',
+    correlation: '如需联系管理员，请提供编号：',
     newLinkNeeded: '请重新生成授权链接、再登录一次后提交；名称和代理地址已保留，代理密码需要重新填写。',
     check: {
       proxyRequired: '本站需要填写代理。',
@@ -434,7 +435,7 @@ export default {
       portRequired: '请填写端口。',
       portInvalid: '端口是 1–65535 之间的整数。',
       authPair: '用户名和密码要么都填，要么都不填。',
-      credInvalid: '用户名和密码不能含控制字符，各自最多 255 字节。',
+      credInvalid: '用户名和密码不能含控制字符，各自最多 100 个字符（且不超过 255 字节）。',
       nameRequired: '请填写名称。',
       nameTooLong: '名称最多 64 个字。',
       nameInvalid: '名称不能含控制字符。',
@@ -453,6 +454,8 @@ export default {
       SELF_ONBOARD_RATE_LIMITED: '操作太频繁，请稍后再试。',
       SELF_ONBOARD_NOT_FOUND: '没有找到这条记录，可能已被处理。',
       SELF_ONBOARD_INVALID_STATE: '状态已经变化，请刷新后再试。',
+      SELF_ONBOARD_INVALID_INPUT: '填写的内容无效，请检查名称等字段后再试。',
+      SELF_ONBOARD_UNAVAILABLE: '服务暂时不可用，请稍后再试。',
       network: '网络错误，请稍后再试。',
       generic: '操作失败，请稍后再试。'
     },

@@ -2709,6 +2709,11 @@ export default {
       currentlyInUse: '使用中',
       inProgress: '进行中',
       inProgressHint: '当前有请求正在处理；下方时间为最近一次已完成请求。',
+      selfOnboarded: '自助托管',
+      errors: {
+        upstreamAccountAlreadyExists: '该 Claude 号已存在（上游身份重复）',
+        selfOnboardedRequiresProxy: '自助托管的号必须保留代理，不能改成直连。'
+      },
       identityUnknown: '身份未知',
       identityUnknownHint: '这个号没有已知的上游账号 UUID（导入时未取得），系统无法替它查重；请管理员自行确认没有重复托管。',
       ownerPaused: '号主暂停',
@@ -4204,7 +4209,10 @@ export default {
         SELF_ONBOARD_ALREADY_HOSTED: '该 Claude 号已在托管中（已有同一上游账号的账号或待审核申请）。',
         SELF_ONBOARD_IDENTITY_MISSING: '申请缺少上游身份，不能批准。',
         SELF_ONBOARD_NOT_FOUND: '申请不存在。',
-        SELF_ONBOARD_INVALID_STATE: '申请状态已变化（可能已被处理、取消或过期），请刷新。'
+        SELF_ONBOARD_INVALID_STATE: '申请状态已变化（可能已被处理、取消或过期），请刷新。',
+        SELF_ONBOARD_INVALID_INPUT: '输入无效，请检查后重试。',
+        SELF_ONBOARD_UNAVAILABLE: '服务暂时不可用，请稍后再试。',
+        UPSTREAM_ACCOUNT_ALREADY_EXISTS: '该 Claude 号已存在（上游身份重复）。'
       }
     },
 
