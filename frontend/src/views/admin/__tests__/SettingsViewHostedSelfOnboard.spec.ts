@@ -155,6 +155,43 @@ describe('admin settings: hosted self-onboarding', () => {
     expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject({ ...hosted, hosted_self_onboard_enabled: false })
   })
 
+  it('switch off: a legal edit is kept while only the illegal field goes back', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored({ hosted_self_onboard_enabled: false }))
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))
+    const w = await mountView()
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_concurrency]').setValue('50')
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_interval_hours]').setValue('0')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject({
+      hosted_self_onboard_default_concurrency: 50,
+      hosted_self_onboard_default_interval_hours: hosted.hosted_self_onboard_default_interval_hours
+    })
+  })
+
+  it('switch off: admissions above the device limit go back first, then the device limit', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored({ hosted_self_onboard_enabled: false }))
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))
+    const w = await mountView()
+    // Stored: device limit 6, admissions 2. A legal-looking lower device limit (1) now conflicts with admissions 2.
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_device_limit]').setValue('1')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject({
+      hosted_self_onboard_default_device_limit: 6,
+      hosted_self_onboard_default_admissions_per_cycle: 2
+    })
+    // Lowering admissions together with the device limit keeps both edits.
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_device_limit]').setValue('3')
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_admissions_per_cycle]').setValue('9')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings.mock.calls[1][0]).toMatchObject({
+      hosted_self_onboard_default_device_limit: 3,
+      hosted_self_onboard_default_admissions_per_cycle: 2
+    })
+  })
+
   it('switch on: uses the backend bounds (concurrency 1–100, priority 0–10000, fee 0–10 with 4 decimals)', async () => {
     settingsApi.getSettings.mockResolvedValue(stored())
     settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))

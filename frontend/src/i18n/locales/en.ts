@@ -2635,7 +2635,8 @@ export default {
       selfOnboarded: 'Self-onboarded',
       errors: {
         upstreamAccountAlreadyExists: 'This Claude account already exists (duplicate upstream identity)',
-        selfOnboardedRequiresProxy: 'A self-onboarded hosted account must keep a proxy; it cannot be switched to direct.'
+        selfOnboardedRequiresProxy: 'A self-onboarded hosted account must keep a proxy; it cannot be switched to direct.',
+        selfOnboardedTypeLocked: 'The platform or account type of a self-onboarded hosted account cannot be changed'
       },
       identityUnknown: 'Identity unknown',
       identityUnknownHint: 'No upstream account UUID is known for this account (it was imported without one), so duplicates cannot be detected automatically; make sure it is not hosted twice.',

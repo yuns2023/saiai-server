@@ -29,7 +29,7 @@ function config(over: Partial<SelfOnboardConfig> = {}): SelfOnboardConfig {
   return { enabled: true, exchange_proxy_configured: true, max_pending: 3, ...over }
 }
 
-async function mountForm(cfg = config(), pendingCount = 0) {
+async function mountForm(cfg = config(), pendingCount: number | null = 0) {
   setActivePinia(createPinia())
   i18n.global.locale.value = 'zh'
   const w = mount(HostedOnboard, { props: { config: cfg, pendingCount }, global: { plugins: [i18n] } })
@@ -282,6 +282,37 @@ describe('HostedOnboard', () => {
     await w.setProps({ pendingCount: 2 })
     expect(w.find('[data-testid=onboard-pending-full]').exists()).toBe(false)
     expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('an unknown pending count is not zero: no limit message; while it loads, no link', async () => {
+    const w = await mountForm(config({ max_pending: 3 }), null)
+    expect(w.find('[data-testid=onboard-pending-full]').exists()).toBe(false)
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(false)
+    await w.setProps({ pendingLoading: true })
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('PENDING_LIMIT asks the page to refresh the applications', async () => {
+    const w = await mountForm()
+    await generate(w)
+    hosted.submitApplication.mockRejectedValue({ status: 409, reason: 'SELF_ONBOARD_PENDING_LIMIT' })
+    await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
+    await w.get('[data-testid=onboard-name]').setValue('n')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(w.emitted('pendingLimit')).toHaveLength(1)
+  })
+
+  it('does not submit once the limit is known to be reached, even with a live link', async () => {
+    const w = await mountForm(config({ max_pending: 3 }), 2)
+    await generate(w)
+    await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
+    await w.get('[data-testid=onboard-name]').setValue('n')
+    await w.setProps({ pendingCount: 3 })
+    expect((w.get('[data-testid=onboard-submit]').element as HTMLButtonElement).disabled).toBe(true)
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(hosted.submitApplication).not.toHaveBeenCalled()
   })
 
   it('shows the pending limit with the configured number and ALREADY_HOSTED in plain words', async () => {

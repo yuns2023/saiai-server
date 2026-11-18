@@ -17,6 +17,7 @@ import {
   MAX_DISPLAY_NAME,
   normalizeAuthCode,
   onboardCorrelationId,
+  onboardErrorCode,
   onboardErrorKey,
   PROXY_PROTOCOLS,
   proxyPayload,
@@ -24,13 +25,17 @@ import {
   type ProxyField
 } from '@/lib/selfOnboard'
 
-/** pendingCount: my applications still under review; at max_pending no new link can be generated. */
-const props = defineProps<{ config: SelfOnboardConfig; pendingCount: number }>()
-const emit = defineEmits<{ submitted: [app: HostedApplication] }>()
+/**
+ * pendingCount: my applications still under review, or null while unknown
+ * (not loaded or failed; never read as zero). At max_pending no new link can
+ * be generated or submitted.
+ */
+const props = defineProps<{ config: SelfOnboardConfig; pendingCount: number | null; pendingLoading?: boolean }>()
+const emit = defineEmits<{ submitted: [app: HostedApplication]; pendingLimit: [] }>()
 const { t } = useI18n()
 
 const proxyRequired = computed(() => !props.config.exchange_proxy_configured)
-const pendingFull = computed(() => props.config.max_pending > 0 && props.pendingCount >= props.config.max_pending)
+const pendingFull = computed(() => props.pendingCount !== null && props.config.max_pending > 0 && props.pendingCount >= props.config.max_pending)
 
 /* ---------- Step 1: authorisation link ---------- */
 const link = ref<SelfOnboardAuthUrl | null>(null)
@@ -67,7 +72,7 @@ function dropLink(): void {
 }
 
 async function generate(): Promise<void> {
-  if (linking.value || submitting.value || pendingFull.value) return
+  if (linking.value || submitting.value || pendingFull.value || props.pendingLoading) return
   linking.value = true
   error.value = ''
   correlationId.value = ''
@@ -119,7 +124,7 @@ const correlationId = ref('')
 const done = ref(false)
 
 async function submit(): Promise<void> {
-  if (submitting.value || linking.value) return
+  if (submitting.value || linking.value || pendingFull.value) return
   tried.value = true
   done.value = false
   if (!linkLive.value || hasProblems.value || !link.value) return
@@ -148,6 +153,8 @@ async function submit(): Promise<void> {
     if (!alive) return
     error.value = t(`onboard.errors.${onboardErrorKey(e)}`, { n: props.config.max_pending })
     correlationId.value = onboardCorrelationId(e)
+    // The server counted more pending applications than the page knew: refresh the list (and the limit state).
+    if (onboardErrorCode(e) === 'SELF_ONBOARD_PENDING_LIMIT') emit('pendingLimit')
     if (submitNeedsNewLink(e)) {
       dropLink()
       proxy.password = ''
@@ -183,7 +190,7 @@ onUnmounted(() => {
               {{ t('onboard.pendingFull', { n: config.max_pending }) }}
             </p>
             <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <button type="button" class="btn" :class="link ? 'btn-line' : 'btn-primary'" :disabled="linking || submitting || pendingFull" data-testid="onboard-generate" @click="generate">
+              <button type="button" class="btn" :class="link ? 'btn-line' : 'btn-primary'" :disabled="linking || submitting || pendingFull || pendingLoading" data-testid="onboard-generate" @click="generate">
                 {{ linking ? t('onboard.generating') : link ? t('onboard.regenerate') : t('onboard.generate') }}
               </button>
               <template v-if="link && linkLive">
@@ -319,7 +326,7 @@ onUnmounted(() => {
           <div class="min-w-0">
             <p class="text-sm text-ink-2">{{ t('onboard.submitLead') }}</p>
             <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <button type="submit" class="btn btn-primary" :disabled="submitting || !linkLive" data-testid="onboard-submit">
+              <button type="submit" class="btn btn-primary" :disabled="submitting || !linkLive || pendingFull" data-testid="onboard-submit">
                 {{ submitting ? t('onboard.submitting') : t('onboard.submit') }}
               </button>
               <span v-if="!linkLive && !error" class="text-xs text-ink-3">{{ t('onboard.codeNeedsLink') }}</span>

@@ -16,6 +16,8 @@ describe('account write errors', () => {
     })
     http.put.mockRejectedValue({ status: 400, reason: 'SELF_ONBOARDED_ACCOUNT_REQUIRES_PROXY', message: 'x' })
     await expect(update(3, {} as never)).rejects.toMatchObject({ message: 'T:admin.accounts.errors.selfOnboardedRequiresProxy' })
+    http.put.mockRejectedValue({ status: 400, reason: 'SELF_ONBOARDED_ACCOUNT_TYPE_LOCKED', message: 'x' })
+    await expect(update(3, {} as never)).rejects.toMatchObject({ message: 'T:admin.accounts.errors.selfOnboardedTypeLocked' })
   })
 
   it('passes other errors through unchanged', async () => {

@@ -82,6 +82,18 @@ export const useHostedStore = defineStore('hosted', () => {
     return request
   }
 
+  /**
+   * A list read that starts after now: a request already in flight (possibly
+   * sent before a write the caller just made) is awaited, then a new one goes out.
+   */
+  async function reload(): Promise<OwnedAccount[]> {
+    const issuedIn = generation
+    if (inflight) await inflight.catch(() => undefined)
+    if (issuedIn !== generation) return accounts.value
+    // Another fresh caller may have started one meanwhile; it also began after our write.
+    return load()
+  }
+
   /** Whether a background check is due now. */
   function due(now: number): boolean {
     if (inflight) return false
@@ -175,5 +187,5 @@ export const useHostedStore = defineStore('hosted', () => {
     ownerBusy.value = null
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, load, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })

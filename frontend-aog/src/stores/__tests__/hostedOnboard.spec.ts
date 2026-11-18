@@ -69,6 +69,20 @@ describe('hosted store: self-onboarding switch', () => {
     expect(store.ownerBusy).toBeNull()
   })
 
+  it('reload() sends a new GET after one already in flight', async () => {
+    const store = useHostedStore()
+    let first!: (v: unknown) => void
+    hosted.listOwnedAccounts.mockReturnValueOnce(new Promise((r) => { first = r }))
+    hosted.listOwnedAccounts.mockResolvedValueOnce([{ account_id: 12, current: true, status: 'available', owner_paused: false, withdraw_requested: false }])
+    void store.load()
+    const fresh = store.reload()
+    expect(hosted.listOwnedAccounts).toHaveBeenCalledTimes(1)
+    first([{ account_id: 12, current: true, status: 'paused', owner_paused: true, withdraw_requested: false }])
+    await fresh
+    expect(hosted.listOwnedAccounts).toHaveBeenCalledTimes(2)
+    expect(store.accounts[0].status).toBe('available')
+  })
+
   it('drops an owner answer that arrives after sign-out', () => {
     const store = useHostedStore()
     const session = store.session()

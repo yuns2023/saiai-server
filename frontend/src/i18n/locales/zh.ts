@@ -2712,7 +2712,8 @@ export default {
       selfOnboarded: '自助托管',
       errors: {
         upstreamAccountAlreadyExists: '该 Claude 号已存在（上游身份重复）',
-        selfOnboardedRequiresProxy: '自助托管的号必须保留代理，不能改成直连。'
+        selfOnboardedRequiresProxy: '自助托管的号必须保留代理，不能改成直连。',
+        selfOnboardedTypeLocked: '自助托管账号不能更改平台或账号类型'
       },
       identityUnknown: '身份未知',
       identityUnknownHint: '这个号没有已知的上游账号 UUID（导入时未取得），系统无法替它查重；请管理员自行确认没有重复托管。',

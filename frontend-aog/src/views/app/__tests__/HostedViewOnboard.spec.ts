@@ -236,6 +236,17 @@ describe('HostedView self-onboarding', () => {
     expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('a failed applications read is not "0 pending": no limit message, retry offered', async () => {
+    hosted.listOwnedAccounts.mockResolvedValue([])
+    hosted.listApplications.mockRejectedValue({ status: 500 })
+    hosted.selfOnboardConfig.mockResolvedValue(ON)
+    setActivePinia(createPinia())
+    const w = mount(HostedView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect(w.find('[data-testid=apps-error]').exists()).toBe(true)
+    expect(w.find('[data-testid=onboard-pending-full]').exists()).toBe(false)
+  })
+
   it('shows no owner controls for servers without the owner flags or for past accounts', async () => {
     const w = await mountView({ accounts: [account(), account({ account_id: 7, current: false, status: null, owner_paused: false, withdraw_requested: false })] })
     expect(w.find('[data-testid=hosted-owner-12]').exists()).toBe(false)

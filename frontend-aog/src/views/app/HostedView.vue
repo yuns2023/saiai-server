@@ -45,11 +45,12 @@ const sections = computed(() =>
 )
 const selected = computed(() => hosted.accounts.find((a) => a.account_id === selectedId.value) ?? null)
 
-async function loadAccounts(): Promise<void> {
+/** fresh: the list must be read after this call (e.g. right after an owner action), never reuse one in flight. */
+async function loadAccounts(fresh = false): Promise<void> {
   loading.value = true
   listFailed.value = false
   try {
-    await hosted.load()
+    await (fresh ? hosted.reload() : hosted.load())
   } catch {
     listFailed.value = true
   } finally {
@@ -146,14 +147,14 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
     const state = await hostedApi.setOwnerState(a.account_id, action)
     if (hosted.applyOwnerState(state, session)) {
       app.notify('ok', t(`hosted.owner_${action}_done`))
-      // Status and badges then come from the server, not from this guess.
-      void loadAccounts()
+      // Status and badges then come from the server, read after this write.
+      void loadAccounts(true)
     }
   } catch (e) {
     if (hosted.session() !== session) return
     const key = onboardErrorKey(e)
     app.notify('error', key === 'generic' ? t('hosted.ownerActionFailed') : t(`onboard.errors.${key}`))
-    void loadAccounts()
+    void loadAccounts(true)
   } finally {
     if (hosted.session() === session) hosted.ownerBusy = null
   }
@@ -169,7 +170,12 @@ async function confirmWithdraw(): Promise<void> {
 const onboardEnabled = computed(() => hosted.onboard?.enabled === true)
 const applications = ref<HostedApplication[]>([])
 const appsFailed = ref(false)
-const pendingCount = computed(() => applications.value.filter((a) => a.status === 'pending').length)
+/** Applications loaded at least once and the last read worked; until then the pending count is unknown. */
+const appsLoaded = ref(false)
+/** null = unknown (not loaded yet, or the last read failed): never treated as zero. */
+const pendingCount = computed(() =>
+  appsLoaded.value && !appsFailed.value ? applications.value.filter((a) => a.status === 'pending').length : null
+)
 
 /** Only the latest list answer is used; a local change bumps it too so an older read cannot undo it. */
 let appsSeq = 0
@@ -181,6 +187,7 @@ async function loadApplications(): Promise<void> {
     if (seq !== appsSeq) return
     applications.value = list
     appsFailed.value = false
+    appsLoaded.value = true
     hosted.hasApplications = list.length > 0
   } catch (e) {
     if (seq !== appsSeq) return
@@ -188,6 +195,7 @@ async function loadApplications(): Promise<void> {
     if ((e as Partial<ApiError> | undefined)?.status === 404) {
       applications.value = []
       appsFailed.value = false
+      appsLoaded.value = true
     } else appsFailed.value = true
   }
 }
@@ -331,7 +339,7 @@ onUnmounted(() => {
       <div class="skeleton h-24" />
     </div>
     <p v-else-if="listFailed && !hosted.accounts.length" class="mt-6 text-sm text-seal" role="alert" data-testid="hosted-list-error">
-      {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts">{{ t('common.retry') }}</button>
+      {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts()">{{ t('common.retry') }}</button>
     </p>
     <p v-else-if="!hosted.accounts.length" class="mt-6 border-t border-rule-strong py-10 text-center text-sm text-ink-2" data-testid="hosted-empty">
       {{ onboardEnabled ? t('hosted.emptyOnboard') : t('hosted.empty') }}
@@ -339,7 +347,7 @@ onUnmounted(() => {
 
     <template v-else>
       <p v-if="listFailed" class="mt-4 text-sm text-seal" role="alert">
-        {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts">{{ t('common.retry') }}</button>
+        {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts()">{{ t('common.retry') }}</button>
       </p>
 
       <!-- Accounts: current first, then past ones (history only); one choice across both -->
@@ -589,7 +597,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <HostedOnboard v-if="onboardEnabled && hosted.onboard" :config="hosted.onboard" :pending-count="pendingCount" @submitted="onSubmitted" />
+    <HostedOnboard v-if="onboardEnabled && hosted.onboard" :config="hosted.onboard" :pending-count="pendingCount" :pending-loading="!appsLoaded && !appsFailed" @submitted="onSubmitted" @pending-limit="loadApplications" />
 
     <ConfirmDialog
       :open="!!withdrawTarget"

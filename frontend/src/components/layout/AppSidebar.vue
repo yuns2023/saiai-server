@@ -539,8 +539,8 @@ const adminNavItems = computed((): NavItem[] => {
       ? [{ path: '/admin/crypto-deposits', label: t('nav.cryptoDeposits'), icon: CreditCardIcon, hideInSimpleMode: true }]
       : []),
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    // Always listed: with self-onboarding switched off, pending applications must stay reachable to reject.
-    { path: '/admin/hosted-applications', label: t('nav.hostedApplications'), icon: UsersIcon, hideInSimpleMode: true },
+    // Always listed (simple mode too): with self-onboarding switched off, pending applications must stay reachable to reject.
+    { path: '/admin/hosted-applications', label: t('nav.hostedApplications'), icon: UsersIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },

@@ -132,7 +132,8 @@ export async function getById(id: number): Promise<Account> {
  */
 const LOCALIZED_ACCOUNT_REASONS: Record<string, string> = {
   UPSTREAM_ACCOUNT_ALREADY_EXISTS: 'admin.accounts.errors.upstreamAccountAlreadyExists',
-  SELF_ONBOARDED_ACCOUNT_REQUIRES_PROXY: 'admin.accounts.errors.selfOnboardedRequiresProxy'
+  SELF_ONBOARDED_ACCOUNT_REQUIRES_PROXY: 'admin.accounts.errors.selfOnboardedRequiresProxy',
+  SELF_ONBOARDED_ACCOUNT_TYPE_LOCKED: 'admin.accounts.errors.selfOnboardedTypeLocked'
 }
 
 export function localizeAccountWriteError(err: unknown): unknown {

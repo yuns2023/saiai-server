@@ -2253,22 +2253,29 @@ function validateUrlSettings(): boolean {
   return false
 }
 
+/** Each hosted number field: its label and whether the backend would accept its current value on its own. */
+function hostedFieldChecks(): Array<{ key: HostedNumberKey; label: string; ok: boolean }> {
+  const int = (v: unknown, min: number, max: number) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
+  return [
+    {
+      key: 'hosted_self_onboard_exchange_proxy_id',
+      label: t('admin.settings.hostedSelfOnboard.exchangeProxy'),
+      ok: int(form.hosted_self_onboard_exchange_proxy_id, 0, Number.MAX_SAFE_INTEGER)
+    },
+    { key: 'hosted_self_fee_rate', label: t('admin.settings.hostedSelfOnboard.feeRate'), ok: validHostedFeeRate(form.hosted_self_fee_rate) },
+    ...hostedSelfOnboardDefaultFields.value.map((f) => ({ key: f.key, label: f.label, ok: int(form[f.key], f.min, f.max) }))
+  ]
+}
+
+const admissionsExceedDevices = () =>
+  form.hosted_self_onboard_default_admissions_per_cycle > form.hosted_self_onboard_default_device_limit
+
 /** The first hosted field the backend would reject (an i18n message), or '' when all are valid. */
 function hostedSelfOnboardProblem(): string {
-  const proxyId = form.hosted_self_onboard_exchange_proxy_id as unknown
-  if (typeof proxyId !== 'number' || !Number.isInteger(proxyId) || proxyId < 0) {
-    return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: t('admin.settings.hostedSelfOnboard.exchangeProxy') })
-  }
-  if (!validHostedFeeRate(form.hosted_self_fee_rate)) {
-    return t('admin.settings.hostedSelfOnboard.invalidFeeRate', { max: HOSTED_FEE_RATE_MAX })
-  }
-  for (const field of hostedSelfOnboardDefaultFields.value) {
-    const v = form[field.key] as unknown
-    if (typeof v !== 'number' || !Number.isInteger(v) || v < field.min || v > field.max) {
-      return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: field.label })
-    }
-  }
-  if (form.hosted_self_onboard_default_admissions_per_cycle > form.hosted_self_onboard_default_device_limit) {
+  const bad = hostedFieldChecks().find((c) => !c.ok)
+  if (bad?.key === 'hosted_self_fee_rate') return t('admin.settings.hostedSelfOnboard.invalidFeeRate', { max: HOSTED_FEE_RATE_MAX })
+  if (bad) return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: bad.label })
+  if (admissionsExceedDevices()) {
     return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: t('admin.hostedApplications.fields.admissionsPerCycle') })
   }
   return ''
@@ -2278,8 +2285,10 @@ function hostedSelfOnboardProblem(): string {
  * The hosted block is part of the full-object save, and the backend rejects
  * any out-of-range value it receives. While the switch is on, a problem
  * blocks the save with a message. While it is off, the block never blocks
- * saving other settings: invalid values go back to what the server last
- * returned (which it accepts) instead of being sent.
+ * saving other settings: each invalid field (only that field) goes back to
+ * what the server last returned, legal edits are kept; if admissions per
+ * cycle then exceed the device limit, admissions go back first, then the
+ * device limit.
  */
 function validateHostedSelfOnboard(): boolean {
   const problem = hostedSelfOnboardProblem()
@@ -2288,7 +2297,9 @@ function validateHostedSelfOnboard(): boolean {
     appStore.showError(problem)
     return false
   }
-  for (const key of HOSTED_NUMBER_KEYS) form[key] = hostedLastRead[key]
+  for (const c of hostedFieldChecks()) if (!c.ok) form[c.key] = hostedLastRead[c.key]
+  if (admissionsExceedDevices()) form.hosted_self_onboard_default_admissions_per_cycle = hostedLastRead.hosted_self_onboard_default_admissions_per_cycle
+  if (admissionsExceedDevices()) form.hosted_self_onboard_default_device_limit = hostedLastRead.hosted_self_onboard_default_device_limit
   return true
 }
 
