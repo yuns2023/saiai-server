@@ -26,6 +26,8 @@ export const useHostedStore = defineStore('hosted', () => {
   const failed = ref(false)
   const hasAny = computed(() => accounts.value.length > 0)
   const onboard = ref<SelfOnboardConfig | null>(null)
+  /** An owner action (pause / resume / withdraw) in flight, kept across page remounts so two never overlap. */
+  const ownerBusy = ref<number | null>(null)
   /** The /hosted entry: an owner, or anyone while self-onboarding is open. */
   const showEntry = computed(() => hasAny.value || onboard.value?.enabled === true)
 
@@ -157,7 +159,8 @@ export const useHostedStore = defineStore('hosted', () => {
     configFailureAt = null
     onboard.value = null
     ownerOverrides.clear()
+    ownerBusy.value = null
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, showEntry, load, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, showEntry, ownerBusy, load, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })

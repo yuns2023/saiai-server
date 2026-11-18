@@ -3982,6 +3982,8 @@ export default {
     hostedApplications: {
       title: 'Hosting Applications',
       description: 'Claude accounts (setup-token) submitted by users. Approving creates the account in the owner\'s own hosted group; it always goes through a proxy, never direct.',
+      settingsLoadFailed: 'Could not read the system settings: approval is unavailable until a retry succeeds (rejecting still works).',
+      retry: 'Retry',
       switchOff: 'Hosted self-onboarding is switched off: new applications cannot be approved, but can still be rejected.',
       empty: 'No applications match.',
       failedToLoad: 'Failed to load hosting applications',

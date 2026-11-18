@@ -1964,6 +1964,23 @@ const hostedSelfOnboardDefaultFields = computed<Array<{ key: HostedDefaultKey; l
   { key: 'hosted_self_onboard_default_interval_hours', label: t('admin.hostedApplications.fields.intervalHours'), min: 1, max: 720 }
 ])
 
+const HOSTED_NUMBER_KEYS = [
+  'hosted_self_onboard_exchange_proxy_id',
+  'hosted_self_fee_rate',
+  'hosted_self_onboard_default_concurrency',
+  'hosted_self_onboard_default_priority',
+  'hosted_self_onboard_default_device_limit',
+  'hosted_self_onboard_default_admissions_per_cycle',
+  'hosted_self_onboard_default_interval_hours'
+] as const
+type HostedNumberKey = (typeof HOSTED_NUMBER_KEYS)[number]
+/** Hosted numbers as last read from (or saved to) the server. */
+const hostedLastRead = reactive({} as Record<HostedNumberKey, number>)
+function rememberHostedNumbers() {
+  for (const key of HOSTED_NUMBER_KEYS) hostedLastRead[key] = form[key]
+}
+rememberHostedNumbers()
+
 async function loadHostedProxies() {
   try {
     hostedProxies.value = (await adminAPI.proxies.getAll()) ?? []
@@ -2132,6 +2149,7 @@ async function loadSettings() {
       settings.registration_email_suffix_whitelist
     )
     registrationEmailSuffixWhitelistDraft.value = ''
+    rememberHostedNumbers()
     form.smtp_password = ''
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''
@@ -2213,7 +2231,14 @@ function validateUrlSettings(): boolean {
  * values are not checked, so they never block saving unrelated settings.
  */
 function validateHostedSelfOnboard(): boolean {
-  if (!form.hosted_self_onboard_enabled) return true
+  if (!form.hosted_self_onboard_enabled) {
+    // Off: an emptied number field (v-model.number gives '') falls back to the last value read from the server.
+    for (const key of HOSTED_NUMBER_KEYS) {
+      const v = form[key] as unknown
+      if (typeof v !== 'number' || !Number.isFinite(v)) form[key] = hostedLastRead[key]
+    }
+    return true
+  }
   const fee = form.hosted_self_fee_rate as unknown
   if (typeof fee !== 'number' || !Number.isFinite(fee) || fee < 0) {
     appStore.showError(t('admin.settings.hostedSelfOnboard.invalidFeeRate'))
@@ -2352,6 +2377,7 @@ async function saveSettings() {
       updated.registration_email_suffix_whitelist
     )
     registrationEmailSuffixWhitelistDraft.value = ''
+    rememberHostedNumbers()
     form.smtp_password = ''
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''

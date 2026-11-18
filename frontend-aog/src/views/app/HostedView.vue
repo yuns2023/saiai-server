@@ -122,7 +122,6 @@ function requests(n: number | null | undefined): string {
 
 /* ---------- Owner controls: pause / resume / ask for take-down ---------- */
 type OwnerAction = 'pause' | 'resume' | 'withdraw'
-const ownerBusy = ref<number | null>(null)
 const withdrawTarget = ref<OwnedAccount | null>(null)
 
 /** Only servers with self-onboarding report the owner flags (and take the actions). */
@@ -131,8 +130,8 @@ function hasOwnerControls(a: OwnedAccount): boolean {
 }
 
 async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> {
-  if (ownerBusy.value !== null) return
-  ownerBusy.value = a.account_id
+  if (hosted.ownerBusy !== null) return
+  hosted.ownerBusy = a.account_id
   const session = hosted.session()
   try {
     const state = await hostedApi.setOwnerState(a.account_id, action)
@@ -143,7 +142,7 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
     app.notify('error', key === 'generic' ? t('hosted.ownerActionFailed') : t(`onboard.errors.${key}`))
     void loadAccounts()
   } finally {
-    ownerBusy.value = null
+    if (hosted.session() === session) hosted.ownerBusy = null
   }
 }
 
@@ -171,8 +170,10 @@ async function loadApplications(): Promise<void> {
   } catch (e) {
     if (seq !== appsSeq) return
     // A server without self-onboarding has no such list.
-    if ((e as Partial<ApiError> | undefined)?.status === 404) applications.value = []
-    else appsFailed.value = true
+    if ((e as Partial<ApiError> | undefined)?.status === 404) {
+      applications.value = []
+      appsFailed.value = false
+    } else appsFailed.value = true
   }
 }
 
@@ -422,7 +423,7 @@ onUnmounted(() => {
                     v-if="a.owner_paused"
                     type="button"
                     class="btn btn-line btn-sm"
-                    :disabled="ownerBusy !== null"
+                    :disabled="hosted.ownerBusy !== null"
                     data-testid="hosted-resume"
                     @click="ownerAction(a, 'resume')"
                   >
@@ -432,13 +433,13 @@ onUnmounted(() => {
                     v-else
                     type="button"
                     class="btn btn-line btn-sm"
-                    :disabled="ownerBusy !== null"
+                    :disabled="hosted.ownerBusy !== null"
                     data-testid="hosted-pause"
                     @click="ownerAction(a, 'pause')"
                   >
                     {{ t('hosted.pause') }}
                   </button>
-                  <button type="button" class="btn btn-quiet btn-sm" :disabled="ownerBusy !== null" data-testid="hosted-withdraw" @click="withdrawTarget = a">
+                  <button type="button" class="btn btn-quiet btn-sm" :disabled="hosted.ownerBusy !== null" data-testid="hosted-withdraw" @click="withdrawTarget = a">
                     {{ t('hosted.withdraw') }}
                   </button>
                   <span class="text-xs text-ink-3">{{ a.owner_paused ? t('hosted.pausedHint') : t('hosted.pauseHint') }}</span>
@@ -581,7 +582,7 @@ onUnmounted(() => {
       :body="t('hosted.withdrawBody')"
       :confirm-label="t('hosted.withdrawConfirm')"
       danger
-      :busy="ownerBusy !== null"
+      :busy="hosted.ownerBusy !== null"
       @confirm="confirmWithdraw"
       @cancel="withdrawTarget = null"
     />

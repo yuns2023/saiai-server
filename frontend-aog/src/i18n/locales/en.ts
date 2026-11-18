@@ -423,11 +423,11 @@ const en: typeof zh = {
     password: 'Password (optional)',
     authHint: 'Fill in both username and password, or neither.',
     step4: 'Submit for review',
-    submitLead: 'The code is used for this submission only; the page never shows or keeps it.',
+    submitLead: 'The code is used for this submission only and is cleared from the page as soon as you submit; it is never stored.',
     submit: 'Submit for review',
     submitting: 'Submitting…',
     submitted: 'Submitted. Waiting for an administrator to review it.',
-    newLinkNeeded: 'Generate a new link, sign in again and submit; the name and proxy you entered are kept.',
+    newLinkNeeded: 'Generate a new link, sign in again and submit; the name and proxy address are kept, the proxy password needs to be entered again.',
     check: {
       proxyRequired: 'This site requires a proxy.',
       protocolInvalid: 'Choose a protocol.',

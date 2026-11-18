@@ -166,6 +166,8 @@ describe('HostedOnboard', () => {
     await w.get('[data-testid=onboard-name]').setValue('我的号')
     await w.get('[data-testid=onboard-proxy-host]').setValue('proxy.example.com')
     await w.get('[data-testid=onboard-proxy-port]').setValue('1080')
+    await w.get('[data-testid=onboard-proxy-username]').setValue('u')
+    await w.get('[data-testid=onboard-proxy-password]').setValue('secret')
     await w.get('form').trigger('submit')
     await flushPromises()
 
@@ -177,8 +179,10 @@ describe('HostedOnboard', () => {
     expect(w.find('[data-testid=onboard-link]').exists()).toBe(false)
     expect((w.get('[data-testid=onboard-name]').element as HTMLInputElement).value).toBe('我的号')
     expect((w.get('[data-testid=onboard-proxy-host]').element as HTMLInputElement).value).toBe('proxy.example.com')
-    // The proxy password is a secret too: it goes with the used link.
+    // The proxy password is a secret too: it goes with the used link; the username stays.
+    expect((w.get('[data-testid=onboard-proxy-username]').element as HTMLInputElement).value).toBe('u')
     expect((w.get('[data-testid=onboard-proxy-password]').element as HTMLInputElement).value).toBe('')
+    expect(w.get('[data-testid=onboard-error]').text()).toContain('代理密码需要重新填写')
   })
 
   it('regenerating drops the old link and its code, and cannot run while a submission is out', async () => {

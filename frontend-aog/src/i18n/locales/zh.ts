@@ -421,11 +421,11 @@ export default {
     password: '密码（选填）',
     authHint: '用户名和密码要么都填，要么都不填。',
     step4: '提交审核',
-    submitLead: '授权码只用于这一次提交，页面不会显示或保存它。',
+    submitLead: '授权码只用于这一次提交，提交后立即从页面清空，不会保存。',
     submit: '提交审核',
     submitting: '提交中…',
     submitted: '已提交，等待管理员审核。',
-    newLinkNeeded: '请重新生成授权链接、再登录一次后提交；已填的名称和代理会保留。',
+    newLinkNeeded: '请重新生成授权链接、再登录一次后提交；名称和代理地址已保留，代理密码需要重新填写。',
     check: {
       proxyRequired: '本站需要填写代理。',
       protocolInvalid: '请选择协议。',

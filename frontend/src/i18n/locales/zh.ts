@@ -4138,6 +4138,8 @@ export default {
     hostedApplications: {
       title: '托管申请',
       description: '用户自助提交的 Claude 号（setup-token）。批准后会建账号并放进号主的专属托管分组；账号必须走代理，没有直连选项。',
+      settingsLoadFailed: '读取系统设置失败：重试成功前不能批准（仍可驳回）。',
+      retry: '重试',
       switchOff: '「托管自助上号」开关已关闭：不能批准新申请，仍可驳回。',
       empty: '没有符合条件的申请。',
       failedToLoad: '加载托管申请失败',

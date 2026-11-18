@@ -152,6 +152,16 @@ describe('admin settings: hosted self-onboarding', () => {
     expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject(zeros)
   })
 
+  it('switch off: an emptied number goes back to the stored value instead of being sent as text', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored({ hosted_self_onboard_enabled: false }))
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))
+    const w = await mountView()
+    await w.get('[data-testid=hosted-self-fee-rate]').setValue('')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject({ hosted_self_onboard_enabled: false, hosted_self_fee_rate: 0.15 })
+  })
+
   it('has English and Chinese texts', () => {
     expect(zh.admin.settings.hostedSelfOnboard.title).toBe('托管自助上号')
     expect(en.admin.settings.hostedSelfOnboard.title).toBeTruthy()

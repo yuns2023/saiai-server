@@ -194,6 +194,18 @@ describe('Hosting applications (admin)', () => {
     expect((row(w, 1).get('[data-testid=approve]').element as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('settings read failed: approve stays off until a retry succeeds, reject still works', async () => {
+    getSettings.mockRejectedValueOnce({ status: 500, message: 'boom' })
+    const w = await mountView()
+    expect(w.find('[data-testid=context-failed]').exists()).toBe(true)
+    expect((row(w, 1).get('[data-testid=approve]').element as HTMLButtonElement).disabled).toBe(true)
+    expect((row(w, 1).get('[data-testid=reject]').element as HTMLButtonElement).disabled).toBe(false)
+    await w.get('[data-testid=context-failed] button').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid=context-failed]').exists()).toBe(false)
+    expect((row(w, 1).get('[data-testid=approve]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('reloads with the chosen status filter', async () => {
     const w = await mountView()
     await w.get('[data-testid=status-filter]').setValue('')

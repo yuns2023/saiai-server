@@ -62,6 +62,13 @@ describe('hosted store: self-onboarding switch', () => {
     expect(store.accounts[0].withdraw_requested).toBe(true)
   })
 
+  it('sign-out clears an owner action in flight', () => {
+    const store = useHostedStore()
+    store.ownerBusy = 12
+    store.reset()
+    expect(store.ownerBusy).toBeNull()
+  })
+
   it('drops an owner answer that arrives after sign-out', () => {
     const store = useHostedStore()
     const session = store.session()

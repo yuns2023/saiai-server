@@ -16,6 +16,14 @@
         >
           {{ t('admin.hostedApplications.switchOff') }}
         </p>
+        <p
+          v-if="contextFailed"
+          class="mt-3 flex items-center gap-3 rounded-md bg-red-50 p-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300"
+          data-testid="context-failed"
+        >
+          {{ t('admin.hostedApplications.settingsLoadFailed') }}
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadApproveContext">{{ t('admin.hostedApplications.retry') }}</button>
+        </p>
       </template>
 
       <template #table>
@@ -356,6 +364,7 @@ const defaults = reactive({
 })
 /** Settings (defaults, switch) and proxies read by this page; approving waits for them. */
 const contextReady = ref(false)
+const contextFailed = ref(false)
 const approveTarget = ref<AdminHostedApplication | null>(null)
 const approveResult = ref<ApproveHostedApplicationResult | null>(null)
 const approveForm = reactive<ApproveForm>({
@@ -406,7 +415,7 @@ async function confirmApprove() {
   if (!target || busy.value) return
   tried.value = true
   if (problems.value.length) return
-  if (!switchOn.value) {
+  if (!contextReady.value || !switchOn.value) {
     appStore.showError(t('admin.hostedApplications.errors.SELF_ONBOARD_DISABLED'))
     return
   }
@@ -476,10 +485,11 @@ async function loadApproveContext() {
     defaults.carpool_device_limit = pick(s.hosted_self_onboard_default_device_limit, defaults.carpool_device_limit)
     defaults.carpool_admissions_per_cycle = pick(s.hosted_self_onboard_default_admissions_per_cycle, defaults.carpool_admissions_per_cycle)
     defaults.carpool_interval_hours = pick(s.hosted_self_onboard_default_interval_hours, defaults.carpool_interval_hours)
-  } catch {
-    // Built-in defaults stay; the admin can edit every value in the dialog.
-  } finally {
     contextReady.value = true
+    contextFailed.value = false
+  } catch {
+    // Without the site settings the defaults and the switch are unknown: approving waits for a retry.
+    contextFailed.value = true
   }
 }
 
