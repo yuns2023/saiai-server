@@ -122,6 +122,8 @@ disposable test databases; no real provider request is needed.
 ccyou.dev does not use the group-based page above. Its user console has
 我的托管号 (`/hosted`), based on **account ownership** (migration
 `128_account_owner.sql`) instead of group grants and `show_account_quota`.
+Users can also submit their own Claude account there and pause/withdraw it;
+see [HOSTED_SELF_ONBOARD.md](HOSTED_SELF_ONBOARD.md).
 
 - An administrator assigns an upstream account to the user who brought it
   with `PUT /api/v1/admin/accounts/:id/owner`. An account that already
