@@ -2508,14 +2508,19 @@ func (h *OpenAIGatewayHandler) checkOpenAIWSSessionPayload(
 	return fresh, nil
 }
 
-// openAIWSModerationKey applies the group re-read at this turn's admission
-// (same group ID, current moderation switch and scope) to the connect-time key.
+// openAIWSModerationKey applies the input scope re-read at this turn's
+// admission (same group ID) to the connect-time key. The moderation switch
+// stays the connect-time one, matching the usage moderation_ref that AfterTurn
+// captures from the connect-time key, so submissions and usage rows stay
+// correlated; the worker still re-reads the switch before classifying.
 func openAIWSModerationKey(connectKey *service.APIKey, current *service.Group) *service.APIKey {
 	if connectKey == nil || current == nil || connectKey.Group == nil || current.ID != connectKey.Group.ID {
 		return connectKey
 	}
+	group := *connectKey.Group
+	group.InputModerationPolicy = current.InputModerationPolicy
 	key := *connectKey
-	key.Group = current
+	key.Group = &group
 	return &key
 }
 
