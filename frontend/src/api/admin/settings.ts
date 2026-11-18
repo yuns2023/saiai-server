@@ -125,6 +125,17 @@ export interface SystemSettings {
   client_setup_command: string
   // AOG Key page: one-time AITP install codes instead of the full command (default off)
   aitp_install_code_enabled: boolean
+  // Hosted self-onboarding (users submit their own Claude setup-token account; admin approves)
+  hosted_self_onboard_enabled: boolean
+  /** Proxy used to exchange the code when the applicant gives none; 0 = none (then the applicant must give one). */
+  hosted_self_onboard_exchange_proxy_id: number
+  /** Rate multiplier of each owner's auto-created hosted group (service fee × standard price). */
+  hosted_self_fee_rate: number
+  hosted_self_onboard_default_concurrency: number
+  hosted_self_onboard_default_priority: number
+  hosted_self_onboard_default_device_limit: number
+  hosted_self_onboard_default_admissions_per_cycle: number
+  hosted_self_onboard_default_interval_hours: number
 }
 
 export interface UpdateSettingsRequest {
@@ -204,6 +215,14 @@ export interface UpdateSettingsRequest {
   client_brand_name?: string
   client_setup_command?: string
   aitp_install_code_enabled?: boolean
+  hosted_self_onboard_enabled?: boolean
+  hosted_self_onboard_exchange_proxy_id?: number
+  hosted_self_fee_rate?: number
+  hosted_self_onboard_default_concurrency?: number
+  hosted_self_onboard_default_priority?: number
+  hosted_self_onboard_default_device_limit?: number
+  hosted_self_onboard_default_admissions_per_cycle?: number
+  hosted_self_onboard_default_interval_hours?: number
 }
 
 /**

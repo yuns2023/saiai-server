@@ -22,17 +22,19 @@ const nav = computed(() => [
   { to: '/dashboard', icon: 'overview' as const, label: t('nav.overview') },
   { to: '/keys', icon: 'key' as const, label: t('nav.keys') },
   { to: '/usage', icon: 'usage' as const, label: t('nav.usage') },
-  // Only for owners of hosted accounts; unknown (loading or failed) stays hidden.
-  ...(hosted.hasAny ? [{ to: '/hosted', icon: 'hosted' as const, label: t('nav.hosted') }] : []),
+  // Owners of hosted accounts, or everyone while self-onboarding is open; unknown (loading or failed) stays hidden.
+  ...(hosted.showEntry ? [{ to: '/hosted', icon: 'hosted' as const, label: t('nav.hosted') }] : []),
   { to: '/billing', icon: 'billing' as const, label: t('nav.billing') },
   ...(app.settings?.user_invite_enabled ? [{ to: '/invites', icon: 'invite' as const, label: t('nav.invites') }] : []),
   { to: '/account', icon: 'account' as const, label: t('nav.account') },
   { to: '/notices', icon: 'bell' as const, label: t('nav.notices'), count: notices.unread.length }
 ])
 
-/** Re-checks hosted-account ownership when due (TTL / failure backoff in the store); never blocks. */
+/** Re-checks hosted-account ownership and the self-onboarding switch when due (TTL / failure backoff in the store); never blocks. */
 function checkHosted(): void {
-  if (auth.isAuthenticated) hosted.ensureLoaded()
+  if (!auth.isAuthenticated) return
+  hosted.ensureLoaded()
+  hosted.ensureConfig()
 }
 
 function onVisibility(): void {

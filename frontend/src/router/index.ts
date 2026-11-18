@@ -392,6 +392,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/hosted-applications',
+    name: 'AdminHostedApplications',
+    component: () => import('@/views/admin/HostedApplicationsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Hosting Applications',
+      titleKey: 'admin.hostedApplications.title',
+      descriptionKey: 'admin.hostedApplications.description'
+    }
+  },
+  {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/admin/SettingsView.vue'),

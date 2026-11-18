@@ -16,6 +16,8 @@ export interface ApiError {
   code?: string | number
   /** Structured backend reason (e.g. INVITATION_CODE_INVALID), when present. */
   reason?: string
+  /** Extra string details from the envelope (e.g. correlation_id), when present. */
+  metadata?: Record<string, string>
   message: string
   error?: unknown
 }
@@ -27,6 +29,14 @@ export const api: AxiosInstance = axios.create({
 })
 
 let refreshing: Promise<string> | null = null
+
+/** String-valued entries of an envelope `metadata` object; undefined when there are none. */
+function stringMap(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const out: Record<string, string> = {}
+  for (const [k, x] of Object.entries(v)) if (typeof x === 'string') out[k] = x
+  return Object.keys(out).length ? out : undefined
+}
 
 /** Which session sent a request, so a late 401 is never replayed as someone else. */
 type SessionTagged = InternalAxiosRequestConfig & { _retry?: boolean; _sentToken?: string | null; _sentUser?: number | null }
@@ -60,12 +70,18 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 api.interceptors.response.use(
   (response: AxiosResponse) => {
-    const body = response.data as { code?: number; message?: string; data?: unknown } | undefined
+    const body = response.data as { code?: number; message?: string; reason?: unknown; metadata?: unknown; data?: unknown } | undefined
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code === 0) {
         response.data = body.data
       } else {
-        return Promise.reject({ status: response.status, code: body.code, message: body.message || 'Unknown error' } satisfies ApiError)
+        return Promise.reject({
+          status: response.status,
+          code: body.code,
+          reason: typeof body.reason === 'string' ? body.reason : undefined,
+          metadata: stringMap(body.metadata),
+          message: body.message || 'Unknown error'
+        } satisfies ApiError)
       }
     }
     return response
@@ -91,6 +107,7 @@ api.interceptors.response.use(
       status,
       code: data.code,
       reason: typeof data.reason === 'string' ? data.reason : undefined,
+      metadata: stringMap(data.metadata),
       error: data.error,
       message: data.message || data.detail || error.message
     } satisfies ApiError)

@@ -907,6 +907,14 @@ export interface Account {
   // 号主：带来该上游账号的平台用户（null 表示未设置）
   owner_user_id: number | null
   owner_email: string | null
+  /** Hosted self-onboarding: no known upstream identity (imported without an account UUID); the admin keeps it unique. */
+  identity_unknown?: boolean
+  /** When the owner paused it (not schedulable until they resume); null when not paused. */
+  owner_paused_at?: string | null
+  /** When the owner asked for it to be taken down (an admin removes it); null when not asked. */
+  owner_withdraw_requested_at?: string | null
+  /** Submitted by its owner through hosted self-onboarding (always behind a proxy). */
+  self_onboarded?: boolean
 
   // Rate limit & scheduling fields
   schedulable: boolean

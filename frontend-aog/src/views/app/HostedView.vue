@@ -3,15 +3,22 @@
  * 我的托管号: upstream accounts that belong to the signed-in user. Each one
  * shows its limit windows and a short self / other-users summary; picking one
  * lists its calls. Other users' calls carry usage only — never their key name
- * or what they were charged.
+ * or what they were charged. The owner can pause / resume an account or ask
+ * for it to be taken down. While self-onboarding is open, the page also lists
+ * my applications and offers the form to submit my own Claude account.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { hostedApi, type HostedUsageSummary, type HostedWindow, type OwnedAccount, type OwnedUsageItem } from '@/api'
+import { hostedApi, type HostedApplication, type HostedUsageSummary, type HostedWindow, type OwnedAccount, type OwnedUsageItem } from '@/api'
 import type { ApiError } from '@/api/client'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import HostedApplications from '@/components/HostedApplications.vue'
+import HostedOnboard from '@/components/HostedOnboard.vue'
 import { intlLocale } from '@/i18n'
 import { cost, count, dateTime, daysAgo, shortTime, ymd } from '@/lib/format'
 import { localMidnight, MAX_SPAN_DAYS, rangeProblem, utcWindow } from '@/lib/hosted'
+import { onboardErrorKey } from '@/lib/selfOnboard'
+import { useAppStore } from '@/stores/app'
 import { useHostedStore } from '@/stores/hosted'
 
 type Range = 'today' | '7d' | '30d' | 'custom'
@@ -23,6 +30,7 @@ const WARN_AT = 80
 
 const { t, te } = useI18n()
 const hosted = useHostedStore()
+const app = useAppStore()
 
 /* ---------- Accounts ---------- */
 const loading = ref(true)
@@ -37,11 +45,12 @@ const sections = computed(() =>
 )
 const selected = computed(() => hosted.accounts.find((a) => a.account_id === selectedId.value) ?? null)
 
-async function loadAccounts(): Promise<void> {
+/** fresh: the list must be read after this call (e.g. right after an owner action), never reuse one in flight. */
+async function loadAccounts(fresh = false): Promise<void> {
   loading.value = true
   listFailed.value = false
   try {
-    await hosted.load()
+    await (fresh ? hosted.reload() : hosted.load())
   } catch {
     listFailed.value = true
   } finally {
@@ -60,6 +69,15 @@ watch(
 
 function statusLabel(s: string): string {
   return te(`hosted.status_${s}`) ? t(`hosted.status_${s}`) : s
+}
+
+/**
+ * While I paused it or asked for take-down, my own label says it: a plain
+ * "可用" / "已暂停" next to it would be redundant or (before the refresh) wrong.
+ * Other statuses (needs attention, rate limited…) still show.
+ */
+function ownerStateHidesStatus(a: OwnedAccount): boolean {
+  return a.current && (a.owner_paused === true || a.withdraw_requested === true) && (a.status === 'available' || a.status === 'paused')
 }
 
 function statusTag(s: string): string {
@@ -110,6 +128,93 @@ function periods(a: OwnedAccount): Array<{ key: string; label: string; s: Hosted
 
 function requests(n: number | null | undefined): string {
   return n == null ? '—' : t('hosted.requests', { n: count(n, intlLocale()) })
+}
+
+/* ---------- Owner controls: pause / resume / ask for take-down ---------- */
+type OwnerAction = 'pause' | 'resume' | 'withdraw'
+const withdrawTarget = ref<OwnedAccount | null>(null)
+
+/** Only servers with self-onboarding report the owner flags (and take the actions). */
+function hasOwnerControls(a: OwnedAccount): boolean {
+  return a.current && typeof a.owner_paused === 'boolean'
+}
+
+async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> {
+  if (hosted.ownerBusy !== null) return
+  hosted.ownerBusy = a.account_id
+  const session = hosted.session()
+  try {
+    const state = await hostedApi.setOwnerState(a.account_id, action)
+    if (hosted.applyOwnerState(state, session)) {
+      app.notify('ok', t(`hosted.owner_${action}_done`))
+      // Status and badges then come from the server, read after this write.
+      void loadAccounts(true)
+    }
+  } catch (e) {
+    if (hosted.session() !== session) return
+    const key = onboardErrorKey(e)
+    app.notify('error', key === 'generic' ? t('hosted.ownerActionFailed') : t(`onboard.errors.${key}`))
+    void loadAccounts(true)
+  } finally {
+    if (hosted.session() === session) hosted.ownerBusy = null
+  }
+}
+
+async function confirmWithdraw(): Promise<void> {
+  const a = withdrawTarget.value
+  if (a) await ownerAction(a, 'withdraw')
+  withdrawTarget.value = null
+}
+
+/* ---------- Self-onboarding ---------- */
+const onboardEnabled = computed(() => hosted.onboard?.enabled === true)
+const applications = ref<HostedApplication[]>([])
+const appsFailed = ref(false)
+/** Applications loaded at least once and the last read worked; until then the pending count is unknown. */
+const appsLoaded = ref(false)
+/** null = unknown (not loaded yet, or the last read failed): never treated as zero. */
+const pendingCount = computed(() =>
+  appsLoaded.value && !appsFailed.value ? applications.value.filter((a) => a.status === 'pending').length : null
+)
+
+/** Only the latest list answer is used; a local change bumps it too so an older read cannot undo it. */
+let appsSeq = 0
+
+async function loadApplications(): Promise<void> {
+  const seq = ++appsSeq
+  try {
+    const list = await hostedApi.listApplications()
+    if (seq !== appsSeq) return
+    applications.value = list
+    appsFailed.value = false
+    appsLoaded.value = true
+    hosted.hasApplications = list.length > 0
+  } catch (e) {
+    if (seq !== appsSeq) return
+    // A server without self-onboarding has no such list.
+    if ((e as Partial<ApiError> | undefined)?.status === 404) {
+      applications.value = []
+      appsFailed.value = false
+      appsLoaded.value = true
+    } else appsFailed.value = true
+  }
+}
+
+function upsertApplication(a: HostedApplication): void {
+  appsSeq++
+  const rest = applications.value.filter((x) => x.id !== a.id)
+  applications.value = [a, ...rest]
+}
+
+function onSubmitted(a: HostedApplication): void {
+  upsertApplication(a)
+  void loadApplications()
+}
+
+/** `updated` is the server's answer for a cancel; null when it failed (state unknown). */
+function onApplicationChanged(updated: HostedApplication | null): void {
+  if (updated) upsertApplication(updated)
+  void loadApplications()
 }
 
 /* ---------- Usage of the selected account ---------- */
@@ -213,7 +318,11 @@ async function loadUsage(more = false): Promise<void> {
 
 watch([selectedId, from, to], () => loadUsage(), { immediate: true })
 
-onMounted(loadAccounts)
+onMounted(() => {
+  void loadAccounts()
+  hosted.loadConfig().catch(() => undefined)
+  void loadApplications()
+})
 onUnmounted(() => {
   usageGen++
   controller?.abort()
@@ -230,15 +339,15 @@ onUnmounted(() => {
       <div class="skeleton h-24" />
     </div>
     <p v-else-if="listFailed && !hosted.accounts.length" class="mt-6 text-sm text-seal" role="alert" data-testid="hosted-list-error">
-      {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts">{{ t('common.retry') }}</button>
+      {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts()">{{ t('common.retry') }}</button>
     </p>
     <p v-else-if="!hosted.accounts.length" class="mt-6 border-t border-rule-strong py-10 text-center text-sm text-ink-2" data-testid="hosted-empty">
-      {{ t('hosted.empty') }}
+      {{ onboardEnabled ? t('hosted.emptyOnboard') : t('hosted.empty') }}
     </p>
 
     <template v-else>
       <p v-if="listFailed" class="mt-4 text-sm text-seal" role="alert">
-        {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts">{{ t('common.retry') }}</button>
+        {{ t('common.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadAccounts()">{{ t('common.retry') }}</button>
       </p>
 
       <!-- Accounts: current first, then past ones (history only); one choice across both -->
@@ -274,7 +383,9 @@ onUnmounted(() => {
                   <span class="block min-w-0">
                     <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span :id="`hosted-name-${a.account_id}`" class="min-w-0 truncate font-medium">{{ a.display_name }}</span>
-                      <span v-if="a.status" class="tag" :class="statusTag(a.status)" data-testid="hosted-status">{{ statusLabel(a.status) }}</span>
+                      <span v-if="a.status && !ownerStateHidesStatus(a)" class="tag" :class="statusTag(a.status)" data-testid="hosted-status">{{ statusLabel(a.status) }}</span>
+                      <span v-if="a.current && a.owner_paused" class="tag tag-warn" data-testid="hosted-owner-paused">{{ t('hosted.ownerPaused') }}</span>
+                      <span v-if="a.current && a.withdraw_requested" class="tag tag-off" data-testid="hosted-withdraw-requested">{{ t('hosted.withdrawRequested') }}</span>
                     </span>
                     <span v-if="kindLabel(a)" class="mt-0.5 block text-xs text-ink-3">{{ kindLabel(a) }}</span>
                     <span class="mt-3 grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm" data-testid="hosted-stats">
@@ -328,128 +439,175 @@ onUnmounted(() => {
                   </span>
                 </span>
               </label>
+              <div v-if="hasOwnerControls(a)" class="flex flex-wrap items-center gap-x-3 gap-y-2 pb-4 pl-10 pr-3" :data-testid="`hosted-owner-${a.account_id}`">
+                <p v-if="a.withdraw_requested" class="text-xs text-ink-3">{{ t('hosted.withdrawPendingHint') }}</p>
+                <template v-else>
+                  <button
+                    v-if="a.owner_paused"
+                    type="button"
+                    class="btn btn-line btn-sm"
+                    :disabled="hosted.ownerBusy !== null"
+                    data-testid="hosted-resume"
+                    @click="ownerAction(a, 'resume')"
+                  >
+                    {{ t('hosted.resume') }}
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="btn btn-line btn-sm"
+                    :disabled="hosted.ownerBusy !== null"
+                    data-testid="hosted-pause"
+                    @click="ownerAction(a, 'pause')"
+                  >
+                    {{ t('hosted.pause') }}
+                  </button>
+                  <button type="button" class="btn btn-quiet btn-sm" :disabled="hosted.ownerBusy !== null" data-testid="hosted-withdraw" @click="withdrawTarget = a">
+                    {{ t('hosted.withdraw') }}
+                  </button>
+                  <span class="text-xs text-ink-3">{{ a.owner_paused ? t('hosted.pausedHint') : t('hosted.pauseHint') }}</span>
+                </template>
+              </div>
             </li>
           </ul>
         </section>
       </div>
+    </template>
 
-      <!-- Calls on the selected account -->
-      <section v-if="selected" class="mt-12" aria-labelledby="hosted-usage-title" data-testid="hosted-usage">
-        <h2 id="hosted-usage-title" class="text-md font-semibold">{{ t('hosted.usageTitle', { name: selected.display_name }) }}</h2>
-        <p class="mt-1 text-xs text-ink-3">{{ t('hosted.usageLead') }}</p>
+    <p v-if="appsFailed" class="mt-8 text-sm text-seal" role="alert" data-testid="apps-error">
+      {{ t('onboard.apps.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadApplications">{{ t('common.retry') }}</button>
+    </p>
+    <HostedApplications v-if="applications.length" :items="applications" @changed="onApplicationChanged" />
 
-        <div class="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
-          <div role="group" :aria-label="t('usage.range')" class="flex rounded border border-rule p-0.5">
+    <!-- Calls on the selected account -->
+    <section v-if="selected" class="mt-12" aria-labelledby="hosted-usage-title" data-testid="hosted-usage">
+      <h2 id="hosted-usage-title" class="text-md font-semibold">{{ t('hosted.usageTitle', { name: selected.display_name }) }}</h2>
+      <p class="mt-1 text-xs text-ink-3">{{ t('hosted.usageLead') }}</p>
+
+      <div class="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div role="group" :aria-label="t('usage.range')" class="flex rounded border border-rule p-0.5">
+          <button
+            v-for="r in ranges"
+            :key="r.id"
+            type="button"
+            class="h-8 rounded-[3px] px-3 text-sm transition-colors duration-150"
+            :class="range === r.id ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
+            :aria-pressed="range === r.id"
+            :data-testid="`hosted-range-${r.id}`"
+            @click="applyRange(r.id)"
+          >
+            {{ r.label }}
+          </button>
+        </div>
+        <div v-if="range === 'custom'" class="flex items-end gap-2">
+          <label class="block">
+            <span class="label">{{ t('usage.from') }}</span>
+            <input
+              v-model="from"
+              type="date"
+              class="field num mt-1 h-9 w-[10.5rem]"
+              :min="fromMin"
+              :max="to"
+              :aria-invalid="problem ? 'true' : undefined"
+              data-testid="hosted-from"
+            />
+          </label>
+          <label class="block">
+            <span class="label">{{ t('usage.to') }}</span>
+            <input
+              v-model="to"
+              type="date"
+              class="field num mt-1 h-9 w-[10.5rem]"
+              :min="from"
+              :max="toMax"
+              :aria-invalid="problem ? 'true' : undefined"
+              data-testid="hosted-to"
+            />
+          </label>
+        </div>
+      </div>
+      <p v-if="problemText" class="mt-2 text-sm text-seal" role="alert" data-testid="hosted-range-problem">{{ problemText }}</p>
+
+      <div v-if="!problem" class="mt-4">
+        <p v-if="usageError" class="py-6 text-sm text-seal" role="alert" data-testid="hosted-usage-error">
+          {{ errorText(usageError) }}
+          <button v-if="usageError === 'failed'" type="button" class="btn btn-quiet btn-sm" @click="loadUsage()">{{ t('common.retry') }}</button>
+        </p>
+        <p v-else-if="!usageLoading && !rows.length" class="border-b border-rule-soft py-10 text-center text-sm text-ink-2" data-testid="hosted-usage-empty">
+          {{ t('hosted.noUsage') }}
+        </p>
+        <template v-else>
+          <div class="relative overflow-x-auto">
+            <table class="ledger min-w-[52rem]" data-testid="hosted-usage-table">
+              <thead>
+                <tr>
+                  <th class="w-[7.5rem]">{{ t('hosted.time') }}</th>
+                  <th>{{ t('hosted.model') }}</th>
+                  <th class="amount">{{ t('hosted.input') }}</th>
+                  <th class="amount">{{ t('hosted.output') }}</th>
+                  <th class="amount">{{ t('hosted.cacheRead') }}</th>
+                  <th class="amount">{{ t('hosted.cacheWrite') }}</th>
+                  <th class="amount">{{ t('hosted.standard') }}</th>
+                  <th>{{ t('hosted.caller') }}</th>
+                  <th class="amount">{{ t('hosted.charged') }}</th>
+                </tr>
+              </thead>
+              <tbody v-if="usageLoading && !rows.length">
+                <tr v-for="i in 5" :key="i">
+                  <td colspan="9"><div class="skeleton h-4 w-full" /></td>
+                </tr>
+              </tbody>
+              <tbody v-else>
+                <tr v-for="(r, i) in rows" :key="`${i}-${r.created_at}`" data-testid="hosted-usage-row">
+                  <td class="num whitespace-nowrap text-ink-2" :title="dateTime(r.created_at, intlLocale())">{{ shortTime(r.created_at, intlLocale()) }}</td>
+                  <td class="max-w-[9rem] truncate font-mono text-xs leading-5 sm:max-w-[14rem]" :title="r.model">{{ r.model }}</td>
+                  <td class="amount num text-ink-2">{{ count(r.input_tokens, intlLocale()) }}</td>
+                  <td class="amount num text-ink-2">{{ count(r.output_tokens, intlLocale()) }}</td>
+                  <td class="amount num text-ink-2">{{ count(r.cache_read_tokens, intlLocale()) }}</td>
+                  <td class="amount num text-ink-2">{{ count(r.cache_creation_tokens, intlLocale()) }}</td>
+                  <td class="amount num" data-testid="hosted-standard">{{ cost(r.standard_cost) }}</td>
+                  <td class="max-w-[12rem] truncate" data-testid="hosted-caller">
+                    <template v-if="r.is_self">
+                      {{ t('hosted.callerSelf') }}<span v-if="r.api_key_name" class="text-ink-3"> · {{ r.api_key_name }}</span>
+                    </template>
+                    <span v-else class="text-ink-2">{{ t('hosted.callerOthers') }}</span>
+                  </td>
+                  <td class="amount num font-medium" data-testid="hosted-charged">{{ r.is_self ? cost(r.charged) : '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="nextCursor || moreError" class="flex items-center justify-center gap-3 pt-4">
+            <p v-if="moreError" class="text-sm text-seal" role="alert" data-testid="hosted-more-error">{{ errorText(moreError) }}</p>
+            <button v-if="moreError === 'badRequest'" type="button" class="btn btn-line btn-sm" data-testid="hosted-reload" @click="loadUsage()">
+              {{ t('hosted.reload') }}
+            </button>
             <button
-              v-for="r in ranges"
-              :key="r.id"
+              v-else-if="nextCursor"
               type="button"
-              class="h-8 rounded-[3px] px-3 text-sm transition-colors duration-150"
-              :class="range === r.id ? 'bg-blue text-on-blue' : 'text-ink-2 hover:text-ink'"
-              :aria-pressed="range === r.id"
-              :data-testid="`hosted-range-${r.id}`"
-              @click="applyRange(r.id)"
+              class="btn btn-line btn-sm"
+              :disabled="usageLoading"
+              data-testid="hosted-load-more"
+              @click="loadUsage(true)"
             >
-              {{ r.label }}
+              {{ usageLoading ? t('hosted.loadingMore') : moreError ? t('common.retry') : t('hosted.loadMore') }}
             </button>
           </div>
-          <div v-if="range === 'custom'" class="flex items-end gap-2">
-            <label class="block">
-              <span class="label">{{ t('usage.from') }}</span>
-              <input
-                v-model="from"
-                type="date"
-                class="field num mt-1 h-9 w-[10.5rem]"
-                :min="fromMin"
-                :max="to"
-                :aria-invalid="problem ? 'true' : undefined"
-                data-testid="hosted-from"
-              />
-            </label>
-            <label class="block">
-              <span class="label">{{ t('usage.to') }}</span>
-              <input
-                v-model="to"
-                type="date"
-                class="field num mt-1 h-9 w-[10.5rem]"
-                :min="from"
-                :max="toMax"
-                :aria-invalid="problem ? 'true' : undefined"
-                data-testid="hosted-to"
-              />
-            </label>
-          </div>
-        </div>
-        <p v-if="problemText" class="mt-2 text-sm text-seal" role="alert" data-testid="hosted-range-problem">{{ problemText }}</p>
+        </template>
+      </div>
+    </section>
 
-        <div v-if="!problem" class="mt-4">
-          <p v-if="usageError" class="py-6 text-sm text-seal" role="alert" data-testid="hosted-usage-error">
-            {{ errorText(usageError) }}
-            <button v-if="usageError === 'failed'" type="button" class="btn btn-quiet btn-sm" @click="loadUsage()">{{ t('common.retry') }}</button>
-          </p>
-          <p v-else-if="!usageLoading && !rows.length" class="border-b border-rule-soft py-10 text-center text-sm text-ink-2" data-testid="hosted-usage-empty">
-            {{ t('hosted.noUsage') }}
-          </p>
-          <template v-else>
-            <div class="relative overflow-x-auto">
-              <table class="ledger min-w-[52rem]" data-testid="hosted-usage-table">
-                <thead>
-                  <tr>
-                    <th class="w-[7.5rem]">{{ t('hosted.time') }}</th>
-                    <th>{{ t('hosted.model') }}</th>
-                    <th class="amount">{{ t('hosted.input') }}</th>
-                    <th class="amount">{{ t('hosted.output') }}</th>
-                    <th class="amount">{{ t('hosted.cacheRead') }}</th>
-                    <th class="amount">{{ t('hosted.cacheWrite') }}</th>
-                    <th class="amount">{{ t('hosted.standard') }}</th>
-                    <th>{{ t('hosted.caller') }}</th>
-                    <th class="amount">{{ t('hosted.charged') }}</th>
-                  </tr>
-                </thead>
-                <tbody v-if="usageLoading && !rows.length">
-                  <tr v-for="i in 5" :key="i">
-                    <td colspan="9"><div class="skeleton h-4 w-full" /></td>
-                  </tr>
-                </tbody>
-                <tbody v-else>
-                  <tr v-for="(r, i) in rows" :key="`${i}-${r.created_at}`" data-testid="hosted-usage-row">
-                    <td class="num whitespace-nowrap text-ink-2" :title="dateTime(r.created_at, intlLocale())">{{ shortTime(r.created_at, intlLocale()) }}</td>
-                    <td class="max-w-[9rem] truncate font-mono text-xs leading-5 sm:max-w-[14rem]" :title="r.model">{{ r.model }}</td>
-                    <td class="amount num text-ink-2">{{ count(r.input_tokens, intlLocale()) }}</td>
-                    <td class="amount num text-ink-2">{{ count(r.output_tokens, intlLocale()) }}</td>
-                    <td class="amount num text-ink-2">{{ count(r.cache_read_tokens, intlLocale()) }}</td>
-                    <td class="amount num text-ink-2">{{ count(r.cache_creation_tokens, intlLocale()) }}</td>
-                    <td class="amount num" data-testid="hosted-standard">{{ cost(r.standard_cost) }}</td>
-                    <td class="max-w-[12rem] truncate" data-testid="hosted-caller">
-                      <template v-if="r.is_self">
-                        {{ t('hosted.callerSelf') }}<span v-if="r.api_key_name" class="text-ink-3"> · {{ r.api_key_name }}</span>
-                      </template>
-                      <span v-else class="text-ink-2">{{ t('hosted.callerOthers') }}</span>
-                    </td>
-                    <td class="amount num font-medium" data-testid="hosted-charged">{{ r.is_self ? cost(r.charged) : '—' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div v-if="nextCursor || moreError" class="flex items-center justify-center gap-3 pt-4">
-              <p v-if="moreError" class="text-sm text-seal" role="alert" data-testid="hosted-more-error">{{ errorText(moreError) }}</p>
-              <button v-if="moreError === 'badRequest'" type="button" class="btn btn-line btn-sm" data-testid="hosted-reload" @click="loadUsage()">
-                {{ t('hosted.reload') }}
-              </button>
-              <button
-                v-else-if="nextCursor"
-                type="button"
-                class="btn btn-line btn-sm"
-                :disabled="usageLoading"
-                data-testid="hosted-load-more"
-                @click="loadUsage(true)"
-              >
-                {{ usageLoading ? t('hosted.loadingMore') : moreError ? t('common.retry') : t('hosted.loadMore') }}
-              </button>
-            </div>
-          </template>
-        </div>
-      </section>
-    </template>
+    <HostedOnboard v-if="onboardEnabled && hosted.onboard" :config="hosted.onboard" :pending-count="pendingCount" :pending-loading="!appsLoaded && !appsFailed" @submitted="onSubmitted" @pending-limit="loadApplications" />
+
+    <ConfirmDialog
+      :open="!!withdrawTarget"
+      :title="t('hosted.withdrawTitle')"
+      :body="t('hosted.withdrawBody')"
+      :confirm-label="t('hosted.withdrawConfirm')"
+      danger
+      :busy="hosted.ownerBusy !== null"
+      @confirm="confirmWithdraw"
+      @cancel="withdrawTarget = null"
+    />
   </section>
 </template>

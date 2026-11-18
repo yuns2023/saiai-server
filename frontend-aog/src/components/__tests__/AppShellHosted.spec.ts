@@ -5,7 +5,7 @@ import { i18n } from '@/i18n'
 import type { OwnedAccount } from '@/api'
 import type { User } from '@/types'
 
-const hosted = vi.hoisted(() => ({ listOwnedAccounts: vi.fn(), listOwnedAccountUsage: vi.fn() }))
+const hosted = vi.hoisted(() => ({ listOwnedAccounts: vi.fn(), listOwnedAccountUsage: vi.fn(), selfOnboardConfig: vi.fn(), listApplications: vi.fn() }))
 vi.mock('@/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api')>()
   return {
@@ -74,6 +74,8 @@ enableAutoUnmount(afterEach)
 describe('AppShell hosted-account entry', () => {
   beforeEach(() => {
     hosted.listOwnedAccounts.mockReset()
+    hosted.selfOnboardConfig.mockReset().mockRejectedValue({ status: 404 })
+    hosted.listApplications.mockReset().mockResolvedValue([])
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-11-16T04:00:00Z'))
     useRoute().fullPath = '/dashboard'
@@ -88,6 +90,28 @@ describe('AppShell hosted-account entry', () => {
     expect(hosted.listOwnedAccounts).toHaveBeenCalledTimes(1)
     expect(navTargets(w)).not.toContain('/hosted')
     expect(navTargets(w)).toContain('/usage')
+  })
+
+  it('is shown to a user without accounts while self-onboarding is open', async () => {
+    hosted.listOwnedAccounts.mockResolvedValue([])
+    hosted.selfOnboardConfig.mockResolvedValue({ enabled: true, exchange_proxy_configured: true, max_pending: 3 })
+    const w = await mountShell()
+    expect(navTargets(w)).toContain('/hosted')
+  })
+
+  it('stays hidden for a user without accounts while self-onboarding is off', async () => {
+    hosted.listOwnedAccounts.mockResolvedValue([])
+    hosted.selfOnboardConfig.mockResolvedValue({ enabled: false, exchange_proxy_configured: true, max_pending: 3 })
+    const w = await mountShell()
+    expect(navTargets(w)).not.toContain('/hosted')
+  })
+
+  it('switch off: still shown to a user who has an application (to see or cancel it)', async () => {
+    hosted.listOwnedAccounts.mockResolvedValue([])
+    hosted.selfOnboardConfig.mockResolvedValue({ enabled: false, exchange_proxy_configured: true, max_pending: 3 })
+    hosted.listApplications.mockResolvedValue([{ id: 1, status: 'pending' }])
+    const w = await mountShell()
+    expect(navTargets(w)).toContain('/hosted')
   })
 
   it('is shown when there is at least one account, current or past', async () => {

@@ -51,6 +51,8 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const customMenuItems = ref<CustomMenuItem[]>([])
   // Stablecoin top-up is configured only on some deployments (ccyou.dev); hide its admin page elsewhere.
   const cryptoPayConfigured = ref(readCachedBool('crypto_pay_configured_cached', false))
+  // Hosted self-onboarding is opt-in per site; its review page is listed only while the switch is on.
+  const hostedSelfOnboardEnabled = ref(readCachedBool('hosted_self_onboard_enabled_cached', false))
 
   async function fetchCryptoPayConfigured(): Promise<void> {
     try {
@@ -81,6 +83,9 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
       writeCachedString('ops_query_mode_default_cached', opsQueryModeDefault.value)
 
       customMenuItems.value = Array.isArray(settings.custom_menu_items) ? settings.custom_menu_items : []
+
+      hostedSelfOnboardEnabled.value = settings.hosted_self_onboard_enabled === true
+      writeCachedBool('hosted_self_onboard_enabled_cached', hostedSelfOnboardEnabled.value)
 
       loaded.value = true
     } catch (err) {
@@ -143,6 +148,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     opsQueryModeDefault,
     customMenuItems,
     cryptoPayConfigured,
+    hostedSelfOnboardEnabled,
     fetch,
     setOpsMonitoringEnabledLocal,
     setOpsRealtimeMonitoringEnabledLocal,
