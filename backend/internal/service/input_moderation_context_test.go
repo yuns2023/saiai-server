@@ -61,6 +61,10 @@ func TestModerationStableAndJointPlans(t *testing.T) {
 
 type chunkModerationStub struct{ texts []string }
 
+func (c *chunkModerationStub) ClassifyWithPolicy(ctx context.Context, text string, policy *InputModerationPolicy) (*InputModerationClassification, error) {
+	return withPolicyScores(c.Classify(ctx, text))(policy)
+}
+
 func (c *chunkModerationStub) Classify(_ context.Context, text string) (*InputModerationClassification, error) {
 	c.texts = append(c.texts, text)
 	score := 0.1
@@ -196,7 +200,7 @@ func TestModerationOversizedJointChecksNewTextAlone(t *testing.T) {
 
 func TestModerationJointSkippedIsRecordedAsCoverageReason(t *testing.T) {
 	repo := &moderationResultRepoStub{}
-	groups := &inputModerationGroupRepoStub{groups: []*Group{{ID: 3, InputModerationEnabled: true}}}
+	groups := &inputModerationGroupRepoStub{groups: []*Group{fullScopeGroup(&Group{ID: 3, InputModerationEnabled: true})}}
 	svc := newInputModerationServiceForTest(nil, repo, groups, nil, nil)
 	client := &cachedModerationBudgetStub{checks: map[string]bool{}}
 	svc.client = client

@@ -44,9 +44,42 @@ func JevCategoryCatalog() []JevCategory {
 	}
 	return categories
 }
+
+const (
+	// InputModerationScopeUserInput classifies only the newest real user text.
+	InputModerationScopeUserInput = "user_input"
+	// InputModerationScopeFull also classifies transmitted project instructions.
+	InputModerationScopeFull = "full"
+)
+
+// InputModerationIncludesInstructions reports whether the group's policy opts
+// into classifying project instructions. Legacy (nil) policies and an empty
+// scope use the cheaper user-input-only default.
+func InputModerationIncludesInstructions(g *Group) bool {
+	return g != nil && effectiveInputModerationScope(g.InputModerationPolicy) == InputModerationScopeFull
+}
+
+func effectiveInputModerationScope(p *InputModerationPolicy) string {
+	if p != nil && p.InputScope == InputModerationScopeFull {
+		return InputModerationScopeFull
+	}
+	return InputModerationScopeUserInput
+}
+
+// ScopedModerationInstructions drops instructions unless the group opts in.
+func ScopedModerationInstructions(g *Group, instructions []string) []string {
+	if !InputModerationIncludesInstructions(g) {
+		return nil
+	}
+	return instructions
+}
+
 func ValidateInputModerationPolicy(p *InputModerationPolicy) error {
 	if p == nil {
 		return nil
+	}
+	if p.InputScope != "" && p.InputScope != InputModerationScopeUserInput && p.InputScope != InputModerationScopeFull {
+		return fmt.Errorf("unsupported moderation input scope")
 	}
 	if p.RulesVersion != JevLegacyRulesVersion && p.RulesVersion != JevExpandedRulesVersion {
 		return fmt.Errorf("unsupported moderation rules version")
@@ -117,7 +150,9 @@ func JevRulesForPolicy(p *InputModerationPolicy) (map[string]string, error) {
 	return rules, nil
 }
 func sameModerationDetection(a, b *InputModerationPolicy) bool {
-	if a.RulesVersion != b.RulesVersion {
+	// A scope change during inference means the scores may cover text the
+	// current policy no longer audits (or vice versa).
+	if a.RulesVersion != b.RulesVersion || effectiveInputModerationScope(a) != effectiveInputModerationScope(b) {
 		return false
 	}
 	x := append([]string{}, a.AuditCategories...)
@@ -168,6 +203,7 @@ func moderationDecisionSnapshot(g *Group) *ModerationDecisionSnapshot {
 			p.Thresholds[id] = g.InputModerationMinConfidence
 		}
 	}
+	p.InputScope = effectiveInputModerationScope(p)
 	return &ModerationDecisionSnapshot{CooldownMinutes: g.InputModerationCooldownMinutes, DisableAfterHits: g.InputModerationDisableAfterHits, StrikeWindowHours: g.InputModerationStrikeWindowHours, DedupeMinutes: g.InputModerationDedupeMinutes, Policy: p, AutoEnforce: g.InputModerationAutoDisableUser, ActionMode: g.InputModerationActionMode, GroupUpdatedAt: g.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z")}
 }
 

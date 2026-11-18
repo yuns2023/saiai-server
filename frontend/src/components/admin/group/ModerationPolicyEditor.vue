@@ -9,6 +9,13 @@
         </select>
       </label>
       <p class="input-hint">{{ t('admin.groups.inputModeration.policy.hint') }}</p>
+      <label class="input-label">{{ t('admin.groups.inputModeration.policy.scope') }}
+        <select :value="scope" class="input mt-1" data-testid="moderation-scope" @change="changeScope(($event.target as HTMLSelectElement).value)">
+          <option value="user_input">{{ t('admin.groups.inputModeration.policy.scopeUserInput') }}</option>
+          <option value="full">{{ t('admin.groups.inputModeration.policy.scopeFull') }}</option>
+        </select>
+      </label>
+      <p class="input-hint">{{ t('admin.groups.inputModeration.policy.scopeHint') }}</p>
       <p v-if="unsupportedLegacy.length" class="text-sm text-amber-700">{{ t('admin.groups.inputModeration.policy.unsupported') }} {{ unsupportedLegacy.join(', ') }}</p>
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
@@ -39,6 +46,7 @@ const { t, locale } = useI18n()
 const catalog = ref<Awaited<ReturnType<typeof getJevCategories>>>()
 const loadFailed = ref(false)
 const version = computed(() => props.modelValue?.rules_version ?? catalog.value?.legacy_version)
+const scope = computed(() => props.modelValue?.input_scope === 'full' ? 'full' : 'user_input')
 const visibleCategories = computed(() => catalog.value?.categories.filter(c => version.value === catalog.value?.expanded_version || c.legacy) ?? [])
 const unsupportedLegacy = computed(() => props.modelValue ? [] : props.legacyCategories.filter(id => !catalog.value?.categories.some(c => c.legacy && c.id.toLowerCase() === id.toLowerCase())))
 function audited(id: string) { return props.modelValue ? (props.modelValue.audit_categories ?? []).includes(id) : !!catalog.value?.categories.find(c => c.id === id)?.legacy }
@@ -55,6 +63,11 @@ function changeVersion(value: string) {
   p.audit_categories = catalog.value.categories.filter(c => p.rules_version === catalog.value?.expanded_version || c.legacy).map(c => c.id)
   p.enforcement_categories = p.enforcement_categories.filter(id => p.audit_categories.includes(id))
   p.thresholds = Object.fromEntries(Object.entries(p.thresholds).filter(([id]) => p.audit_categories.includes(id)))
+  emit('update:modelValue', p)
+}
+function changeScope(value: string) {
+  const p = current()
+  p.input_scope = value === 'full' ? 'full' : 'user_input'
   emit('update:modelValue', p)
 }
 function toggleAudit(id: string) {

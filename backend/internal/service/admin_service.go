@@ -1602,7 +1602,13 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		if err := ValidateInputModerationPolicy(input.InputModerationPolicy); err != nil {
 			return nil, infraerrors.BadRequest("INVALID_MODERATION_POLICY", err.Error())
 		}
-		group.InputModerationPolicy = input.InputModerationPolicy
+		policy := *input.InputModerationPolicy
+		// Clients that predate input_scope omit it: keep the stored scope.
+		// Restoring the default requires an explicit "user_input".
+		if policy.InputScope == "" && group.InputModerationPolicy != nil {
+			policy.InputScope = group.InputModerationPolicy.InputScope
+		}
+		group.InputModerationPolicy = &policy
 	}
 	if input.InputModerationMinConfidence != nil {
 		group.InputModerationMinConfidence = normalizePositiveInt(*input.InputModerationMinConfidence, 90, 1, 100)

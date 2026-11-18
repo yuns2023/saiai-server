@@ -6,4 +6,7 @@ type InputModerationPolicy struct {
 	AuditCategories       []string       `json:"audit_categories"`
 	EnforcementCategories []string       `json:"enforcement_categories"`
 	Thresholds            map[string]int `json:"thresholds"`
+	// InputScope selects what is submitted to the detector: "user_input"
+	// (default when empty) or "full" (also transmitted project instructions).
+	InputScope string `json:"input_scope,omitempty"`
 }

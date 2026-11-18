@@ -2096,6 +2096,7 @@ export interface InputModerationPolicy {
  audit_categories: string[]
  enforcement_categories: string[]
  thresholds: Record<string, number>
+ input_scope?: 'user_input' | 'full'
 }
 export interface ModerationDiagnostics {
   input_chars: number

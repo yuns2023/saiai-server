@@ -484,7 +484,7 @@ func (h *GatewayHandler) submitInputModeration(c *gin.Context, apiKey *service.A
 		APIKeyID:     apiKey.ID,
 		GroupID:      *apiKey.GroupID,
 		Text:         text,
-		Instructions: instructions,
+		Instructions: service.ScopedModerationInstructions(apiKey.Group, instructions),
 	})
 }
 
