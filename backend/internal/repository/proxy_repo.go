@@ -82,7 +82,55 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 }
 
 func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) error {
-	builder := r.client.Proxy.UpdateOneID(proxyIn.ID).
+	return updateProxyWithClient(ctx, r.client, proxyIn)
+}
+
+// UpdateAndQueueAccountRefresh saves the proxy and queues an account_changed
+// scheduler event for every live account using it, in one transaction: either
+// all accounts are told about the change or the update fails. It returns the
+// account ids so the caller can refresh their cached copies after commit.
+func (r *proxyRepository) UpdateAndQueueAccountRefresh(ctx context.Context, proxyIn *service.Proxy) ([]int64, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txc := tx.Client()
+	if err := updateProxyWithClient(ctx, txc, proxyIn); err != nil {
+		return nil, err
+	}
+	rows, err := txc.QueryContext(ctx, "SELECT id FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL ORDER BY id", proxyIn.ID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range ids {
+		if err := enqueueSchedulerOutbox(ctx, txc, service.SchedulerOutboxEventAccountChanged, &ids[i], nil, nil); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func updateProxyWithClient(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) error {
+	builder := client.Proxy.UpdateOneID(proxyIn.ID).
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).

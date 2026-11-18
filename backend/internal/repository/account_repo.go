@@ -823,37 +823,10 @@ func (r *accountRepository) syncSchedulerAccountSnapshot(ctx context.Context, ac
 	}
 }
 
-// RefreshAccountsUsingProxy queues a scheduler change for every live account
-// using the proxy and re-syncs their single-account cache keys, so a proxy
-// status/address change reaches cached copies (selection, sticky sessions,
-// Forward) without waiting for a full rebuild.
-func (r *accountRepository) RefreshAccountsUsingProxy(ctx context.Context, proxyID int64) error {
-	rows, err := r.sql.QueryContext(ctx, "SELECT id FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL ORDER BY id", proxyID)
-	if err != nil {
-		return err
-	}
-	ids := make([]int64, 0)
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for i := range ids {
-		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &ids[i], nil, nil); err != nil {
-			return err
-		}
-	}
-	r.syncSchedulerAccountSnapshots(ctx, ids)
-	return nil
+// SyncSchedulerAccountSnapshots re-reads the accounts from the database and
+// rewrites their single-account scheduler cache keys (best effort).
+func (r *accountRepository) SyncSchedulerAccountSnapshots(ctx context.Context, accountIDs []int64) {
+	r.syncSchedulerAccountSnapshots(ctx, accountIDs)
 }
 
 func (r *accountRepository) syncSchedulerAccountSnapshots(ctx context.Context, accountIDs []int64) {

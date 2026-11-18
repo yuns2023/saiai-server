@@ -652,13 +652,17 @@ func ensureHostedOwnerGroup(ctx context.Context, txc *dbent.Client, userID int64
 		return 0, err
 	}
 	if mapped.Valid {
+		// FOR UPDATE (not NO KEY): it conflicts with the KEY SHARE lock that the
+		// foreign-key check of a concurrent account_groups / user_allowed_groups
+		// insert takes on this group, so an uncommitted grant to another user
+		// is waited for and then seen by the "shared" check below.
 		var (
 			platform, status, subscriptionType string
 			hostedUsage, exclusive, deleted    bool
 		)
 		err := scanSingleRow(ctx, txc, `
 			SELECT platform, status, subscription_type, hosted_usage_enabled, is_exclusive, deleted_at IS NOT NULL
-			FROM groups WHERE id = $1 FOR NO KEY UPDATE`,
+			FROM groups WHERE id = $1 FOR UPDATE`,
 			[]any{mapped.Int64}, &platform, &status, &subscriptionType, &hostedUsage, &exclusive, &deleted)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return 0, err

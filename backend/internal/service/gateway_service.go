@@ -3096,6 +3096,26 @@ func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, gr
 }
 
 func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+	accounts, useMixed, err := s.listSchedulableAccountsUnfiltered(ctx, groupID, platform, hasForcePlatform)
+	// Simple mode has no group isolation: self-onboarded accounts are never
+	// candidates there, whatever the source (snapshot, stale bucket, DB).
+	if s.isRunModeSimple() {
+		accounts = withoutSelfOnboarded(accounts)
+	}
+	return accounts, useMixed, err
+}
+
+func (s *GatewayService) isRunModeSimple() bool {
+	return s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
+}
+
+// excludedInSimpleMode: a self-onboarded account is never selectable in
+// simple mode (no exclusive-group isolation), including by sticky account ID.
+func (s *GatewayService) excludedInSimpleMode(account *Account) bool {
+	return account != nil && account.SelfOnboarded && s.isRunModeSimple()
+}
+
+func (s *GatewayService) listSchedulableAccountsUnfiltered(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
 	if platform == PlatformSora {
 		return s.listSoraSchedulableAccounts(ctx, groupID)
 	}
@@ -3289,7 +3309,7 @@ func (s *GatewayService) soraUnschedulableReason(account *Account) string {
 }
 
 func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, account *Account) bool {
-	if !accountAllowsUser(ctx, account) {
+	if !accountAllowsUser(ctx, account) || s.excludedInSimpleMode(account) {
 		return false
 	}
 	if account.Platform == PlatformSora {
@@ -3299,7 +3319,7 @@ func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, a
 }
 
 func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Context, account *Account, requestedModel string) bool {
-	if !accountAllowsUser(ctx, account) {
+	if !accountAllowsUser(ctx, account) || s.excludedInSimpleMode(account) {
 		return false
 	}
 	if account.Platform == PlatformSora {
@@ -3314,7 +3334,7 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 // isAccountInGroup checks if the account belongs to the specified group.
 // When groupID is nil, returns true only for ungrouped accounts (no group assignments).
 func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool {
-	if account == nil {
+	if account == nil || s.excludedInSimpleMode(account) {
 		return false
 	}
 	if groupID == nil {

@@ -8,7 +8,6 @@ import (
 	"maps"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -2700,7 +2699,7 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
-	previous, previousAddr := proxy.Status, proxyAddressKey(proxy)
+	previous, previousAddr := proxy.Status, proxyAddressOf(proxy)
 
 	if input.Name != "" {
 		proxy.Name = input.Name
@@ -2723,30 +2722,37 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if input.Status != "" {
 		proxy.Status = input.Status
 	}
-	before := *proxy
-
+	// Accounts keep a copy of their proxy in the scheduler cache (snapshot
+	// and single-account keys). A changed status, address or credentials must
+	// reach them now: otherwise a disabled proxy keeps a self-onboarded account
+	// selectable, and a moved proxy keeps being dialed at its old address.
+	// The proxy update and the per-account outbox events commit together.
+	relevant := previous != proxy.Status || previousAddr != proxyAddressOf(proxy)
+	if refresher, ok := s.proxyRepo.(proxyUpdateRefresher); ok && relevant {
+		ids, err := refresher.UpdateAndQueueAccountRefresh(ctx, proxy)
+		if err != nil {
+			return nil, err
+		}
+		if syncer, ok := s.accountRepo.(accountSnapshotSyncer); ok && len(ids) > 0 {
+			syncer.SyncSchedulerAccountSnapshots(ctx, ids)
+		}
+		return proxy, nil
+	}
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
 		return nil, err
-	}
-	// Accounts keep a copy of their proxy in the scheduler cache (snapshot
-	// and single-account keys). A changed address, credentials or status
-	// must reach them now, not at the next full rebuild: otherwise a
-	// disabled proxy keeps a self-onboarded account selectable, and a moved
-	// proxy keeps being dialed at its old address.
-	if previous != before.Status || previousAddr != proxyAddressKey(&before) {
-		if refresher, ok := s.accountRepo.(proxyAccountsRefresher); ok {
-			if err := refresher.RefreshAccountsUsingProxy(ctx, id); err != nil {
-				logger.LegacyPrintf("service.admin", "[Proxy] refresh accounts using proxy %d failed: %v", id, err)
-			}
-		}
 	}
 	return proxy, nil
 }
 
-// proxyAccountsRefresher re-syncs the scheduler state of every account that
-// uses a proxy (outbox events + single-account cache keys).
-type proxyAccountsRefresher interface {
-	RefreshAccountsUsingProxy(ctx context.Context, proxyID int64) error
+// proxyUpdateRefresher saves a proxy and queues scheduler events for every
+// account using it in one transaction, returning those account ids.
+type proxyUpdateRefresher interface {
+	UpdateAndQueueAccountRefresh(ctx context.Context, proxy *Proxy) ([]int64, error)
+}
+
+// accountSnapshotSyncer rewrites single-account scheduler cache keys.
+type accountSnapshotSyncer interface {
+	SyncSchedulerAccountSnapshots(ctx context.Context, accountIDs []int64)
 }
 
 // proxyDeleter deletes a proxy only if no live account references it, in
@@ -2755,8 +2761,14 @@ type proxyDeleter interface {
 	DeleteIfUnused(ctx context.Context, id int64) error
 }
 
-func proxyAddressKey(p *Proxy) string {
-	return p.Protocol + "|" + p.Host + "|" + strconv.Itoa(p.Port) + "|" + p.Username + "|" + p.Password
+// proxyAddress is what an account dials: compared field by field.
+type proxyAddress struct {
+	Protocol, Host, Username, Password string
+	Port                               int
+}
+
+func proxyAddressOf(p *Proxy) proxyAddress {
+	return proxyAddress{Protocol: p.Protocol, Host: p.Host, Username: p.Username, Password: p.Password, Port: p.Port}
 }
 
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {

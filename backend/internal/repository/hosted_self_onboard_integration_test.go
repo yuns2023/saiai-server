@@ -804,9 +804,10 @@ func (f *hostedFixture) submitAs(t *testing.T, userID int64) int64 {
 	return id
 }
 
-// A proxy status / address change reaches the cached single-account keys
-// (selection, sticky sessions, Forward) and queues outbox events.
-func TestRefreshAccountsUsingProxyUpdatesCachedAccounts(t *testing.T) {
+// A proxy status / address change commits together with outbox events for
+// every account using it, and the cached single-account keys (selection,
+// sticky sessions, Forward) see it after the sync.
+func TestProxyUpdateRefreshesCachedAccounts(t *testing.T) {
 	ctx := context.Background()
 	f := newHostedFixture(t)
 	owner := f.user(t)
@@ -830,8 +831,10 @@ func TestRefreshAccountsUsingProxyUpdatesCachedAccounts(t *testing.T) {
 	p, err := proxies.GetByID(ctx, proxy.ID)
 	require.NoError(t, err)
 	p.Status = "disabled"
-	require.NoError(t, proxies.Update(ctx, p))
-	require.NoError(t, repo.RefreshAccountsUsingProxy(ctx, proxy.ID))
+	ids, err := proxies.UpdateAndQueueAccountRefresh(ctx, p)
+	require.NoError(t, err)
+	require.Equal(t, []int64{acc.ID}, ids)
+	repo.SyncSchedulerAccountSnapshots(ctx, ids)
 	cached, err = cache.GetAccount(ctx, acc.ID)
 	require.NoError(t, err)
 	require.False(t, cached.IsSchedulable(), "disabled proxy seen through the cached key")
@@ -840,8 +843,9 @@ func TestRefreshAccountsUsingProxyUpdatesCachedAccounts(t *testing.T) {
 	require.Greater(t, hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", acc.ID), before)
 
 	p.Status, p.Host, p.Port = service.StatusActive, "198.51.100.77", 3129
-	require.NoError(t, proxies.Update(ctx, p))
-	require.NoError(t, repo.RefreshAccountsUsingProxy(ctx, proxy.ID))
+	ids, err = proxies.UpdateAndQueueAccountRefresh(ctx, p)
+	require.NoError(t, err)
+	repo.SyncSchedulerAccountSnapshots(ctx, ids)
 	cached, err = cache.GetAccount(ctx, acc.ID)
 	require.NoError(t, err)
 	require.True(t, cached.IsSchedulable())
@@ -922,4 +926,45 @@ func TestUngroupedPoolExcludesSelfOnboarded(t *testing.T) {
 	many, err := repo.ListSchedulableUngroupedByPlatforms(ctx, []string{service.PlatformAnthropic})
 	require.NoError(t, err)
 	require.Equal(t, map[int64]bool{plain.ID: true}, ids(many))
+}
+
+// A grant of the owner group to another user that is still uncommitted when
+// the approval starts is waited for (group row FOR UPDATE vs the FK KEY SHARE)
+// and then seen: the approval refuses instead of binding into a shared group.
+func TestHostedApproveWaitsForUncommittedGroupGrant(t *testing.T) {
+	ctx := context.Background()
+	f := newHostedFixture(t)
+	owner := f.user(t)
+	stranger := f.user(t)
+	proxy := f.proxy(t, service.StatusActive)
+	first := f.submit(t, owner.ID, uuid.NewString(), nil)
+	res, err := f.repo.Approve(ctx, service.HostedApproveParams{ApplicationID: first.ID, AdminUserID: 1, ExistingProxyID: proxy.ID, Build: hostedTestSpec})
+	require.NoError(t, err)
+	second := f.submit(t, owner.ID, uuid.NewString(), nil)
+
+	grant, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = grant.Rollback() }()
+	_, err = grant.ExecContext(ctx, "INSERT INTO user_allowed_groups (user_id, group_id) VALUES ($1, $2)", stranger.ID, res.GroupID)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.repo.Approve(ctx, service.HostedApproveParams{ApplicationID: second.ID, AdminUserID: 1, ExistingProxyID: proxy.ID, Build: hostedTestSpec})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("approval did not wait for the uncommitted grant: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	require.NoError(t, grant.Commit())
+	select {
+	case err := <-done:
+		requireReason(t, err, "SELF_ONBOARD_INVALID_STATE")
+		require.Equal(t, "owner_group_shared", infraerrors.FromError(err).Metadata["detail"])
+	case <-time.After(10 * time.Second):
+		t.Fatal("approval still blocked after the grant committed")
+	}
+	require.Equal(t, 1, hostedCountRows(t, "SELECT COUNT(*) FROM accounts WHERE owner_user_id=$1", owner.ID))
 }

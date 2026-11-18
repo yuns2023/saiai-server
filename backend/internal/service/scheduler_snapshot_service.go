@@ -106,7 +106,12 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
 		} else if hit {
-			return derefAccounts(cached), useMixed, nil
+			accounts := derefAccounts(cached)
+			if s.isRunModeSimple() {
+				// A stale global bucket may still hold self-onboarded accounts.
+				accounts = withoutSelfOnboarded(accounts)
+			}
+			return accounts, useMixed, nil
 		}
 	}
 
