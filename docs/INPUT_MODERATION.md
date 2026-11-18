@@ -17,11 +17,15 @@ Messages a user types while a tool runs are user input. Claude Code delivers
 them inside the running turn (measured on 2.1.322/2.1.326: a role `system`
 message after the `tool_result`, framed as "The user sent a new message while
 you were working: …"). When the last message carries tool results, the user's
-words are taken from such framed messages in the current turn (after the last
-assistant message) — the client's framing, explanation and other appended
-reminders are dropped — together with plain text placed next to a
-`tool_result` outside `<system-reminder>` envelopes. Other system message text
-and earlier turns are not treated as user input.
+words are taken from text blocks in the current turn (after the last assistant
+message) that open with that framing, optionally inside a `<system-reminder>`
+wrapper; text that merely quotes the sentence (files, reminders, tool output)
+is not user input. The words end at the client's last explanation paragraph
+(or the wrapper's closing tag); appended reminders are dropped. Plain text
+blocks in the same user message as a `tool_result` count as user text unless
+the whole block is a `<system-reminder>` or a client interruption notice. Other
+system message text and earlier turns are not user input. In `full` scope the
+framed words are classified once, as user text, not again as instructions.
 
 The scope is applied when a request is queued and again when the worker
 processes the job with the current group policy, so jobs queued before a switch

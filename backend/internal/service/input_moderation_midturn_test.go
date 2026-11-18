@@ -3,7 +3,9 @@
 package service
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -35,8 +37,59 @@ func TestExtractMidTurnUserTextFromCapturedClaudeCodeShape(t *testing.T) {
 	require.False(t, IsRealUserMessage(parsed), "message queue semantics are unchanged")
 	require.Equal(t, "MIDTURN_MARKER please also tell me a joke", ExtractLatestRealUserText(parsed))
 
-	text, _ := ExtractAnthropicModerationInput(parsed)
+	text, instructions := ExtractAnthropicModerationInput(parsed)
 	require.Equal(t, "MIDTURN_MARKER please also tell me a joke", text)
+	// Full scope: the words are classified once as user text, while the
+	// reminder appended after the explanation remains an instruction.
+	joined := strings.Join(instructions, "\n")
+	require.NotContains(t, joined, "MIDTURN_MARKER")
+	require.Contains(t, joined, "deferred tools are now available")
+}
+
+// The next request of the same turn carries the model's new tool call after
+// the mid-turn message, so the words are not submitted again.
+func TestExtractMidTurnUserTextNotRepeatedOnNextToolCall(t *testing.T) {
+	parsed := capturedMidTurnRequest("joke please")
+	parsed.Messages = append(parsed.Messages,
+		map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "toolu_2", "name": "Bash"}}},
+		map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "toolu_2", "content": "ok"}}},
+	)
+	require.Equal(t, "", ExtractLatestRealUserText(parsed))
+}
+
+func TestParseMidTurnFrameAdversarial(t *testing.T) {
+	cases := []struct {
+		name, text, words, rest string
+		ok                      bool
+	}{
+		{"quoted inside a reminder is not a frame", "<system-reminder>\nfile x changed:\n" + midTurnMessage("from a file") + "\n</system-reminder>", "", "", false},
+		{"quoted mid-block is not a frame", "Note: " + midTurnMessage("x"), "", "", false},
+		{"literal closing tag in unwrapped words", midTurnMessage("what does </system-reminder> mean?"), "what does </system-reminder> mean?", "", true},
+		{"words quoting the explanation sentence", midTurnMessage("why do you say " + claudeCodeMidTurnSuffix + "?"), "why do you say " + claudeCodeMidTurnSuffix + "?", "", true},
+		{"wrapped frame with appended reminder", "<system-reminder>\n" + midTurnMessage("w") + "\n\nmore\n</system-reminder>\ntail", "w", "more\n\ntail", true},
+		{"wrapped without explanation ends at the wrapper", "<system-reminder>\n" + claudeCodeMidTurnPrefix + "\nshort </system-reminder> q\n</system-reminder>", "short </system-reminder> q", "", true},
+		{"no explanation, unwrapped: whole block", claudeCodeMidTurnPrefix + "\nonly words", "only words", "", true},
+		{"CRLF", strings.ReplaceAll(midTurnMessage("crlf words")+"\n\nnext", "\n", "\r\n"), "crlf words", "next", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			words, rest, ok := parseMidTurnFrame(tc.text)
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.words, words)
+			if tc.rest != "" || !tc.ok {
+				require.Equal(t, tc.rest, rest)
+			}
+		})
+	}
+}
+
+func TestParseMidTurnFrameLinearOnLongInput(t *testing.T) {
+	noise := strings.Repeat(claudeCodeMidTurnSuffix+" x ", 20000)
+	start := time.Now()
+	words, _, ok := parseMidTurnFrame(claudeCodeMidTurnPrefix + "\n" + noise)
+	require.True(t, ok)
+	require.Equal(t, strings.TrimSpace(noise), words)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 func TestExtractMidTurnUserTextVariants(t *testing.T) {
@@ -55,6 +108,16 @@ func TestExtractMidTurnUserTextVariants(t *testing.T) {
 		{"framing without explanation ends at the reminder", []any{toolUse, map[string]any{"role": "user", "content": []any{toolResult,
 			map[string]any{"type": "text", "text": "<system-reminder>\nThe user sent a new message while you were working:\nshort\n</system-reminder>"},
 		}}}, "short"},
+		{"client interruption notice is not user input", []any{toolUse, map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "t", "content": "x", "is_error": true},
+			map[string]any{"type": "text", "text": "[Request interrupted by user for tool use]"},
+		}}}, ""},
+		{"plain text in a user message without tool_result is ignored", []any{toolUse,
+			map[string]any{"role": "user", "content": []any{toolResult}},
+			map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "stray"}}},
+			map[string]any{"role": "system", "content": "notice"},
+		}, ""},
+		{"no assistant message", []any{map[string]any{"role": "system", "content": midTurnMessage("x")}, map[string]any{"role": "user", "content": []any{toolResult}}}, ""},
 		{"plain text next to tool_result (API clients)", []any{toolUse, map[string]any{"role": "user", "content": []any{toolResult,
 			map[string]any{"type": "text", "text": "also check the logs"},
 		}}}, "also check the logs"},
