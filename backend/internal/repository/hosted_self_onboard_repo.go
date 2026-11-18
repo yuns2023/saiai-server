@@ -141,10 +141,12 @@ func (r *hostedApplicationRepository) CreatePending(ctx context.Context, in *ser
 	defer func() { _ = tx.Rollback() }()
 
 	// The user row lock serializes this user's submissions, so the pending
-	// count below cannot be raced past the limit.
+	// count below cannot be raced past the limit. FOR NO KEY UPDATE (not FOR
+	// UPDATE): it does not conflict with the KEY SHARE locks that foreign-key
+	// checks of concurrent inserts (accounts, api keys, ...) take on users.
 	var status string
 	if err := scanSingleRow(ctx, tx,
-		"SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+		"SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE",
 		[]any{in.UserID}, &status); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, service.ErrSelfOnboardInvalidState
@@ -155,7 +157,9 @@ func (r *hostedApplicationRepository) CreatePending(ctx context.Context, in *ser
 		return nil, service.ErrSelfOnboardInvalidState
 	}
 	var enabled string
-	if err := scanSingleRow(ctx, tx, "SELECT value FROM settings WHERE key = $1",
+	// Share lock, like the approval: a concurrent "switch off" save waits
+	// for this insert instead of racing it.
+	if err := scanSingleRow(ctx, tx, "SELECT value FROM settings WHERE key = $1 FOR SHARE",
 		[]any{service.SettingKeyHostedSelfOnboardEnabled}, &enabled); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -234,12 +238,8 @@ func (r *hostedApplicationRepository) ListAdmin(ctx context.Context, status stri
 	if pageSize < 1 {
 		pageSize = 20
 	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	if page > 100000 {
-		page = 100000 // keeps the offset far from overflow
-	}
+	pageSize = min(pageSize, service.HostedApplicationListMaxPageSize)
+	page = min(page, service.HostedApplicationListMaxPage) // keeps the offset far from overflow
 	where := ""
 	args := []any{}
 	if status != "" {
@@ -433,7 +433,7 @@ func (r *hostedApplicationRepository) Approve(ctx context.Context, p service.Hos
 
 	var userStatus string
 	if err := scanSingleRow(ctx, txc,
-		"SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+		"SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE",
 		[]any{app.UserID}, &userStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, service.ErrSelfOnboardInvalidState.WithMetadata(map[string]string{"detail": "applicant_unavailable"})
@@ -658,7 +658,7 @@ func ensureHostedOwnerGroup(ctx context.Context, txc *dbent.Client, userID int64
 		)
 		err := scanSingleRow(ctx, txc, `
 			SELECT platform, status, subscription_type, hosted_usage_enabled, is_exclusive, deleted_at IS NOT NULL
-			FROM groups WHERE id = $1 FOR UPDATE`,
+			FROM groups WHERE id = $1 FOR NO KEY UPDATE`,
 			[]any{mapped.Int64}, &platform, &status, &subscriptionType, &hostedUsage, &exclusive, &deleted)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return 0, err

@@ -41,7 +41,10 @@ func parseHostedApplicationID(c *gin.Context) (int64, bool) {
 func (h *HostedApplicationHandler) List(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	page, pageSize := response.ParsePagination(c)
-	pageSize = min(pageSize, 100)
+	// Same clamps as the repository, so the response echoes the page and
+	// page size that were actually queried.
+	pageSize = min(pageSize, service.HostedApplicationListMaxPageSize)
+	page = min(page, service.HostedApplicationListMaxPage)
 	items, total, err := h.service.ListAdmin(c.Request.Context(), strings.TrimSpace(c.Query("status")), page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)

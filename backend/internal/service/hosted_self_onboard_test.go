@@ -392,6 +392,11 @@ func TestHostedTokenValidation(t *testing.T) {
 		{"absurd", mutate(func(r *oauth.TokenResponse) { r.ExpiresIn = 10 * 365 * 24 * 3600 }), errHostedTokenExpiry},
 		{"no scope", mutate(func(r *oauth.TokenResponse) { r.Scope = "" }), errHostedTokenScope},
 		{"other scope", mutate(func(r *oauth.TokenResponse) { r.Scope = "user:profile user:inferencex" }), errHostedTokenScope},
+		{"broader scope", mutate(func(r *oauth.TokenResponse) { r.Scope = "user:inference org:create_api_key" }), errHostedTokenScope},
+		{"sessions scope", mutate(func(r *oauth.TokenResponse) { r.Scope = "user:profile user:inference user:sessions:claude_code" }), errHostedTokenScope},
+		{"full oauth scope", mutate(func(r *oauth.TokenResponse) { r.Scope = oauth.ScopeOAuth }), errHostedTokenScope},
+		{"profile only", mutate(func(r *oauth.TokenResponse) { r.Scope = "user:profile" }), errHostedTokenScope},
+		{"duplicate", mutate(func(r *oauth.TokenResponse) { r.Scope = "user:inference user:inference" }), errHostedTokenScope},
 		{"no account", mutate(func(r *oauth.TokenResponse) { r.Account = nil }), ErrSelfOnboardIdentityMissing},
 		{"empty uuid", mutate(func(r *oauth.TokenResponse) { r.Account.UUID = "" }), ErrSelfOnboardIdentityMissing},
 		{"bad uuid", mutate(func(r *oauth.TokenResponse) { r.Account.UUID = "not-a-uuid" }), ErrSelfOnboardIdentityMissing},
@@ -404,6 +409,8 @@ func TestHostedTokenValidation(t *testing.T) {
 	}
 	tok, err := validateHostedSetupToken(mutate(func(r *oauth.TokenResponse) { r.Scope = "user:profile user:inference" }), now)
 	require.NoError(t, err)
+	_, err = validateHostedSetupToken(mutate(func(r *oauth.TokenResponse) { r.Scope = " user:inference  user:profile " }), now)
+	require.NoError(t, err, "order and spacing do not matter")
 	require.Equal(t, now.Unix()+31536000, tok.Credentials["expires_at"], "expiry from expires_in, never invented")
 	require.NotContains(t, tok.Credentials, "refresh_token")
 	withRefresh := mutate(func(r *oauth.TokenResponse) { r.RefreshToken = "rt-secret" })

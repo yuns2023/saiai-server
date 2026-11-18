@@ -3128,6 +3128,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, platforms)
 		} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, platforms)
+			accounts = withoutSelfOnboarded(accounts)
 		} else {
 			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, platforms)
 		}
@@ -3166,6 +3167,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	var err error
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
+		accounts = withoutSelfOnboarded(accounts)
 	} else if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
 		// 分组内无账号则返回空列表，由上层处理错误，不再回退到全平台查询
@@ -3316,8 +3318,9 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 		return false
 	}
 	if groupID == nil {
-		// 无分组的 API Key 只能使用未分组的账号
-		return len(account.AccountGroups) == 0
+		// 无分组的 API Key 只能使用未分组的账号；自助托管号只经号主专属组调度
+		// （专属组被删除后不会落入未分组池）。
+		return len(account.AccountGroups) == 0 && !account.SelfOnboarded
 	}
 	for _, ag := range account.AccountGroups {
 		if ag.GroupID == *groupID {
@@ -10917,4 +10920,20 @@ func formatProxyIDForLog(proxyID *int64) string {
 		return "none"
 	}
 	return strconv.FormatInt(*proxyID, 10)
+}
+
+// withoutSelfOnboarded drops self-onboarded accounts from group-less pools
+// (simple mode / ungrouped keys): they are only scheduled through their
+// owner's exclusive group.
+func withoutSelfOnboarded(accounts []Account) []Account {
+	out := accounts[:0:0]
+	for _, acc := range accounts {
+		if !acc.SelfOnboarded {
+			out = append(out, acc)
+		}
+	}
+	if out == nil {
+		return accounts[:0]
+	}
+	return out
 }

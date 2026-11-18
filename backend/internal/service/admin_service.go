@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2191,6 +2192,11 @@ func applyUpdateAccountInput(account *Account, input *UpdateAccountInput, carpoo
 		account.Name = input.Name
 	}
 	if input.Type != "" {
+		// Self-onboarded accounts stay anthropic setup-token (the never-direct
+		// and identity rules depend on it); resending the same type is fine.
+		if account.SelfOnboarded && input.Type != storedType {
+			return ErrSelfOnboardedAccountTypeLocked
+		}
 		account.Type = input.Type
 	}
 	if input.Notes != nil {
@@ -2353,6 +2359,14 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				return nil, ErrPlatformRetired
 			}
 			accountByID[account.ID] = account
+		}
+	}
+	// Checked before any write: a mixed batch changes nothing.
+	if input.ProxyID != nil && *input.ProxyID == 0 {
+		for _, account := range accountsForPinnedDefaults {
+			if account != nil && account.SelfOnboarded {
+				return nil, ErrSelfOnboardedAccountNeedsProxy
+			}
 		}
 	}
 
@@ -2686,6 +2700,7 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
+	previous, previousAddr := proxy.Status, proxyAddressKey(proxy)
 
 	if input.Name != "" {
 		proxy.Name = input.Name
@@ -2708,14 +2723,46 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if input.Status != "" {
 		proxy.Status = input.Status
 	}
+	before := *proxy
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
 		return nil, err
 	}
+	// Accounts keep a copy of their proxy in the scheduler cache (snapshot
+	// and single-account keys). A changed address, credentials or status
+	// must reach them now, not at the next full rebuild: otherwise a
+	// disabled proxy keeps a self-onboarded account selectable, and a moved
+	// proxy keeps being dialed at its old address.
+	if previous != before.Status || previousAddr != proxyAddressKey(&before) {
+		if refresher, ok := s.accountRepo.(proxyAccountsRefresher); ok {
+			if err := refresher.RefreshAccountsUsingProxy(ctx, id); err != nil {
+				logger.LegacyPrintf("service.admin", "[Proxy] refresh accounts using proxy %d failed: %v", id, err)
+			}
+		}
+	}
 	return proxy, nil
 }
 
+// proxyAccountsRefresher re-syncs the scheduler state of every account that
+// uses a proxy (outbox events + single-account cache keys).
+type proxyAccountsRefresher interface {
+	RefreshAccountsUsingProxy(ctx context.Context, proxyID int64) error
+}
+
+// proxyDeleter deletes a proxy only if no live account references it, in
+// one transaction that locks the proxy row first.
+type proxyDeleter interface {
+	DeleteIfUnused(ctx context.Context, id int64) error
+}
+
+func proxyAddressKey(p *Proxy) string {
+	return p.Protocol + "|" + p.Host + "|" + strconv.Itoa(p.Port) + "|" + p.Username + "|" + p.Password
+}
+
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
+	if deleter, ok := s.proxyRepo.(proxyDeleter); ok {
+		return deleter.DeleteIfUnused(ctx, id)
+	}
 	count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
 	if err != nil {
 		return err
@@ -2732,7 +2779,16 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 		return result, nil
 	}
 
+	deleter, transactional := s.proxyRepo.(proxyDeleter)
 	for _, id := range ids {
+		if transactional {
+			if err := deleter.DeleteIfUnused(ctx, id); err != nil {
+				result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{ID: id, Reason: err.Error()})
+				continue
+			}
+			result.DeletedIDs = append(result.DeletedIDs, id)
+			continue
+		}
 		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
 		if err != nil {
 			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{

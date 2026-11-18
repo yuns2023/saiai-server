@@ -803,3 +803,123 @@ func (f *hostedFixture) submitAs(t *testing.T, userID int64) int64 {
 		"SELECT id FROM hosted_account_applications WHERE user_id=$1 AND status='pending' ORDER BY id LIMIT 1", userID).Scan(&id))
 	return id
 }
+
+// A proxy status / address change reaches the cached single-account keys
+// (selection, sticky sessions, Forward) and queues outbox events.
+func TestRefreshAccountsUsingProxyUpdatesCachedAccounts(t *testing.T) {
+	ctx := context.Background()
+	f := newHostedFixture(t)
+	owner := f.user(t)
+	proxy := f.proxy(t, service.StatusActive)
+	cache := NewSchedulerCache(testRedis(t))
+	repo := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, cache)
+	proxies := &proxyRepository{client: integrationEntClient, sql: integrationDB}
+
+	acc := mustCreateAccount(t, integrationEntClient, &service.Account{Name: "p2c cached " + uuid.NewString(), Platform: service.PlatformAnthropic,
+		Type: service.AccountTypeSetupToken, ProxyID: &proxy.ID})
+	_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET owner_user_id=$2, self_onboarded=TRUE WHERE id=$1", acc.ID, owner.ID)
+	require.NoError(t, err)
+	warm, err := repo.GetByID(ctx, acc.ID)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetAccount(ctx, warm))
+	cached, err := cache.GetAccount(ctx, acc.ID)
+	require.NoError(t, err)
+	require.True(t, cached.IsSchedulable())
+
+	before := hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", acc.ID)
+	p, err := proxies.GetByID(ctx, proxy.ID)
+	require.NoError(t, err)
+	p.Status = "disabled"
+	require.NoError(t, proxies.Update(ctx, p))
+	require.NoError(t, repo.RefreshAccountsUsingProxy(ctx, proxy.ID))
+	cached, err = cache.GetAccount(ctx, acc.ID)
+	require.NoError(t, err)
+	require.False(t, cached.IsSchedulable(), "disabled proxy seen through the cached key")
+	_, err = cached.EgressProxyURL()
+	require.ErrorIs(t, err, service.ErrAccountProxyRequired)
+	require.Greater(t, hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", acc.ID), before)
+
+	p.Status, p.Host, p.Port = service.StatusActive, "198.51.100.77", 3129
+	require.NoError(t, proxies.Update(ctx, p))
+	require.NoError(t, repo.RefreshAccountsUsingProxy(ctx, proxy.ID))
+	cached, err = cache.GetAccount(ctx, acc.ID)
+	require.NoError(t, err)
+	require.True(t, cached.IsSchedulable())
+	u, err := cached.EgressProxyURL()
+	require.NoError(t, err)
+	require.Equal(t, "socks5h://198.51.100.77:3129", u, "the new address is used")
+}
+
+// Deleting a proxy locks it, counts references and deletes in one
+// transaction; it never wins against an approval that binds it.
+func TestProxyDeleteIfUnusedVersusApproval(t *testing.T) {
+	ctx := context.Background()
+	f := newHostedFixture(t)
+	owner := f.user(t)
+	proxies := &proxyRepository{client: integrationEntClient, sql: integrationDB}
+
+	unused := f.proxy(t, service.StatusActive)
+	require.NoError(t, proxies.DeleteIfUnused(ctx, unused.ID))
+	require.Equal(t, 1, hostedCountRows(t, "SELECT COUNT(*) FROM proxies WHERE id=$1 AND deleted_at IS NOT NULL", unused.ID))
+	require.NoError(t, proxies.DeleteIfUnused(ctx, unused.ID), "already deleted: no-op")
+
+	for round := 0; round < 6; round++ {
+		proxy := f.proxy(t, service.StatusActive)
+		app := f.submit(t, owner.ID, uuid.NewString(), nil)
+		var wg sync.WaitGroup
+		var approveErr, deleteErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, approveErr = f.repo.Approve(ctx, service.HostedApproveParams{ApplicationID: app.ID, AdminUserID: 1, ExistingProxyID: proxy.ID, Build: hostedTestSpec})
+		}()
+		go func() {
+			defer wg.Done()
+			deleteErr = proxies.DeleteIfUnused(ctx, proxy.ID)
+		}()
+		wg.Wait()
+		deleted := hostedCountRows(t, "SELECT COUNT(*) FROM proxies WHERE id=$1 AND deleted_at IS NOT NULL", proxy.ID) == 1
+		bound := hostedCountRows(t, "SELECT COUNT(*) FROM accounts WHERE proxy_id=$1 AND deleted_at IS NULL", proxy.ID)
+		require.False(t, deleted && bound > 0, "round %d: a deleted proxy is bound to a live account", round)
+		if approveErr == nil {
+			require.ErrorIs(t, deleteErr, service.ErrProxyInUse, "round %d", round)
+		} else {
+			requireReason(t, approveErr, "SELF_ONBOARD_PROXY_REQUIRED")
+			require.NoError(t, deleteErr)
+		}
+		// Clean the approved account's group binding for the next round.
+		_, err := integrationDB.ExecContext(ctx, "UPDATE hosted_account_applications SET status='cancelled', credentials=NULL, proxy_password=NULL WHERE id=$1 AND status='pending'", app.ID)
+		require.NoError(t, err)
+	}
+}
+
+// After the owner group is gone a self-onboarded account does not fall into
+// the ungrouped pool.
+func TestUngroupedPoolExcludesSelfOnboarded(t *testing.T) {
+	ctx := context.Background()
+	f := newHostedFixture(t)
+	owner := f.user(t)
+	proxy := f.proxy(t, service.StatusActive)
+	repo := f.repo.accounts
+	plain := mustCreateAccount(t, integrationEntClient, &service.Account{Name: "p2c ungrouped plain", Platform: service.PlatformAnthropic, Type: service.AccountTypeSetupToken, ProxyID: &proxy.ID})
+	self := mustCreateAccount(t, integrationEntClient, &service.Account{Name: "p2c ungrouped self", Platform: service.PlatformAnthropic, Type: service.AccountTypeSetupToken, ProxyID: &proxy.ID})
+	_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET owner_user_id=$2 WHERE id = ANY($1)", pq.Array([]int64{plain.ID, self.ID}), owner.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET self_onboarded=TRUE WHERE id=$1", self.ID)
+	require.NoError(t, err)
+	ids := func(list []service.Account) map[int64]bool {
+		out := map[int64]bool{}
+		for _, a := range list {
+			if a.ID == plain.ID || a.ID == self.ID {
+				out[a.ID] = true
+			}
+		}
+		return out
+	}
+	one, err := repo.ListSchedulableUngroupedByPlatform(ctx, service.PlatformAnthropic)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]bool{plain.ID: true}, ids(one))
+	many, err := repo.ListSchedulableUngroupedByPlatforms(ctx, []string{service.PlatformAnthropic})
+	require.NoError(t, err)
+	require.Equal(t, map[int64]bool{plain.ID: true}, ids(many))
+}

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -203,9 +204,17 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 		reqBody["expires_in"] = 31536000 // 365 * 24 * 60 * 60 seconds
 	}
 
-	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3: Exchanging code for token at %s", s.tokenURL)
-	reqBodyJSON, _ := json.Marshal(logredact.RedactMap(reqBody))
-	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Request Body: %s", string(reqBodyJSON))
+	// Hosted self-onboarding: no request body, no raw transport error, no
+	// response body in logs or errors; stage, status, timeout flag and the
+	// caller's correlation id only.
+	correlationID, quiet := service.QuietOAuthExchange(ctx)
+	if quiet {
+		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] stage=exchange_start correlation_id=%s", correlationID)
+	} else {
+		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3: Exchanging code for token at %s", s.tokenURL)
+		reqBodyJSON, _ := json.Marshal(logredact.RedactMap(reqBody))
+		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Request Body: %s", string(reqBodyJSON))
+	}
 
 	var tokenResp oauth.TokenResponse
 
@@ -219,6 +228,14 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 		Post(s.tokenURL)
 
 	if err != nil {
+		if quiet {
+			timeout := errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)
+			logger.LegacyPrintf("repository.claude_oauth", "[OAuth] stage=exchange_request_failed timeout=%v correlation_id=%s", timeout, correlationID)
+			if timeout {
+				return nil, fmt.Errorf("token exchange request failed: %w", context.DeadlineExceeded)
+			}
+			return nil, errors.New("token exchange request failed")
+		}
 		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 FAILED - Request error: %v", err)
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -228,10 +245,18 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Response - Status: %d", resp.StatusCode)
 
 	if !resp.IsSuccessState() {
+		if quiet {
+			logger.LegacyPrintf("repository.claude_oauth", "[OAuth] stage=exchange_rejected status=%d correlation_id=%s", resp.StatusCode, correlationID)
+			return nil, fmt.Errorf("token exchange failed: status %d", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("token exchange failed: status %d, body: %s", resp.StatusCode, resp.String())
 	}
 
-	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 SUCCESS - Got access token")
+	if quiet {
+		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] stage=exchange_ok correlation_id=%s", correlationID)
+	} else {
+		logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 SUCCESS - Got access token")
+	}
 	return &tokenResp, nil
 }
 

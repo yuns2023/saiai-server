@@ -53,6 +53,10 @@ var (
 	// sent directly from the server.
 	ErrSelfOnboardedAccountNeedsProxy = infraerrors.BadRequest("SELF_ONBOARDED_ACCOUNT_REQUIRES_PROXY", "a self-onboarded hosted account must keep a proxy")
 
+	// ErrSelfOnboardedAccountTypeLocked: the platform and type of a
+	// self-onboarded account cannot change.
+	ErrSelfOnboardedAccountTypeLocked = infraerrors.BadRequest("SELF_ONBOARDED_ACCOUNT_TYPE_LOCKED", "the type of a self-onboarded hosted account cannot change")
+
 	// ErrUpstreamAccountAlreadyExists: a live account of the platform already
 	// has this upstream identity (unique index from migration 133).
 	ErrUpstreamAccountAlreadyExists = infraerrors.Conflict("UPSTREAM_ACCOUNT_ALREADY_EXISTS", "another live account already uses this upstream account (same account_uuid)")
@@ -66,6 +70,8 @@ const (
 	HostedApplicationStatusExpired   = "expired"
 
 	HostedSelfOnboardMaxPending       = 3
+	HostedApplicationListMaxPageSize  = 100
+	HostedApplicationListMaxPage      = 100000
 	hostedSelfOnboardSessionTTL       = 10 * time.Minute
 	hostedSelfOnboardSessionPurpose   = "setup_token"
 	hostedSelfOnboardAuthURLLimit     = 10
@@ -478,7 +484,7 @@ func (s *HostedSelfOnboardService) Submit(ctx context.Context, userID int64, in 
 	// 6. Exchange (total deadline 20 s). Errors and responses are never
 	// echoed or logged beyond stage + correlation id.
 	correlationID := newHostedCorrelationID()
-	exchangeCtx, cancel := context.WithTimeout(ctx, hostedSelfOnboardExchangeDeadline)
+	exchangeCtx, cancel := context.WithTimeout(WithQuietOAuthExchange(ctx, correlationID), hostedSelfOnboardExchangeDeadline)
 	tokenResp, err := s.oauthClient.ExchangeCodeForToken(exchangeCtx, authCode+"#"+state, session.CodeVerifier, session.State, proxyURL, true)
 	cancel()
 	if err != nil {
@@ -893,7 +899,7 @@ func validateHostedSetupToken(resp *oauth.TokenResponse, now time.Time) (*hosted
 	if resp.ExpiresIn < int64(hostedTokenMinLifetime/time.Second) || resp.ExpiresIn > int64(hostedTokenMaxLifetime/time.Second) {
 		return nil, errHostedTokenExpiry
 	}
-	if !hasScope(resp.Scope, oauth.ScopeInference) {
+	if !isHostedSetupTokenScope(resp.Scope) {
 		return nil, errHostedTokenScope
 	}
 	if resp.Account == nil {
@@ -921,13 +927,21 @@ func validateHostedSetupToken(resp *oauth.TokenResponse, now time.Time) (*hosted
 	return out, nil
 }
 
-func hasScope(scopes, want string) bool {
+// isHostedSetupTokenScope accepts exactly {user:inference} or
+// {user:inference, user:profile} (any order, no duplicates): a setup-token
+// must not carry broader rights (org:create_api_key, sessions, ...).
+func isHostedSetupTokenScope(scopes string) bool {
+	seen := map[string]bool{}
 	for _, s := range strings.Fields(scopes) {
-		if s == want {
-			return true
+		if seen[s] {
+			return false
+		}
+		seen[s] = true
+		if s != oauth.ScopeInference && s != "user:profile" {
+			return false
 		}
 	}
-	return false
+	return seen[oauth.ScopeInference]
 }
 
 // truncateUTF8Bytes cuts v to at most n bytes on a rune boundary.
@@ -1084,4 +1098,22 @@ func hostedCredentialUnix(v any) (int64, bool) {
 		}
 		return 0, false
 	}
+}
+
+type quietOAuthExchangeKey struct{}
+
+// WithQuietOAuthExchange marks a Claude code exchange whose client must not
+// log request bodies, raw transport errors or response bodies (hosted
+// self-onboarding); logs carry the correlation id instead.
+func WithQuietOAuthExchange(ctx context.Context, correlationID string) context.Context {
+	return context.WithValue(ctx, quietOAuthExchangeKey{}, correlationID)
+}
+
+// QuietOAuthExchange reports the marker set by WithQuietOAuthExchange.
+func QuietOAuthExchange(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	id, ok := ctx.Value(quietOAuthExchangeKey{}).(string)
+	return id, ok
 }
