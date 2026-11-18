@@ -34,7 +34,7 @@ func TestModerationCachedChecksDoNotConsumeCallBudget(t *testing.T) {
 func TestModerationBudgetFailureRetainsCoverageDiagnostics(t *testing.T) {
 	repo := &moderationResultRepoStub{}
 	client := &chunkModerationStub{}
-	groups := &inputModerationGroupRepoStub{groups: []*Group{{ID: 3, InputModerationEnabled: true}}}
+	groups := &inputModerationGroupRepoStub{groups: []*Group{fullScopeGroup(&Group{ID: 3, InputModerationEnabled: true})}}
 	svc := newInputModerationServiceForTest(nil, repo, groups, nil, nil)
 	svc.client = client
 	defer svc.Stop()
@@ -90,6 +90,38 @@ type cachedModerationBudgetStub struct {
 }
 
 func (*cachedModerationBudgetStub) UsesInputModerationCallBudget() {}
+
+func (client *cachedModerationBudgetStub) ClassifyWithPolicy(ctx context.Context, text string, policy *InputModerationPolicy) (*InputModerationClassification, error) {
+	return withPolicyScores(client.Classify(ctx, text))(policy)
+}
+
+// withPolicyScores lets legacy test stubs serve explicit (full-scope) policies:
+// audited categories missing from the stub's scores are reported as zero.
+func withPolicyScores(result *InputModerationClassification, err error) func(*InputModerationPolicy) (*InputModerationClassification, error) {
+	return func(policy *InputModerationPolicy) (*InputModerationClassification, error) {
+		if err != nil || result == nil || policy == nil {
+			return result, err
+		}
+		if result.Scores == nil {
+			result.Scores = map[string]float64{}
+		}
+		for _, id := range policy.AuditCategories {
+			if _, ok := result.Scores[id]; !ok {
+				result.Scores[id] = 0
+			}
+		}
+		return result, nil
+	}
+}
+
+// fullScopeGroup converts a legacy group to the equivalent explicit policy that
+// also classifies project instructions.
+func fullScopeGroup(g *Group) *Group {
+	p := EffectiveInputModerationPolicy(g)
+	p.InputScope = InputModerationScopeFull
+	g.InputModerationPolicy = p
+	return g
+}
 
 func (client *cachedModerationBudgetStub) Classify(ctx context.Context, text string) (*InputModerationClassification, error) {
 	if client.checks[text] {

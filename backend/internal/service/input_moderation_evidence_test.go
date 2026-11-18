@@ -59,7 +59,7 @@ func (failingEvidenceSealer) Seal(ModerationEvidenceAAD, []byte) (string, error)
 
 func evidenceTestGroup(autoDisable bool, enforce ...string) *Group {
 	return &Group{ID: 3, InputModerationEnabled: true, InputModerationAutoDisableUser: autoDisable, InputModerationMinConfidence: 90,
-		InputModerationPolicy: &InputModerationPolicy{RulesVersion: JevExpandedRulesVersion, AuditCategories: evidenceTestCategories, EnforcementCategories: enforce, Thresholds: map[string]int{}}}
+		InputModerationPolicy: &InputModerationPolicy{RulesVersion: JevExpandedRulesVersion, AuditCategories: evidenceTestCategories, EnforcementCategories: enforce, Thresholds: map[string]int{}, InputScope: InputModerationScopeFull}}
 }
 
 func newEvidenceTestService(t *testing.T, client InputModerationClient, group *Group) (*InputModerationService, *moderationResultRepoStub) {

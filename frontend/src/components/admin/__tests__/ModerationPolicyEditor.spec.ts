@@ -40,6 +40,17 @@ describe('ModerationPolicyEditor', () => {
   await wrapper.get('[aria-label="PII threshold"]').setValue(95)
   expect((wrapper.emitted('update:modelValue')![0][0] as any).thresholds).toEqual({ PII: 95 })
  })
+ it('defaults the input scope to user input and can opt into project instructions', async () => {
+  const base = { rules_version: 'jev-expanded-v1', audit_categories: ['PII'], enforcement_categories: ['PII'], thresholds: { PII: 95 } }
+  const wrapper = mount(ModerationPolicyEditor, { props: { modelValue: base as any, legacyCategories: [], minConfidence: 90 } })
+  await flushPromises()
+  expect((wrapper.get('[data-testid="moderation-scope"]').element as HTMLSelectElement).value).toBe('user_input')
+  await wrapper.get('[data-testid="moderation-scope"]').setValue('full')
+  const policy = wrapper.emitted('update:modelValue')![0][0] as any
+  expect(policy).toEqual({ ...base, input_scope: 'full' })
+  await wrapper.setProps({ modelValue: policy })
+  expect((wrapper.get('[data-testid="moderation-scope"]').element as HTMLSelectElement).value).toBe('full')
+ })
  it('preserves policy on catalog failure and offers retry', async () => {
   mocks.get.mockRejectedValueOnce(new Error('TEST_ONLY'))
   const wrapper = mount(ModerationPolicyEditor, { props: { legacyCategories: [], minConfidence: 90 } })

@@ -1,7 +1,23 @@
 # Input moderation results and Jev settings
 
-Group moderation remains opt-in. The newest real user text and transmitted project instructions are classified.
-See the coverage and content-cache contract below.
+Group moderation remains opt-in. Each group policy has an input scope
+(`input_moderation_policy.input_scope`):
+
+- `user_input` (default, also for an empty value and legacy groups without an
+  explicit policy): only the newest real user text is classified. System
+  prompts, system/developer messages and recognized project-instruction
+  envelopes (CLAUDE.md, AGENTS.md, `user_instructions`) are dropped before
+  queueing, so content placed only there is not detected. Turns without new
+  user text (tool results) are recorded as `skipped`/`no_new_user_text` and make
+  no detector call.
+- `full`: the newest real user text and transmitted project instructions are
+  classified, as described in the coverage and content-cache contract below.
+
+The scope is applied when a request is queued and again when the worker
+processes the job with the current group policy, so jobs queued before a switch
+to `user_input` no longer send their instructions. Switching to `full` applies
+to requests queued afterwards. No migration is involved: the field lives in the
+existing policy JSON.
 
 Usage history exposes `moderation_result` independently of risk events:
 

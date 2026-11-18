@@ -1473,7 +1473,7 @@ func (h *OpenAIGatewayHandler) submitOpenAIInputModeration(
 		APIKeyID:     apiKey.ID,
 		GroupID:      *apiKey.GroupID,
 		Text:         text,
-		Instructions: instructions,
+		Instructions: service.ScopedModerationInstructions(apiKey.Group, instructions),
 		Source:       source,
 		TurnNumber:   turnNumber,
 	})

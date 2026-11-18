@@ -44,9 +44,34 @@ func JevCategoryCatalog() []JevCategory {
 	}
 	return categories
 }
+const (
+	// InputModerationScopeUserInput classifies only the newest real user text.
+	InputModerationScopeUserInput = "user_input"
+	// InputModerationScopeFull also classifies transmitted project instructions.
+	InputModerationScopeFull = "full"
+)
+
+// InputModerationIncludesInstructions reports whether the group's policy opts
+// into classifying project instructions. Legacy (nil) policies and an empty
+// scope use the cheaper user-input-only default.
+func InputModerationIncludesInstructions(g *Group) bool {
+	return g != nil && g.InputModerationPolicy != nil && g.InputModerationPolicy.InputScope == InputModerationScopeFull
+}
+
+// ScopedModerationInstructions drops instructions unless the group opts in.
+func ScopedModerationInstructions(g *Group, instructions []string) []string {
+	if !InputModerationIncludesInstructions(g) {
+		return nil
+	}
+	return instructions
+}
+
 func ValidateInputModerationPolicy(p *InputModerationPolicy) error {
 	if p == nil {
 		return nil
+	}
+	if p.InputScope != "" && p.InputScope != InputModerationScopeUserInput && p.InputScope != InputModerationScopeFull {
+		return fmt.Errorf("unsupported moderation input scope")
 	}
 	if p.RulesVersion != JevLegacyRulesVersion && p.RulesVersion != JevExpandedRulesVersion {
 		return fmt.Errorf("unsupported moderation rules version")

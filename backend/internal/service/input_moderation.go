@@ -435,6 +435,15 @@ func (s *InputModerationService) process(task InputModerationTask) (processErr e
 		_ = s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "group_disabled"})
 		return nil
 	}
+	// Apply the current scope to already queued work too: jobs queued before a
+	// switch to user-input-only must not still send their instructions.
+	if len(task.Instructions) > 0 && !InputModerationIncludesInstructions(group) {
+		task.Instructions = nil
+		task.Diagnostics.InstructionBlocks, task.Diagnostics.InstructionChars = 0, 0
+		if strings.TrimSpace(task.Text) == "" {
+			return s.recordResult(task, InputModerationResult{Status: "skipped", Reason: "no_new_user_text"})
+		}
+	}
 
 	// Read administrator-managed trust from the repository, not a queued/auth snapshot.
 	user, err := s.userService.GetByID(classifyCtx, task.UserID)
