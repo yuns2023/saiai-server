@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const http = vi.hoisted(() => ({ get: vi.fn() }))
+const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../client', () => ({ api: http }))
 
 import { hostedApi } from '../hosted'
@@ -8,6 +8,7 @@ import { hostedApi } from '../hosted'
 describe('hostedApi', () => {
   beforeEach(() => {
     http.get.mockReset()
+    http.post.mockReset()
   })
 
   it('GET /hosted/owned-accounts returns the items (null-safe)', async () => {
@@ -36,5 +37,31 @@ describe('hostedApi', () => {
     const page = await hostedApi.listOwnedAccountUsage(12, { start: 'a', end: 'b', cursor: null })
     expect(http.get.mock.calls[0][1].params).toEqual({ start: 'a', end: 'b' })
     expect(page).toEqual({ items: [], next_cursor: null })
+  })
+
+  it('self-onboarding config defaults to off', async () => {
+    http.get.mockResolvedValue({ data: null })
+    expect(await hostedApi.selfOnboardConfig()).toEqual({ enabled: false, exchange_proxy_configured: false, max_pending: 3 })
+    expect(http.get).toHaveBeenCalledWith('/hosted/self-onboard/config')
+    http.get.mockResolvedValue({ data: { enabled: true, exchange_proxy_configured: true, max_pending: 2 } })
+    expect(await hostedApi.selfOnboardConfig()).toEqual({ enabled: true, exchange_proxy_configured: true, max_pending: 2 })
+  })
+
+  it('posts to the application endpoints of the contract', async () => {
+    http.post.mockResolvedValue({ data: { id: 1 } })
+    await hostedApi.createAuthUrl()
+    expect(http.post).toHaveBeenLastCalledWith('/hosted/applications/auth-url')
+    const body = { session_id: 's', code: 'a#b', display_name: 'n', proxy: { protocol: 'socks5h' as const, host: 'h', port: 1 } }
+    await hostedApi.submitApplication(body)
+    expect(http.post).toHaveBeenLastCalledWith('/hosted/applications', body)
+    await hostedApi.cancelApplication(7)
+    expect(http.post).toHaveBeenLastCalledWith('/hosted/applications/7/cancel')
+    for (const action of ['pause', 'resume', 'withdraw'] as const) {
+      await hostedApi.setOwnerState(12, action)
+      expect(http.post).toHaveBeenLastCalledWith(`/hosted/owned-accounts/12/${action}`)
+    }
+    http.get.mockResolvedValue({ data: { items: null } })
+    expect(await hostedApi.listApplications()).toEqual([])
+    expect(http.get).toHaveBeenLastCalledWith('/hosted/applications')
   })
 })
