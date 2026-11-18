@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
@@ -827,7 +828,7 @@ func TestProxyUpdateRefreshesCachedAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cached.IsSchedulable())
 
-	before := hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", acc.ID)
+	before := hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = 'account_bulk_changed' AND payload->'account_ids' @> to_jsonb($1::bigint)", acc.ID)
 	p, err := proxies.GetByID(ctx, proxy.ID)
 	require.NoError(t, err)
 	p.Status = "disabled"
@@ -840,7 +841,7 @@ func TestProxyUpdateRefreshesCachedAccounts(t *testing.T) {
 	require.False(t, cached.IsSchedulable(), "disabled proxy seen through the cached key")
 	_, err = cached.EgressProxyURL()
 	require.ErrorIs(t, err, service.ErrAccountProxyRequired)
-	require.Greater(t, hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1", acc.ID), before)
+	require.Greater(t, hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = 'account_bulk_changed' AND payload->'account_ids' @> to_jsonb($1::bigint)", acc.ID), before)
 
 	p.Status, p.Host, p.Port = service.StatusActive, "198.51.100.77", 3129
 	ids, err = proxies.UpdateAndQueueAccountRefresh(ctx, p)
@@ -953,11 +954,18 @@ func TestHostedApproveWaitsForUncommittedGroupGrant(t *testing.T) {
 		_, err := f.repo.Approve(ctx, service.HostedApproveParams{ApplicationID: second.ID, AdminUserID: 1, ExistingProxyID: proxy.ID, Build: hostedTestSpec})
 		done <- err
 	}()
-	select {
-	case err := <-done:
-		t.Fatalf("approval did not wait for the uncommitted grant: %v", err)
-	case <-time.After(500 * time.Millisecond):
-	}
+	// Wait until the approval is observably blocked on a lock (not a sleep).
+	require.Eventually(t, func() bool {
+		select {
+		case err := <-done:
+			t.Fatalf("approval did not wait for the uncommitted grant: %v", err)
+		default:
+		}
+		var waiting int
+		err := integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM groups WHERE id = $1 FOR UPDATE%'`).Scan(&waiting)
+		return err == nil && waiting > 0
+	}, 10*time.Second, 20*time.Millisecond, "approval never blocked on the group row")
 	require.NoError(t, grant.Commit())
 	select {
 	case err := <-done:
@@ -967,4 +975,56 @@ func TestHostedApproveWaitsForUncommittedGroupGrant(t *testing.T) {
 		t.Fatal("approval still blocked after the grant committed")
 	}
 	require.Equal(t, 1, hostedCountRows(t, "SELECT COUNT(*) FROM accounts WHERE owner_user_id=$1", owner.ID))
+}
+
+// Two quick proxy changes (disable, then re-enable within the outbox dedup
+// window) each produce their own account_bulk_changed event, and consuming
+// them restores the account to its owner-group candidate bucket.
+func TestProxyQuickChangesAreNotDeduplicated(t *testing.T) {
+	ctx := context.Background()
+	f := newHostedFixture(t)
+	owner := f.user(t)
+	proxy := f.proxy(t, service.StatusActive)
+	group := mustCreateGroup(t, integrationEntClient, &service.Group{Name: "p2c-bulk-" + uuid.NewString(), Platform: service.PlatformAnthropic})
+	_, err := integrationDB.ExecContext(ctx, "INSERT INTO user_allowed_groups (user_id, group_id) VALUES ($1, $2)", owner.ID, group.ID) // cleanup tracks the group
+	require.NoError(t, err)
+	acc := mustCreateAccount(t, integrationEntClient, &service.Account{Name: "p2c bulk " + uuid.NewString(), Platform: service.PlatformAnthropic,
+		Type: service.AccountTypeSetupToken, ProxyID: &proxy.ID})
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET owner_user_id=$2, self_onboarded=TRUE WHERE id=$1", acc.ID, owner.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "INSERT INTO account_groups (account_id, group_id, priority) VALUES ($1, $2, 1)", acc.ID, group.ID)
+	require.NoError(t, err)
+
+	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox")
+	proxies := &proxyRepository{client: integrationEntClient, sql: integrationDB}
+	p, err := proxies.GetByID(ctx, proxy.ID)
+	require.NoError(t, err)
+	p.Status = "disabled"
+	_, err = proxies.UpdateAndQueueAccountRefresh(ctx, p)
+	require.NoError(t, err)
+	p.Status = service.StatusActive
+	_, err = proxies.UpdateAndQueueAccountRefresh(ctx, p)
+	require.NoError(t, err)
+	require.Equal(t, 2, hostedCountRows(t, `SELECT COUNT(*) FROM scheduler_outbox WHERE event_type = $1 AND payload->'account_ids' @> to_jsonb($2::bigint)`,
+		service.SchedulerOutboxEventAccountBulkChanged, acc.ID), "the second change is not deduplicated away")
+
+	cache := NewSchedulerCache(testRedis(t))
+	cfg := &config.Config{RunMode: config.RunModeStandard, Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+		OutboxPollIntervalSeconds: 1, DbFallbackEnabled: true}}}
+	svc := service.NewSchedulerSnapshotService(cache, NewSchedulerOutboxRepository(integrationDB), newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil), nil, cfg)
+	svc.Start()
+	t.Cleanup(svc.Stop)
+	bucket := service.SchedulerBucket{GroupID: group.ID, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeMixed}
+	require.Eventually(t, func() bool {
+		cached, hit, err := cache.GetSnapshot(ctx, bucket)
+		if err != nil || !hit {
+			return false
+		}
+		for _, a := range cached {
+			if a.ID == acc.ID {
+				return a.IsSchedulable()
+			}
+		}
+		return false
+	}, 10*time.Second, 100*time.Millisecond, "consumed events put the account back into its group bucket")
 }

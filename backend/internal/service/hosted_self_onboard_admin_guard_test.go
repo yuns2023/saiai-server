@@ -182,7 +182,12 @@ func (r *simpleModeAccountRepo) ListSchedulableByPlatform(context.Context, strin
 func TestSimpleModeNeverSelectsSelfOnboarded(t *testing.T) {
 	ctx := context.Background()
 	simple := &config.Config{RunMode: config.RunModeSimple}
-	self := Account{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true, SelfOnboarded: true}
+	proxyID := int64(9)
+	// A usable proxy: without the simple-mode guard this account would be
+	// selectable, so every rejection below is the guard's doing.
+	self := Account{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true, SelfOnboarded: true,
+		ProxyID: &proxyID, Proxy: &Proxy{ID: proxyID, Protocol: "socks5h", Host: "203.0.113.9", Port: 1080, Status: StatusActive}}
+	require.True(t, self.IsSchedulable())
 	plain := Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Status: StatusActive, Schedulable: true}
 	ids := func(list []Account) []int64 {
 		out := []int64{}
@@ -202,6 +207,11 @@ func TestSimpleModeNeverSelectsSelfOnboarded(t *testing.T) {
 	got, _, err = gw.listSchedulableAccounts(ctx, &gid, PlatformAnthropic, false)
 	require.NoError(t, err)
 	require.Equal(t, []int64{1}, ids(got))
+	standard := &config.Config{RunMode: config.RunModeStandard}
+	stdSnapshot := NewSchedulerSnapshotService(&simpleModeSnapshotCache{accounts: []*Account{&plain, &self}}, nil, nil, nil, standard)
+	got, _, err = (&GatewayService{cfg: standard, schedulerSnapshot: stdSnapshot}).listSchedulableAccounts(ctx, &gid, PlatformAnthropic, false)
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, ids(got), "standard mode keeps the owner-group account")
 
 	// 2. No snapshot: mixed branch with a group id, mixed without, single platform.
 	repo := &simpleModeAccountRepo{accounts: []Account{plain, self}}
@@ -214,6 +224,9 @@ func TestSimpleModeNeverSelectsSelfOnboarded(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []int64{1}, ids(got), "group=%v force=%v", tc.group != nil, tc.force)
 	}
+	got, _, err = (&GatewayService{cfg: standard, accountRepo: repo}).listSchedulableAccounts(ctx, &gid, PlatformAnthropic, false)
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 2}, ids(got), "standard mode, group branch")
 
 	// 3. Sticky / by-ID checks.
 	self.AccountGroups = []AccountGroup{{GroupID: gid}}
@@ -224,7 +237,8 @@ func TestSimpleModeNeverSelectsSelfOnboarded(t *testing.T) {
 	require.True(t, gw.isAccountSchedulableForSelection(ctx, &plain))
 
 	// Standard mode: the exclusive group still works.
-	std := &GatewayService{cfg: &config.Config{}}
+	std := &GatewayService{cfg: standard}
 	require.True(t, std.isAccountInGroup(&self, &gid))
-	require.True(t, std.isAccountSchedulableForSelection(ctx, &self) == self.IsSchedulable())
+	require.True(t, std.isAccountSchedulableForSelection(ctx, &self))
+	require.True(t, std.isAccountSchedulableForModelSelection(ctx, &self, ""))
 }

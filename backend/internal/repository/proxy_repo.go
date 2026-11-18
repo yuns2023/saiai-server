@@ -85,8 +85,9 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 	return updateProxyWithClient(ctx, r.client, proxyIn)
 }
 
-// UpdateAndQueueAccountRefresh saves the proxy and queues an account_changed
-// scheduler event for every live account using it, in one transaction: either
+// UpdateAndQueueAccountRefresh saves the proxy and queues one
+// account_bulk_changed scheduler event listing every live account using it,
+// in one transaction: either
 // all accounts are told about the change or the update fails. It returns the
 // account ids so the caller can refresh their cached copies after commit.
 func (r *proxyRepository) UpdateAndQueueAccountRefresh(ctx context.Context, proxyIn *service.Proxy) ([]int64, error) {
@@ -118,8 +119,12 @@ func (r *proxyRepository) UpdateAndQueueAccountRefresh(ctx context.Context, prox
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range ids {
-		if err := enqueueSchedulerOutbox(ctx, txc, service.SchedulerOutboxEventAccountChanged, &ids[i], nil, nil); err != nil {
+	// One account_bulk_changed event (not deduplicated, unlike per-account
+	// account_changed within 1 s): a quick disable → re-enable still leaves an
+	// event for the second change. Its consumer refreshes every listed
+	// account key and rebuilds their groups.
+	if len(ids) > 0 {
+		if err := enqueueSchedulerOutbox(ctx, txc, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, map[string]any{"account_ids": ids}); err != nil {
 			return nil, err
 		}
 	}
