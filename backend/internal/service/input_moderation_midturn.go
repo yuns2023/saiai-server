@@ -162,10 +162,10 @@ func plainUserText(text string) string {
 		nextOpen, nextClose = find(nextOpen, systemReminderOpen), find(nextClose, systemReminderClose)
 		if depth == 0 {
 			if nextOpen < 0 {
-				out.WriteString(text[pos:])
+				_, _ = out.WriteString(text[pos:])
 				break
 			}
-			out.WriteString(text[pos:nextOpen])
+			_, _ = out.WriteString(text[pos:nextOpen])
 			depth, pos = 1, nextOpen+len(systemReminderOpen)
 			continue
 		}
@@ -178,7 +178,7 @@ func plainUserText(text string) string {
 		}
 		depth, pos = depth-1, nextClose+len(systemReminderClose)
 		if depth == 0 {
-			out.WriteString("\n")
+			_, _ = out.WriteString("\n")
 		}
 	}
 	plain := strings.TrimSpace(out.String())
