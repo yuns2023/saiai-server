@@ -180,6 +180,11 @@
               >
                 {{ row.extra.email_address }}
               </span>
+              <span v-if="row.identity_unknown || row.owner_paused || row.withdraw_requested" class="mt-0.5 flex flex-wrap gap-1">
+                <span v-if="row.identity_unknown" class="badge badge-gray" :title="t('admin.accounts.identityUnknownHint')" data-testid="account-identity-unknown">{{ t('admin.accounts.identityUnknown') }}</span>
+                <span v-if="row.owner_paused" class="badge badge-warning" data-testid="account-owner-paused">{{ t('admin.accounts.ownerPaused') }}</span>
+                <span v-if="row.withdraw_requested" class="badge badge-danger" data-testid="account-withdraw-requested">{{ t('admin.accounts.withdrawRequested') }}</span>
+              </span>
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -753,6 +758,9 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.temp_unschedulable_until !== next.temp_unschedulable_until ||
     current.owner_user_id !== next.owner_user_id ||
     current.owner_email !== next.owner_email ||
+    current.owner_paused !== next.owner_paused ||
+    current.withdraw_requested !== next.withdraw_requested ||
+    current.identity_unknown !== next.identity_unknown ||
     buildOpenAIUsageRefreshKey(current) !== buildOpenAIUsageRefreshKey(next)
   )
 }

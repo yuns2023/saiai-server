@@ -466,6 +466,7 @@ export default {
     hostedAccounts: 'Hosted Accounts',
     buySubscription: 'Purchase & recharge',
     cryptoDeposits: 'Held Stablecoin Deposits',
+    hostedApplications: 'Hosting Applications',
     docs: 'Docs'
   },
 
@@ -2631,6 +2632,10 @@ export default {
       currentlyInUse: 'In use',
       inProgress: 'In progress',
       inProgressHint: 'A request is currently in progress; the timestamp below is the last completed request.',
+      identityUnknown: 'Identity unknown',
+      identityUnknownHint: 'No upstream account UUID is known for this account (it was imported without one), so duplicates cannot be detected automatically; make sure it is not hosted twice.',
+      ownerPaused: 'Paused by owner',
+      withdrawRequested: 'Take-down requested',
       lastCompletedHint: 'Last completed request: {time}',
       lastCompletedNever: 'No completed request recorded',
       listPendingSyncHint: 'List changes are pending sync. Click sync to load latest rows.',
@@ -3973,6 +3978,78 @@ export default {
       deleteConfirm: 'Are you sure you want to delete this announcement? This action cannot be undone.'
     },
 
+    // Hosted self-onboarding applications
+    hostedApplications: {
+      title: 'Hosting Applications',
+      description: 'Claude accounts (setup-token) submitted by users. Approving creates the account in the owner\'s own hosted group; it always goes through a proxy, never direct.',
+      switchOff: 'Hosted self-onboarding is switched off: new applications cannot be approved, but can still be rejected.',
+      empty: 'No applications match.',
+      failedToLoad: 'Failed to load hosting applications',
+      columns: {
+        applicant: 'Applicant',
+        displayName: 'Name / upstream email',
+        proxy: 'Submitted proxy',
+        createdAt: 'Submitted',
+        status: 'Status',
+        actions: 'Actions'
+      },
+      statuses: {
+        pending: 'Pending',
+        approved: 'Approved',
+        rejected: 'Rejected',
+        cancelled: 'Cancelled',
+        expired: 'Expired',
+        all: 'All'
+      },
+      proxyAuth: 'with auth',
+      noProxy: 'None',
+      applicant: 'Applicant',
+      approve: 'Approve',
+      approving: 'Approving…',
+      reject: 'Reject',
+      rejecting: 'Rejecting…',
+      approveTitle: 'Approve hosting application',
+      proxyMode: 'Proxy',
+      proxyModeHint: 'The account must use a proxy; there is no direct option.',
+      modeExisting: 'Use an existing proxy',
+      modeSubmitted: 'Create from the applicant\'s proxy',
+      chooseProxy: 'Choose a proxy',
+      noProxies: 'No proxies yet. Add one under Proxies, or use the applicant\'s proxy.',
+      noSubmittedProxy: 'The applicant did not submit a proxy.',
+      proxyRequired: 'Choose a proxy.',
+      numbersInvalid: 'Check the numbers: whole numbers; device limit 1–32, admissions per cycle 0–device limit, cycle 1–720 hours.',
+      approveHint: 'Defaults come from Settings → Hosted self-onboarding. After approval, verify with “Test account” on the Accounts page.',
+      approved: 'Created account #{account} (owner hosted group #{group}).',
+      approvedHint: 'Search for this ID on the Accounts page and verify it with “Test account”.',
+      approveSuccess: 'Approved: account #{account}',
+      approveFailed: 'Approval failed',
+      accountLink: 'Account #{id}',
+      rejectTitle: 'Reject hosting application',
+      rejectMessage: 'Reject “{name}” submitted by {user}.',
+      rejectReason: 'Reason',
+      rejectReasonHint: 'The applicant sees this text.',
+      rejectReasonShort: 'Reason: {reason}',
+      rejectSuccess: 'Rejected',
+      rejectFailed: 'Rejection failed',
+      fields: {
+        concurrency: 'Concurrency',
+        priority: 'Priority',
+        deviceLimit: 'Carpool device limit',
+        admissionsPerCycle: 'Admissions per cycle',
+        intervalHours: 'Cycle (hours)'
+      },
+      errors: {
+        SELF_ONBOARD_DISABLED: 'Hosted self-onboarding is switched off; approval is not possible.',
+        SELF_ONBOARD_PROXY_REQUIRED: 'A proxy is required.',
+        SELF_ONBOARD_PROXY_INVALID: 'The proxy is invalid or unusable; choose another.',
+        SELF_ONBOARD_PROXY_UNAVAILABLE: 'The proxy is unusable; choose another.',
+        SELF_ONBOARD_ALREADY_HOSTED: 'This Claude account is already hosted (an account or pending application with the same upstream account exists).',
+        SELF_ONBOARD_IDENTITY_MISSING: 'The application has no upstream identity and cannot be approved.',
+        SELF_ONBOARD_NOT_FOUND: 'Application not found.',
+        SELF_ONBOARD_INVALID_STATE: 'The application changed (handled, cancelled or expired). Please refresh.'
+      }
+    },
+
     // Held stablecoin deposits
     cryptoDeposits: {
       title: 'Held Stablecoin Deposits',
@@ -5246,6 +5323,22 @@ export default {
         redirectUrlMissing: 'Set the Frontend URL under Registration first; the redirect URI is derived from it.',
         redirectUrlHint: 'Register exactly this URL as the authorized redirect URI of your {provider} app.',
         accountHint: 'Accounts are bound by the {provider} account ID (never merged by email). First sign-in follows the registration and invitation settings; no email code is needed.'
+      },
+      hostedSelfOnboard: {
+        title: 'Hosted self-onboarding',
+        description: 'Signed-in users submit their own Claude account (setup-token) on the ccyou.dev hosted page; administrators review it under Hosting Applications. Each owner gets an own hosted group automatically.',
+        enabled: 'Open self-onboarding',
+        enabledHint: 'When off, the user entry is hidden, links and submissions are refused and admins cannot approve; existing applications can still be viewed, cancelled and rejected.',
+        exchangeProxy: 'Exchange proxy',
+        exchangeProxyHint: 'Used to exchange the code when the applicant gives no proxy. When unset, applicants must bring their own proxy; the server never connects directly.',
+        exchangeProxyNone: 'None (applicants must bring a proxy)',
+        exchangeProxyMissing: 'Proxy #{id} (no longer listed)',
+        feeRate: 'Hosting service fee rate',
+        feeRateHint: 'Rate of each new owner hosted group: the owner\'s own use is billed at standard price × this rate (e.g. 0.10).',
+        defaultsTitle: 'Approval defaults',
+        defaultsHint: 'Prefilled in the approve dialog; administrators can change each one.',
+        invalidFeeRate: 'The hosting service fee rate must be a number of at least 0',
+        invalidDefault: 'Invalid hosted self-onboarding default: {field}'
       },
       redeemPurchase: {
         title: 'Users buying redeem codes',

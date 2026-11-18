@@ -886,6 +886,64 @@
             </p>
           </div>
         </div>
+        <!-- Hosted self-onboarding: users submit their own Claude setup-token account, an admin approves -->
+        <div class="card" data-testid="hosted-self-onboard-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.hostedSelfOnboard.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.hostedSelfOnboard.description') }}
+            </p>
+          </div>
+          <div class="space-y-6 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="font-medium text-gray-900 dark:text-white">{{ t('admin.settings.hostedSelfOnboard.enabled') }}</label>
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.hostedSelfOnboard.enabledHint') }}</p>
+              </div>
+              <Toggle v-model="form.hosted_self_onboard_enabled" data-testid="hosted-self-onboard-enabled" />
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.hostedSelfOnboard.exchangeProxy') }}
+                </label>
+                <Select
+                  v-model="form.hosted_self_onboard_exchange_proxy_id"
+                  :options="hostedExchangeProxyOptions"
+                  data-testid="hosted-self-onboard-exchange-proxy"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.hostedSelfOnboard.exchangeProxyHint') }}</p>
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.hostedSelfOnboard.feeRate') }}
+                </label>
+                <input v-model.number="form.hosted_self_fee_rate" type="number" min="0" step="0.01" class="input" data-testid="hosted-self-fee-rate" />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.hostedSelfOnboard.feeRateHint') }}</p>
+              </div>
+            </div>
+            <div>
+              <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.settings.hostedSelfOnboard.defaultsTitle') }}</h3>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.hostedSelfOnboard.defaultsHint') }}</p>
+              <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                <div v-for="field in hostedSelfOnboardDefaultFields" :key="field.key">
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ field.label }}</label>
+                  <input
+                    v-model.number="form[field.key]"
+                    type="number"
+                    :min="field.min"
+                    :max="field.max"
+                    step="1"
+                    class="input"
+                    :data-testid="`hosted-default-${field.key}`"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
         </div><!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
@@ -1684,7 +1742,7 @@ import type {
   UpdateSettingsRequest,
   DefaultSubscriptionSetting
 } from '@/api/admin/settings'
-import type { AdminGroup } from '@/types'
+import type { AdminGroup, Proxy } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
@@ -1864,8 +1922,56 @@ const form = reactive<SettingsForm>({
   maintenance_message: '',
   client_brand_name: '',
   client_setup_command: '',
-  aitp_install_code_enabled: false
+  aitp_install_code_enabled: false,
+  hosted_self_onboard_enabled: false,
+  hosted_self_onboard_exchange_proxy_id: 0,
+  hosted_self_fee_rate: 0.1,
+  hosted_self_onboard_default_concurrency: 3,
+  hosted_self_onboard_default_priority: 1,
+  hosted_self_onboard_default_device_limit: 5,
+  hosted_self_onboard_default_admissions_per_cycle: 1,
+  hosted_self_onboard_default_interval_hours: 24
 })
+
+/* ---------- Hosted self-onboarding ---------- */
+const hostedProxies = ref<Proxy[]>([])
+
+const hostedExchangeProxyOptions = computed(() => {
+  const options = [{ value: 0, label: t('admin.settings.hostedSelfOnboard.exchangeProxyNone') }]
+  for (const p of hostedProxies.value) {
+    options.push({ value: p.id, label: `${p.name} · ${p.protocol}://${p.host}:${p.port}` })
+  }
+  // A stored proxy that is no longer listed (deleted or inactive) still shows, by ID.
+  const current = form.hosted_self_onboard_exchange_proxy_id
+  if (current > 0 && !hostedProxies.value.some((p) => p.id === current)) {
+    options.push({ value: current, label: t('admin.settings.hostedSelfOnboard.exchangeProxyMissing', { id: current }) })
+  }
+  return options
+})
+
+type HostedDefaultKey =
+  | 'hosted_self_onboard_default_concurrency'
+  | 'hosted_self_onboard_default_priority'
+  | 'hosted_self_onboard_default_device_limit'
+  | 'hosted_self_onboard_default_admissions_per_cycle'
+  | 'hosted_self_onboard_default_interval_hours'
+
+const hostedSelfOnboardDefaultFields = computed<Array<{ key: HostedDefaultKey; label: string; min: number; max?: number }>>(() => [
+  { key: 'hosted_self_onboard_default_concurrency', label: t('admin.hostedApplications.fields.concurrency'), min: 1 },
+  { key: 'hosted_self_onboard_default_priority', label: t('admin.hostedApplications.fields.priority'), min: 1 },
+  { key: 'hosted_self_onboard_default_device_limit', label: t('admin.hostedApplications.fields.deviceLimit'), min: 1, max: 32 },
+  { key: 'hosted_self_onboard_default_admissions_per_cycle', label: t('admin.hostedApplications.fields.admissionsPerCycle'), min: 0, max: 32 },
+  { key: 'hosted_self_onboard_default_interval_hours', label: t('admin.hostedApplications.fields.intervalHours'), min: 1, max: 720 }
+])
+
+async function loadHostedProxies() {
+  try {
+    hostedProxies.value = (await adminAPI.proxies.getAll()) ?? []
+  } catch (error) {
+    console.error('Failed to load proxies:', error)
+    hostedProxies.value = []
+  }
+}
 
 const defaultSubscriptionGroupOptions = computed<DefaultSubscriptionGroupOption[]>(() =>
   subscriptionGroups.value.map((group) => ({
@@ -2101,8 +2207,26 @@ function validateUrlSettings(): boolean {
   return false
 }
 
+/** Fee rate ≥ 0 and whole-number approval defaults within their ranges. */
+function validateHostedSelfOnboard(): boolean {
+  const fee = form.hosted_self_fee_rate as unknown
+  if (typeof fee !== 'number' || !Number.isFinite(fee) || fee < 0) {
+    appStore.showError(t('admin.settings.hostedSelfOnboard.invalidFeeRate'))
+    return false
+  }
+  for (const field of hostedSelfOnboardDefaultFields.value) {
+    const v = form[field.key] as unknown
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < field.min || (field.max !== undefined && v > field.max)) {
+      appStore.showError(t('admin.settings.hostedSelfOnboard.invalidDefault', { field: field.label }))
+      return false
+    }
+  }
+  return true
+}
+
 async function saveSettings() {
   if (!validateUrlSettings()) return
+  if (!validateHostedSelfOnboard()) return
 
   saving.value = true
   try {
@@ -2201,7 +2325,15 @@ async function saveSettings() {
       maintenance_message: form.maintenance_message,
       client_brand_name: form.client_brand_name,
       client_setup_command: form.client_setup_command,
-      aitp_install_code_enabled: form.aitp_install_code_enabled
+      aitp_install_code_enabled: form.aitp_install_code_enabled,
+      hosted_self_onboard_enabled: form.hosted_self_onboard_enabled,
+      hosted_self_onboard_exchange_proxy_id: form.hosted_self_onboard_exchange_proxy_id,
+      hosted_self_fee_rate: form.hosted_self_fee_rate,
+      hosted_self_onboard_default_concurrency: form.hosted_self_onboard_default_concurrency,
+      hosted_self_onboard_default_priority: form.hosted_self_onboard_default_priority,
+      hosted_self_onboard_default_device_limit: form.hosted_self_onboard_default_device_limit,
+      hosted_self_onboard_default_admissions_per_cycle: form.hosted_self_onboard_default_admissions_per_cycle,
+      hosted_self_onboard_default_interval_hours: form.hosted_self_onboard_default_interval_hours
     }
     const updated = await adminAPI.settings.updateSettings(payload)
     Object.assign(form, updated)
@@ -2372,6 +2504,7 @@ async function saveOverloadCooldownSettings() {
 onMounted(() => {
   loadSettings()
   loadSubscriptionGroups()
+  loadHostedProxies()
   loadAdminApiKey()
   loadOverloadCooldownSettings()
 })

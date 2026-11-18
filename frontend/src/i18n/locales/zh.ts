@@ -466,6 +466,7 @@ export default {
     hostedAccounts: '托管账号',
     buySubscription: '购买与充值',
     cryptoDeposits: '稳定币待审充值',
+    hostedApplications: '托管申请',
     docs: '文档'
   },
 
@@ -2708,6 +2709,10 @@ export default {
       currentlyInUse: '使用中',
       inProgress: '进行中',
       inProgressHint: '当前有请求正在处理；下方时间为最近一次已完成请求。',
+      identityUnknown: '身份未知',
+      identityUnknownHint: '这个号没有已知的上游账号 UUID（导入时未取得），系统无法替它查重；请管理员自行确认没有重复托管。',
+      ownerPaused: '号主暂停',
+      withdrawRequested: '申请下架',
       lastCompletedHint: '最近完成请求：{time}',
       lastCompletedNever: '尚无已完成请求记录',
       listPendingSyncHint: '列表存在待同步变更，点击同步可补齐最新数据。',
@@ -4129,6 +4134,78 @@ export default {
       deleteConfirm: '确定要删除该公告吗？此操作无法撤销。'
     },
 
+    // Hosted self-onboarding applications
+    hostedApplications: {
+      title: '托管申请',
+      description: '用户自助提交的 Claude 号（setup-token）。批准后会建账号并放进号主的专属托管分组；账号必须走代理，没有直连选项。',
+      switchOff: '「托管自助上号」开关已关闭：不能批准新申请，仍可驳回。',
+      empty: '没有符合条件的申请。',
+      failedToLoad: '加载托管申请失败',
+      columns: {
+        applicant: '申请人',
+        displayName: '名称 / 上游邮箱',
+        proxy: '提交的代理',
+        createdAt: '提交时间',
+        status: '状态',
+        actions: '操作'
+      },
+      statuses: {
+        pending: '待审核',
+        approved: '已通过',
+        rejected: '已驳回',
+        cancelled: '已取消',
+        expired: '已过期',
+        all: '全部'
+      },
+      proxyAuth: '含认证',
+      noProxy: '未提交',
+      applicant: '申请人',
+      approve: '批准',
+      approving: '批准中…',
+      reject: '驳回',
+      rejecting: '驳回中…',
+      approveTitle: '批准托管申请',
+      proxyMode: '代理',
+      proxyModeHint: '账号必须走代理，没有直连选项。',
+      modeExisting: '使用已有代理',
+      modeSubmitted: '用申请人提交的代理新建',
+      chooseProxy: '选择代理',
+      noProxies: '还没有可用代理，请先到「IP 管理」添加，或使用申请人提交的代理。',
+      noSubmittedProxy: '申请人没有提交代理。',
+      proxyRequired: '请选择一个代理。',
+      numbersInvalid: '请检查数值：都是整数；设备上限 1–32，每周期名额 0–设备上限，周期 1–720 小时。',
+      approveHint: '默认值来自系统设置「托管自助上号」。批准后可在账号管理里用「测试账号」验证。',
+      approved: '已创建账号 #{account}（号主托管分组 #{group}）。',
+      approvedHint: '可在账号管理里搜索该 ID 并用「测试账号」验证。',
+      approveSuccess: '已批准，账号 #{account}',
+      approveFailed: '批准失败',
+      accountLink: '账号 #{id}',
+      rejectTitle: '驳回托管申请',
+      rejectMessage: '驳回 {user} 提交的「{name}」。',
+      rejectReason: '驳回原因',
+      rejectReasonHint: '申请人会看到这段文字。',
+      rejectReasonShort: '原因：{reason}',
+      rejectSuccess: '已驳回',
+      rejectFailed: '驳回失败',
+      fields: {
+        concurrency: '并发',
+        priority: '优先级',
+        deviceLimit: '拼车设备上限',
+        admissionsPerCycle: '每周期名额',
+        intervalHours: '周期（小时）'
+      },
+      errors: {
+        SELF_ONBOARD_DISABLED: '「托管自助上号」开关已关闭，不能批准。',
+        SELF_ONBOARD_PROXY_REQUIRED: '必须选择代理。',
+        SELF_ONBOARD_PROXY_INVALID: '代理无效或不可用，请换一个。',
+        SELF_ONBOARD_PROXY_UNAVAILABLE: '代理不可用，请换一个。',
+        SELF_ONBOARD_ALREADY_HOSTED: '该 Claude 号已在托管中（已有同一上游账号的账号或待审核申请）。',
+        SELF_ONBOARD_IDENTITY_MISSING: '申请缺少上游身份，不能批准。',
+        SELF_ONBOARD_NOT_FOUND: '申请不存在。',
+        SELF_ONBOARD_INVALID_STATE: '申请状态已变化（可能已被处理、取消或过期），请刷新。'
+      }
+    },
+
     // Held stablecoin deposits
     cryptoDeposits: {
       title: '稳定币待审充值',
@@ -5409,6 +5486,22 @@ export default {
         redirectUrlMissing: '请先在「注册设置」中填写前端地址（Frontend URL），回调地址由它生成。',
         redirectUrlHint: '把这个地址原样填到 {provider} 应用的授权回调地址中。',
         accountHint: '账号按 {provider} 账号 ID 绑定（不按邮箱合并）；首次登录遵守注册开关与邀请码设置，无需邮箱验证码。'
+      },
+      hostedSelfOnboard: {
+        title: '托管自助上号',
+        description: '允许登录用户在 ccyou.dev「我的托管号」页提交自己的 Claude 号（setup-token），由管理员在「托管申请」页审核。每个号主自动建一个专属托管分组。',
+        enabled: '开放自助上号',
+        enabledHint: '关闭后用户端入口隐藏、不能生成授权链接或提交，管理员不能批准；已有申请仍可查看、取消和驳回。',
+        exchangeProxy: '兑换用代理',
+        exchangeProxyHint: '申请人没填自己的代理时，用这个代理兑换授权码。不设置时申请人必须自带代理；服务器从不直连。',
+        exchangeProxyNone: '不设置（申请人必须自带代理）',
+        exchangeProxyMissing: '代理 #{id}（已不在列表中）',
+        feeRate: '托管服务费倍率',
+        feeRateHint: '新建号主托管分组的倍率：号主自用按标准价 × 该倍率计费（例如 0.10）。',
+        defaultsTitle: '批准时的默认值',
+        defaultsHint: '批准对话框里预填这些值，管理员可逐个修改。',
+        invalidFeeRate: '托管服务费倍率必须是不小于 0 的数字',
+        invalidDefault: '托管自助上号默认值无效：{field}'
       },
       redeemPurchase: {
         title: '用户购买兑换码',
