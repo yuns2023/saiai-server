@@ -60,12 +60,17 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 api.interceptors.response.use(
   (response: AxiosResponse) => {
-    const body = response.data as { code?: number; message?: string; data?: unknown } | undefined
+    const body = response.data as { code?: number; message?: string; reason?: unknown; data?: unknown } | undefined
     if (body && typeof body === 'object' && 'code' in body) {
       if (body.code === 0) {
         response.data = body.data
       } else {
-        return Promise.reject({ status: response.status, code: body.code, message: body.message || 'Unknown error' } satisfies ApiError)
+        return Promise.reject({
+          status: response.status,
+          code: body.code,
+          reason: typeof body.reason === 'string' ? body.reason : undefined,
+          message: body.message || 'Unknown error'
+        } satisfies ApiError)
       }
     }
     return response

@@ -50,4 +50,22 @@ describe('hosted store: self-onboarding switch', () => {
     store.applyOwnerState({ id: 12, owner_paused: true, withdraw_requested: false })
     expect(store.accounts[0].owner_paused).toBe(true)
   })
+
+  it('a list read issued before an owner action cannot undo it', async () => {
+    const store = useHostedStore()
+    let answer!: (v: unknown) => void
+    hosted.listOwnedAccounts.mockReturnValue(new Promise((r) => { answer = r }))
+    const pending = store.load()
+    store.applyOwnerState({ id: 12, owner_paused: false, withdraw_requested: true })
+    answer([{ account_id: 12, current: true, owner_paused: false, withdraw_requested: false }])
+    await pending
+    expect(store.accounts[0].withdraw_requested).toBe(true)
+  })
+
+  it('drops an owner answer that arrives after sign-out', () => {
+    const store = useHostedStore()
+    const session = store.session()
+    store.reset()
+    expect(store.applyOwnerState({ id: 12, owner_paused: true, withdraw_requested: false }, session)).toBe(false)
+  })
 })

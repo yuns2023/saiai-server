@@ -183,6 +183,17 @@ describe('Hosting applications (admin)', () => {
     expect((row(w, 1).get('[data-testid=reject]').element as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('keeps approve disabled until this page has read the settings', async () => {
+    let release!: (v: unknown) => void
+    getSettings.mockReturnValue(new Promise((r) => { release = r }))
+    const w = mount(HostedApplicationsView, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect((row(w, 1).get('[data-testid=approve]').element as HTMLButtonElement).disabled).toBe(true)
+    release(structuredClone(settings))
+    await flushPromises()
+    expect((row(w, 1).get('[data-testid=approve]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('reloads with the chosen status filter', async () => {
     const w = await mountView()
     await w.get('[data-testid=status-filter]').setValue('')

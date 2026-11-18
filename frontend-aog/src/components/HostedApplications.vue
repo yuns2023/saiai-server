@@ -10,7 +10,7 @@ import { useAppStore } from '@/stores/app'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{ items: HostedApplication[] }>()
-const emit = defineEmits<{ changed: [app: HostedApplication] }>()
+const emit = defineEmits<{ changed: [app: HostedApplication | null] }>()
 const { t, te } = useI18n()
 const app = useAppStore()
 
@@ -41,7 +41,7 @@ async function confirmCancel(): Promise<void> {
   } catch (e) {
     app.notify('error', t(`onboard.errors.${onboardErrorKey(e)}`))
     // NOT_FOUND / INVALID_STATE: it was handled meanwhile; the parent reloads the list.
-    emit('changed', a)
+    emit('changed', null)
   } finally {
     busy.value = false
     target.value = null

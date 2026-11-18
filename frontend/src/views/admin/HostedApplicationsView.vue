@@ -70,7 +70,7 @@
 
           <template #cell-actions="{ row }">
             <div v-if="row.status === 'pending'" class="flex gap-2">
-              <button class="btn btn-primary btn-sm" :disabled="!switchOn || busy" :title="switchOn ? '' : t('admin.hostedApplications.switchOff')" data-testid="approve" @click="openApprove(row)">
+              <button class="btn btn-primary btn-sm" :disabled="!switchOn || !contextReady || busy" :title="switchOn ? '' : t('admin.hostedApplications.switchOff')" data-testid="approve" @click="openApprove(row)">
                 {{ t('admin.hostedApplications.approve') }}
               </button>
               <button class="btn btn-secondary btn-sm" :disabled="busy" data-testid="reject" @click="openReject(row)">
@@ -354,6 +354,8 @@ const defaults = reactive({
   carpool_admissions_per_cycle: 1,
   carpool_interval_hours: 24
 })
+/** Settings (defaults, switch) and proxies read by this page; approving waits for them. */
+const contextReady = ref(false)
 const approveTarget = ref<AdminHostedApplication | null>(null)
 const approveResult = ref<ApproveHostedApplicationResult | null>(null)
 const approveForm = reactive<ApproveForm>({
@@ -382,7 +384,7 @@ function hasSubmittedProxy(a: AdminHostedApplication): boolean {
 }
 
 function openApprove(row: AdminHostedApplication) {
-  if (busy.value || !switchOn.value) return
+  if (busy.value || !switchOn.value || !contextReady.value) return
   Object.assign(approveForm, {
     proxy_mode: hasSubmittedProxy(row) ? 'submitted' : 'existing',
     proxy_id: null,
@@ -404,6 +406,10 @@ async function confirmApprove() {
   if (!target || busy.value) return
   tried.value = true
   if (problems.value.length) return
+  if (!switchOn.value) {
+    appStore.showError(t('admin.hostedApplications.errors.SELF_ONBOARD_DISABLED'))
+    return
+  }
   busy.value = true
   try {
     const result = await adminAPI.hostedApplications.approve(target.id, approvePayload(approveForm))
@@ -472,6 +478,8 @@ async function loadApproveContext() {
     defaults.carpool_interval_hours = pick(s.hosted_self_onboard_default_interval_hours, defaults.carpool_interval_hours)
   } catch {
     // Built-in defaults stay; the admin can edit every value in the dialog.
+  } finally {
+    contextReady.value = true
   }
 }
 

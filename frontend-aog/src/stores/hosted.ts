@@ -31,6 +31,9 @@ export const useHostedStore = defineStore('hosted', () => {
 
   /** Bumped by reset(); a list fetched for a previous account is discarded. */
   let generation = 0
+  /** Owner actions applied so far (ordering against list reads). */
+  let ownerSeq = 0
+  const ownerOverrides = new Map<number, { seq: number; state: OwnerState }>()
   let inflight: Promise<OwnedAccount[]> | null = null
   let lastSuccessAt: number | null = null
   let lastFailureAt: number | null = null
@@ -39,9 +42,15 @@ export const useHostedStore = defineStore('hosted', () => {
   function load(): Promise<OwnedAccount[]> {
     if (inflight) return inflight
     const issuedIn = generation
+    const issuedAfter = ownerSeq
     const request = hostedApi
       .listOwnedAccounts()
-      .then((list) => {
+      .then((raw) => {
+        // A pause / resume / withdraw that finished after this list was asked for wins over it.
+        const list = raw.map((a) => {
+          const o = ownerOverrides.get(a.account_id)
+          return o && o.seq > issuedAfter ? { ...a, owner_paused: o.state.owner_paused, withdraw_requested: o.state.withdraw_requested } : a
+        })
         if (issuedIn === generation) {
           accounts.value = list
           failed.value = false
@@ -120,11 +129,19 @@ export const useHostedStore = defineStore('hosted', () => {
     if (configDue(Date.now())) loadConfig().catch(() => undefined)
   }
 
-  /** Applies an owner pause / resume / withdraw answer to the listed account. */
-  function applyOwnerState(state: OwnerState): void {
+  /** Current session tag; pass it back to applyOwnerState so a late answer after sign-out is dropped. */
+  function session(): number {
+    return generation
+  }
+
+  /** Applies an owner pause / resume / withdraw answer to the listed account; false when the session changed meanwhile. */
+  function applyOwnerState(state: OwnerState, issuedIn: number = generation): boolean {
+    if (issuedIn !== generation) return false
+    ownerOverrides.set(state.id, { seq: ++ownerSeq, state })
     accounts.value = accounts.value.map((a) =>
       a.account_id === state.id ? { ...a, owner_paused: state.owner_paused, withdraw_requested: state.withdraw_requested } : a
     )
+    return true
   }
 
   function reset(): void {
@@ -139,7 +156,8 @@ export const useHostedStore = defineStore('hosted', () => {
     configSuccessAt = null
     configFailureAt = null
     onboard.value = null
+    ownerOverrides.clear()
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, showEntry, load, ensureLoaded, loadConfig, ensureConfig, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, showEntry, load, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })

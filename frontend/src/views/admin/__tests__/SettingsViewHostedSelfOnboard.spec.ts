@@ -133,6 +133,25 @@ describe('admin settings: hosted self-onboarding', () => {
     expect(settingsApi.updateSettings).not.toHaveBeenCalled()
   })
 
+  it('needs admissions per cycle ≤ device limit while on', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored({ hosted_self_onboard_default_device_limit: 2, hosted_self_onboard_default_admissions_per_cycle: 3 }))
+    const w = await mountView()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings).not.toHaveBeenCalled()
+  })
+
+  it('never blocks saving other settings while the switch is off, even with stored zeros', async () => {
+    const zeros = { hosted_self_onboard_enabled: false, hosted_self_onboard_default_concurrency: 0, hosted_self_onboard_default_interval_hours: 0 }
+    settingsApi.getSettings.mockResolvedValue(stored(zeros))
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(zeros), ...payload }))
+    const w = await mountView()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings).toHaveBeenCalledTimes(1)
+    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject(zeros)
+  })
+
   it('has English and Chinese texts', () => {
     expect(zh.admin.settings.hostedSelfOnboard.title).toBe('托管自助上号')
     expect(en.admin.settings.hostedSelfOnboard.title).toBeTruthy()

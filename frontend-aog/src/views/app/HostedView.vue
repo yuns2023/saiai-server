@@ -133,13 +133,15 @@ function hasOwnerControls(a: OwnedAccount): boolean {
 async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> {
   if (ownerBusy.value !== null) return
   ownerBusy.value = a.account_id
+  const session = hosted.session()
   try {
-    hosted.applyOwnerState(await hostedApi.setOwnerState(a.account_id, action))
-    app.notify('ok', t(`hosted.owner_${action}_done`))
+    const state = await hostedApi.setOwnerState(a.account_id, action)
+    if (hosted.applyOwnerState(state, session)) app.notify('ok', t(`hosted.owner_${action}_done`))
   } catch (e) {
+    if (hosted.session() !== session) return
     const key = onboardErrorKey(e)
     app.notify('error', key === 'generic' ? t('hosted.ownerActionFailed') : t(`onboard.errors.${key}`))
-    loadAccounts()
+    void loadAccounts()
   } finally {
     ownerBusy.value = null
   }
@@ -156,23 +158,38 @@ const onboardEnabled = computed(() => hosted.onboard?.enabled === true)
 const applications = ref<HostedApplication[]>([])
 const appsFailed = ref(false)
 
+/** Only the latest list answer is used; a local change bumps it too so an older read cannot undo it. */
+let appsSeq = 0
+
 async function loadApplications(): Promise<void> {
+  const seq = ++appsSeq
   try {
-    applications.value = await hostedApi.listApplications()
+    const list = await hostedApi.listApplications()
+    if (seq !== appsSeq) return
+    applications.value = list
     appsFailed.value = false
   } catch (e) {
+    if (seq !== appsSeq) return
     // A server without self-onboarding has no such list.
     if ((e as Partial<ApiError> | undefined)?.status === 404) applications.value = []
     else appsFailed.value = true
   }
 }
 
+function upsertApplication(a: HostedApplication): void {
+  appsSeq++
+  const rest = applications.value.filter((x) => x.id !== a.id)
+  applications.value = [a, ...rest]
+}
+
 function onSubmitted(a: HostedApplication): void {
-  applications.value = [a, ...applications.value.filter((x) => x.id !== a.id)]
+  upsertApplication(a)
   void loadApplications()
 }
 
-function onApplicationChanged(): void {
+/** `updated` is the server's answer for a cancel; null when it failed (state unknown). */
+function onApplicationChanged(updated: HostedApplication | null): void {
+  if (updated) upsertApplication(updated)
   void loadApplications()
 }
 
@@ -433,7 +450,7 @@ onUnmounted(() => {
       </div>
     </template>
 
-    <p v-if="appsFailed && onboardEnabled" class="mt-8 text-sm text-seal" role="alert" data-testid="apps-error">
+    <p v-if="appsFailed" class="mt-8 text-sm text-seal" role="alert" data-testid="apps-error">
       {{ t('onboard.apps.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadApplications">{{ t('common.retry') }}</button>
     </p>
     <HostedApplications v-if="applications.length" :items="applications" @changed="onApplicationChanged" />

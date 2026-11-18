@@ -79,7 +79,9 @@ describe('HostedOnboard', () => {
       await w.get('[data-testid=onboard-generate]').trigger('click')
       await flushPromises()
       expect(w.find('[data-testid=onboard-countdown]').exists()).toBe(true)
+      await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
       await vi.advanceTimersByTimeAsync(4000)
+      expect(code(w).value).toBe('')
       expect(w.find('[data-testid=onboard-expired]').exists()).toBe(true)
       expect(code(w).disabled).toBe(true)
     } finally {
@@ -175,6 +177,35 @@ describe('HostedOnboard', () => {
     expect(w.find('[data-testid=onboard-link]').exists()).toBe(false)
     expect((w.get('[data-testid=onboard-name]').element as HTMLInputElement).value).toBe('我的号')
     expect((w.get('[data-testid=onboard-proxy-host]').element as HTMLInputElement).value).toBe('proxy.example.com')
+    // The proxy password is a secret too: it goes with the used link.
+    expect((w.get('[data-testid=onboard-proxy-password]').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('regenerating drops the old link and its code, and cannot run while a submission is out', async () => {
+    const w = await mountForm()
+    await generate(w)
+    await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
+    hosted.createAuthUrl.mockReturnValue(new Promise(() => undefined))
+    await w.get('[data-testid=onboard-generate]').trigger('click')
+    await flushPromises()
+    expect(code(w).value).toBe('')
+    expect(w.find('[data-testid=onboard-link]').exists()).toBe(false)
+  })
+
+  it('locks the code field and the generate button while submitting', async () => {
+    const w = await mountForm()
+    await generate(w)
+    let finish!: (v: unknown) => void
+    hosted.submitApplication.mockReturnValue(new Promise((r) => { finish = r }))
+    await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
+    await w.get('[data-testid=onboard-name]').setValue('n')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(code(w).disabled).toBe(true)
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(true)
+    finish(APP)
+    await flushPromises()
+    expect(code(w).value).toBe('')
   })
 
   it('on EXCHANGE_FAILED also needs a new link', async () => {

@@ -8,7 +8,8 @@ import type { PaginatedResponse } from '@/types'
 
 export type HostedApplicationStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'expired'
 
-export interface AdminHostedApplication {
+/** What approve / reject return as `application` (the user-facing shape). */
+export interface HostedApplication {
   id: number
   status: HostedApplicationStatus | string
   display_name: string
@@ -19,6 +20,10 @@ export interface AdminHostedApplication {
   account_id: number | null
   created_at: string
   reviewed_at: string | null
+}
+
+/** List rows: the application plus admin-only applicant and proxy details. */
+export interface AdminHostedApplication extends HostedApplication {
   user_id: number
   user_email: string
   proxy_protocol: string
@@ -41,7 +46,7 @@ export interface ApproveHostedApplicationRequest {
 }
 
 export interface ApproveHostedApplicationResult {
-  application: AdminHostedApplication
+  application: HostedApplication
   account_id: number
   group_id: number
 }
@@ -62,8 +67,8 @@ export const hostedApplicationsAPI = {
     const { data } = await apiClient.post<ApproveHostedApplicationResult>(`/admin/hosted-applications/${id}/approve`, body)
     return data
   },
-  async reject(id: number, reason: string): Promise<AdminHostedApplication> {
-    const { data } = await apiClient.post<AdminHostedApplication>(`/admin/hosted-applications/${id}/reject`, { reason })
+  async reject(id: number, reason: string): Promise<HostedApplication> {
+    const { data } = await apiClient.post<HostedApplication>(`/admin/hosted-applications/${id}/reject`, { reason })
     return data
   }
 }

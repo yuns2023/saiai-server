@@ -2207,8 +2207,13 @@ function validateUrlSettings(): boolean {
   return false
 }
 
-/** Fee rate ≥ 0 and whole-number approval defaults within their ranges. */
+/**
+ * While the switch is on: fee rate ≥ 0 and whole-number approval defaults
+ * within the ranges the approve dialog enforces. While it is off, stored
+ * values are not checked, so they never block saving unrelated settings.
+ */
 function validateHostedSelfOnboard(): boolean {
+  if (!form.hosted_self_onboard_enabled) return true
   const fee = form.hosted_self_fee_rate as unknown
   if (typeof fee !== 'number' || !Number.isFinite(fee) || fee < 0) {
     appStore.showError(t('admin.settings.hostedSelfOnboard.invalidFeeRate'))
@@ -2220,6 +2225,12 @@ function validateHostedSelfOnboard(): boolean {
       appStore.showError(t('admin.settings.hostedSelfOnboard.invalidDefault', { field: field.label }))
       return false
     }
+  }
+  if (form.hosted_self_onboard_default_admissions_per_cycle > form.hosted_self_onboard_default_device_limit) {
+    appStore.showError(
+      t('admin.settings.hostedSelfOnboard.invalidDefault', { field: t('admin.hostedApplications.fields.admissionsPerCycle') })
+    )
+    return false
   }
   return true
 }

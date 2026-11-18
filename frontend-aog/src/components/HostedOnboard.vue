@@ -3,10 +3,11 @@
  * 托管我的 Claude 号: generate a setup-token authorisation link, paste the
  * `code#state` claude.ai shows, name the account, optionally give a proxy and
  * submit it for review. The code is never kept: the field is cleared after
- * every submission. A failure that used up the link asks for a new one and
- * keeps the name and proxy fields.
+ * every submission and whenever its link expires or is replaced. A failure
+ * that used up the link asks for a new one and keeps the name and the proxy
+ * address (not its password).
  */
-import { computed, onUnmounted, reactive, ref } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { hostedApi, type HostedApplication, type SelfOnboardAuthUrl, type SelfOnboardConfig } from '@/api'
 import {
@@ -33,6 +34,7 @@ const link = ref<SelfOnboardAuthUrl | null>(null)
 const linking = ref(false)
 const now = ref(Date.now())
 let ticker: number | undefined
+let alive = true
 
 const expiresMs = computed(() => (link.value ? Date.parse(link.value.expires_at) : NaN))
 const remainingMs = computed(() => (Number.isFinite(expiresMs.value) ? Math.max(0, expiresMs.value - now.value) : 0))
@@ -62,16 +64,21 @@ function dropLink(): void {
 }
 
 async function generate(): Promise<void> {
-  if (linking.value) return
+  if (linking.value || submitting.value) return
   linking.value = true
   error.value = ''
   newLinkNeeded.value = false
+  done.value = false
+  // The old link is replaced either way; its code must not be reused.
+  dropLink()
+  code.value = ''
   try {
-    link.value = await hostedApi.createAuthUrl()
-    code.value = ''
+    const fresh = await hostedApi.createAuthUrl()
+    if (!alive) return
+    link.value = fresh
     startTicker()
   } catch (e) {
-    error.value = t(`onboard.errors.${onboardErrorKey(e)}`, { n: props.config.max_pending })
+    if (alive) error.value = t(`onboard.errors.${onboardErrorKey(e)}`, { n: props.config.max_pending })
   } finally {
     linking.value = false
   }
@@ -83,6 +90,11 @@ const displayName = ref('')
 const proxy = reactive(emptyProxy())
 /** Field problems are shown once the user tried to submit. */
 const tried = ref(false)
+
+// An expired link takes its pasted code with it.
+watch(linkLive, (live) => {
+  if (!live) code.value = ''
+})
 
 const codeProblem = computed(() => (normalizeAuthCode(code.value) ? '' : 'codeInvalid'))
 const nameProblem = computed(() => checkDisplayName(displayName.value))
@@ -101,7 +113,7 @@ const newLinkNeeded = ref(false)
 const done = ref(false)
 
 async function submit(): Promise<void> {
-  if (submitting.value) return
+  if (submitting.value || linking.value) return
   tried.value = true
   done.value = false
   if (!linkLive.value || hasProblems.value || !link.value) return
@@ -118,6 +130,7 @@ async function submit(): Promise<void> {
   newLinkNeeded.value = false
   try {
     const app = await hostedApi.submitApplication(body)
+    if (!alive) return
     dropLink()
     displayName.value = ''
     Object.assign(proxy, emptyProxy())
@@ -125,17 +138,24 @@ async function submit(): Promise<void> {
     done.value = true
     emit('submitted', app)
   } catch (e) {
+    if (!alive) return
     error.value = t(`onboard.errors.${onboardErrorKey(e)}`, { n: props.config.max_pending })
     if (submitNeedsNewLink(e)) {
       dropLink()
+      proxy.password = ''
       newLinkNeeded.value = true
     }
   } finally {
     submitting.value = false
+    // Anything pasted while the request was out belongs to a link that is now used or gone.
+    code.value = ''
   }
 }
 
-onUnmounted(stopTicker)
+onUnmounted(() => {
+  alive = false
+  stopTicker()
+})
 </script>
 
 <template>
@@ -152,7 +172,7 @@ onUnmounted(stopTicker)
           <div class="min-w-0">
             <p class="text-sm text-ink-2">{{ t('onboard.step1Lead') }}</p>
             <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <button type="button" class="btn" :class="link ? 'btn-line' : 'btn-primary'" :disabled="linking" data-testid="onboard-generate" @click="generate">
+              <button type="button" class="btn" :class="link ? 'btn-line' : 'btn-primary'" :disabled="linking || submitting" data-testid="onboard-generate" @click="generate">
                 {{ linking ? t('onboard.generating') : link ? t('onboard.regenerate') : t('onboard.generate') }}
               </button>
               <template v-if="link && linkLive">
@@ -178,7 +198,7 @@ onUnmounted(stopTicker)
                 autocomplete="off"
                 autocapitalize="off"
                 spellcheck="false"
-                :disabled="!linkLive"
+                :disabled="!linkLive || submitting"
                 :placeholder="linkLive ? t('onboard.codePlaceholder') : t('onboard.codeNeedsLink')"
                 :aria-invalid="tried && linkLive && codeProblem ? 'true' : undefined"
                 data-testid="onboard-code"

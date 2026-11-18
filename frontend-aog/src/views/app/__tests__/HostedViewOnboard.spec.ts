@@ -139,6 +139,29 @@ describe('HostedView self-onboarding', () => {
     expect(w.get('[data-testid=app-1]').get('[data-testid=app-status]').text()).toBe('已取消')
   })
 
+  it('shows the cancelled state right away, even if the refresh is slow', async () => {
+    const w = await mountView({ apps: [application({ id: 1, status: 'pending' })] })
+    hosted.cancelApplication.mockResolvedValue(application({ id: 1, status: 'cancelled' }))
+    hosted.listApplications.mockReturnValue(new Promise(() => undefined))
+    await w.get('[data-testid=app-cancel-1]').trigger('click')
+    await flushPromises()
+    const dialog = document.querySelector('dialog[open]') as HTMLDialogElement
+    ;([...dialog.querySelectorAll('button')].find((b) => b.textContent?.includes('确认取消申请')) as HTMLButtonElement).click()
+    await flushPromises()
+    expect(w.get('[data-testid=app-1]').get('[data-testid=app-status]').text()).toBe('已取消')
+    expect(w.find('[data-testid=app-cancel-1]').exists()).toBe(false)
+  })
+
+  it('offers a retry when the list fails, also with the switch off', async () => {
+    hosted.listOwnedAccounts.mockResolvedValue([])
+    hosted.listApplications.mockRejectedValue({ status: 500 })
+    hosted.selfOnboardConfig.mockResolvedValue(OFF)
+    setActivePinia(createPinia())
+    const w = mount(HostedView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    expect(w.find('[data-testid=apps-error]').exists()).toBe(true)
+  })
+
   it('applications stay visible with the switch off', async () => {
     const w = await mountView({ config: OFF, apps: [application({ status: 'pending' })] })
     expect(w.find('[data-testid=apps]').exists()).toBe(true)
