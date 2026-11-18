@@ -26,9 +26,9 @@ var claudeCodeToolResultNotices = []string{"[Request interrupted by user"}
 // the framing must open the block (after optional whitespace and an optional
 // <system-reminder> wrapper), so files, tool output or reminders that merely
 // quote the sentence are not user input. It returns the user's words and the
-// text after the client's explanation (other reminders appended to the block).
-// The user's words end at the LAST explanation paragraph, so words quoting the
-// explanation or a literal closing tag stay intact. Each call is linear.
+// remaining text after the client's explanation (other reminders). When the
+// boundary is ambiguous the words end early: client text is never attributed
+// to the user. Each call is linear in the block length.
 func parseMidTurnFrame(text string) (words, rest string, ok bool) {
 	body := strings.TrimLeft(text, " \t\r\n")
 	wrapped := strings.HasPrefix(body, systemReminderOpen)
@@ -39,43 +39,62 @@ func parseMidTurnFrame(text string) (words, rest string, ok bool) {
 		return "", "", false
 	}
 	body = body[len(claudeCodeMidTurnPrefix):]
+	suffixAt := firstParagraphIndex(body, claudeCodeMidTurnSuffix)
+	closeAt := -1
 	if wrapped {
-		if i := strings.LastIndex(body, systemReminderClose); i >= 0 {
-			rest = body[i+len(systemReminderClose):]
-			body = body[:i]
-		}
+		closeAt = strings.Index(body, systemReminderClose)
 	}
-	if i := lastParagraphIndex(body, claudeCodeMidTurnSuffix); i >= 0 {
-		after := body[i:]
-		end := len(after)
-		if j := strings.Index(after, "\n\n"); j >= 0 {
-			end = j
-		} else if j := strings.Index(after, "\r\n\r\n"); j >= 0 {
-			end = j
+	switch {
+	case suffixAt >= 0 && (closeAt < 0 || suffixAt < closeAt):
+		words = body[:suffixAt]
+		after := body[suffixAt:]
+		end := earliestIndex(after, "\n\n", "\r\n\r\n")
+		if wrapped {
+			if i := strings.Index(after, systemReminderClose); i >= 0 && (end < 0 || i < end) {
+				end = i
+			}
 		}
-		rest = after[end:] + rest
-		body = body[:i]
+		if end >= 0 {
+			rest = after[end:]
+		}
+	case closeAt >= 0:
+		words = body[:closeAt]
+		rest = body[closeAt:]
+	default:
+		words = body
 	}
-	return strings.TrimSpace(body), strings.TrimSpace(rest), true
+	if wrapped {
+		rest = strings.Replace(rest, systemReminderClose, "\n", 1)
+	}
+	return strings.TrimSpace(words), strings.TrimSpace(rest), true
 }
 
-// lastParagraphIndex finds the last occurrence of marker that starts a
+// firstParagraphIndex finds the first occurrence of marker that starts a
 // paragraph, scanning forward once.
-func lastParagraphIndex(text, marker string) int {
-	found := -1
+func firstParagraphIndex(text, marker string) int {
 	for offset := 0; offset < len(text); {
 		i := strings.Index(text[offset:], marker)
 		if i < 0 {
-			break
+			return -1
 		}
 		i += offset
 		before := strings.TrimRight(text[:i], " \t")
 		if strings.HasSuffix(before, "\n\n") || strings.HasSuffix(before, "\r\n\r\n") {
-			found = i
+			return i
 		}
 		offset = i + len(marker)
 	}
-	return found
+	return -1
+}
+
+func earliestIndex(text string, seps ...string) int {
+	best := -1
+	for _, sep := range seps {
+		if i := strings.Index(text, sep); i >= 0 && (best < 0 || i < best) {
+			best = i
+		}
+	}
+	return best
 }
 
 // extractMidTurnUserText returns user-authored text of the current turn when
@@ -111,25 +130,42 @@ func extractMidTurnUserText(messages []any) string {
 				}
 				continue
 			}
-			if plainAllowed && !clientGeneratedToolResultText(text) {
-				parts = append(parts, strings.TrimSpace(text))
+			if plainAllowed {
+				if plain := plainUserText(text); plain != "" {
+					parts = append(parts, plain)
+				}
 			}
 		}
 	}
 	return strings.Join(parts, "\n")
 }
 
-func clientGeneratedToolResultText(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || strings.HasPrefix(trimmed, systemReminderOpen) {
-		return true
+// plainUserText keeps the text outside closed <system-reminder> envelopes, in
+// order; an unclosed envelope drops the rest of the block, and client
+// interruption notices are not user words.
+func plainUserText(text string) string {
+	var out strings.Builder
+	for {
+		open := strings.Index(text, systemReminderOpen)
+		if open < 0 {
+			out.WriteString(text)
+			break
+		}
+		out.WriteString(text[:open])
+		closeAt := strings.Index(text[open:], systemReminderClose)
+		if closeAt < 0 {
+			break
+		}
+		out.WriteString("\n")
+		text = text[open+closeAt+len(systemReminderClose):]
 	}
+	plain := strings.TrimSpace(out.String())
 	for _, notice := range claudeCodeToolResultNotices {
-		if strings.HasPrefix(trimmed, notice) {
-			return true
+		if strings.HasPrefix(plain, notice) {
+			return ""
 		}
 	}
-	return false
+	return plain
 }
 
 func hasToolResultBlock(content any) bool {
@@ -167,7 +203,7 @@ func messageTextBlocks(content any) []string {
 	return nil
 }
 
-// withoutMidTurnWords replaces framed mid-turn blocks of a system message by
+// withoutMidTurnWords replaces framed mid-turn blocks of a message by
 // the reminders appended after the client's explanation, so in full scope the
 // user's words are classified once, as user text, not again as instructions.
 func withoutMidTurnWords(content any) any {

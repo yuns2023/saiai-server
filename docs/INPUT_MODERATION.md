@@ -20,10 +20,13 @@ you were working: …"). When the last message carries tool results, the user's
 words are taken from text blocks in the current turn (after the last assistant
 message) that open with that framing, optionally inside a `<system-reminder>`
 wrapper; text that merely quotes the sentence (files, reminders, tool output)
-is not user input. The words end at the client's last explanation paragraph
-(or the wrapper's closing tag); appended reminders are dropped. Plain text
-blocks in the same user message as a `tool_result` count as user text unless
-the whole block is a `<system-reminder>` or a client interruption notice. Other
+is not user input. The words end at the client's first explanation paragraph
+or the wrapper's first closing tag, whichever comes first: an ambiguous
+boundary ends the words early rather than attributing client text to the user;
+appended reminders are dropped. In the same user message as a `tool_result`,
+text outside closed `<system-reminder>` envelopes counts as user text (an
+unclosed envelope drops the rest of its block; client interruption notices are
+skipped). Other
 system message text and earlier turns are not user input. In `full` scope the
 framed words are classified once, as user text, not again as instructions.
 

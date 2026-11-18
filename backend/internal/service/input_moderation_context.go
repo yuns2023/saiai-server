@@ -296,11 +296,8 @@ func ExtractAnthropicModerationInput(parsed *ParsedRequest) (string, []string) {
 			continue
 		}
 		role, _ := message["role"].(string)
-		content := message["content"]
-		if role == "system" {
-			content = withoutMidTurnWords(content)
-		}
-		text := moderationTextContent(content)
+		// Framed mid-turn words are user text; keep them out of instructions.
+		text := moderationTextContent(withoutMidTurnWords(message["content"]))
 		if role == "system" || role == "developer" || (role == "user" && projectInstructionText(text) && (i < len(parsed.Messages)-1 || !IsRealUserMessage(parsed))) {
 			parts = appendUniqueModerationText(parts, text)
 		}

@@ -64,23 +64,51 @@ func TestParseMidTurnFrameAdversarial(t *testing.T) {
 	}{
 		{"quoted inside a reminder is not a frame", "<system-reminder>\nfile x changed:\n" + midTurnMessage("from a file") + "\n</system-reminder>", "", "", false},
 		{"quoted mid-block is not a frame", "Note: " + midTurnMessage("x"), "", "", false},
+		{"captured shape", midTurnMessage("w") + "\n\nThe following deferred tools", "w", "The following deferred tools", true},
 		{"literal closing tag in unwrapped words", midTurnMessage("what does </system-reminder> mean?"), "what does </system-reminder> mean?", "", true},
-		{"words quoting the explanation sentence", midTurnMessage("why do you say " + claudeCodeMidTurnSuffix + "?"), "why do you say " + claudeCodeMidTurnSuffix + "?", "", true},
-		{"wrapped frame with appended reminder", "<system-reminder>\n" + midTurnMessage("w") + "\n\nmore\n</system-reminder>\ntail", "w", "more\n\ntail", true},
-		{"wrapped without explanation ends at the wrapper", "<system-reminder>\n" + claudeCodeMidTurnPrefix + "\nshort </system-reminder> q\n</system-reminder>", "short </system-reminder> q", "", true},
+		{"words quoting the explanation mid-line", midTurnMessage("why do you say " + claudeCodeMidTurnSuffix + "?"), "why do you say " + claudeCodeMidTurnSuffix + "?", "", true},
+		{"appended reminder repeating the explanation stays client text", midTurnMessage("w") + "\n\n" + claudeCodeMidTurnSuffix + " again", "w", claudeCodeMidTurnSuffix + " again", true},
+		{"wrapped frame with appended reminder", "<system-reminder>\n" + midTurnMessage("w") + "\n\nmore\n</system-reminder>\ntail", "w", "more\n\n\ntail", true},
+		{"wrapped without explanation ends at the first close", "<system-reminder>\n" + claudeCodeMidTurnPrefix + "\nshort\n</system-reminder>\n<system-reminder>\nother reminder\n</system-reminder>", "short", "<system-reminder>\nother reminder\n</system-reminder>", true},
+		{"close tag does not glue words", "<system-reminder>\n" + claudeCodeMidTurnPrefix + "\ninner</system-reminder>outer", "inner", "outer", true},
 		{"no explanation, unwrapped: whole block", claudeCodeMidTurnPrefix + "\nonly words", "only words", "", true},
 		{"CRLF", strings.ReplaceAll(midTurnMessage("crlf words")+"\n\nnext", "\n", "\r\n"), "crlf words", "next", true},
+		{"earliest paragraph break after explanation", midTurnMessage("w") + "\r\n\r\nfirst\n\nsecond", "w", "first\n\nsecond", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			words, rest, ok := parseMidTurnFrame(tc.text)
 			require.Equal(t, tc.ok, ok)
 			require.Equal(t, tc.words, words)
-			if tc.rest != "" || !tc.ok {
-				require.Equal(t, tc.rest, rest)
-			}
+			require.Equal(t, tc.rest, rest)
 		})
 	}
+}
+
+func TestPlainUserTextNextToToolResult(t *testing.T) {
+	require.Equal(t, "also check the logs", plainUserText("<system-reminder>\nnote\n</system-reminder>\nalso check the logs"))
+	require.Equal(t, "also check the logs", plainUserText("also check the logs\n<system-reminder>\nnote\n</system-reminder>"))
+	require.Equal(t, "a\nb", plainUserText("a<system-reminder>x</system-reminder>b"))
+	require.Equal(t, "before", plainUserText("before\n<system-reminder>\nunclosed"))
+	require.Equal(t, "", plainUserText("[Request interrupted by user for tool use]"))
+}
+
+// Older clients put the frame next to the tool_result in a user message that
+// may also hold project instructions: in full scope the words still count once.
+func TestFullScopeOldUserFrameCountedOnce(t *testing.T) {
+	parsed := &ParsedRequest{Messages: []any{
+		map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "t", "name": "Bash"}}},
+		map[string]any{"role": "user", "content": []any{
+			map[string]any{"type": "tool_result", "tool_use_id": "t", "content": "ok"},
+			map[string]any{"type": "text", "text": "<system-reminder>\n" + midTurnMessage("please explain CLAUDE.md") + "\n</system-reminder>"},
+			map[string]any{"type": "text", "text": "<system-reminder>\nContents of CLAUDE.md: rules\n</system-reminder>"},
+		}},
+	}}
+	text, instructions := ExtractAnthropicModerationInput(parsed)
+	require.Equal(t, "please explain CLAUDE.md", text)
+	joined := strings.Join(instructions, "\n")
+	require.NotContains(t, joined, "please explain")
+	require.Contains(t, joined, "Contents of CLAUDE.md: rules")
 }
 
 func TestParseMidTurnFrameLinearOnLongInput(t *testing.T) {
