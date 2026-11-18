@@ -334,10 +334,10 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	}
 	debugLogRequestHeaders("ACCOUNT_TEST_UPSTREAM", req.Header)
 
-	// Get proxy URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	// Get proxy URL (a self-onboarded account is never tested without its proxy)
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return s.sendErrorAndEnd(c, "Request failed: this account requires a working proxy")
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())

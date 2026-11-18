@@ -114,7 +114,7 @@ func ClassifyChatGPTBoundAccount(account *Account, groupID int64, now time.Time)
 		unavailable.Status = account.Status
 		return unavailable
 	}
-	if !account.Schedulable {
+	if !account.Schedulable || account.IsOwnerOrProxyBlocked() {
 		return permanent(ChatGPTBoundReasonAdminUnschedulable)
 	}
 	inGroup := false

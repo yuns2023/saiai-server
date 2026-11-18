@@ -45,6 +45,14 @@ type Account struct {
 	LoadFactor *int `json:"load_factor,omitempty"`
 	// OwnerUserID holds the value of the "owner_user_id" field.
 	OwnerUserID *int64 `json:"owner_user_id,omitempty"`
+	// UpstreamAccountUUID holds the value of the "upstream_account_uuid" field.
+	UpstreamAccountUUID *string `json:"upstream_account_uuid,omitempty"`
+	// SelfOnboarded holds the value of the "self_onboarded" field.
+	SelfOnboarded bool `json:"self_onboarded,omitempty"`
+	// OwnerPausedAt holds the value of the "owner_paused_at" field.
+	OwnerPausedAt *time.Time `json:"owner_paused_at,omitempty"`
+	// OwnerWithdrawRequestedAt holds the value of the "owner_withdraw_requested_at" field.
+	OwnerWithdrawRequestedAt *time.Time `json:"owner_withdraw_requested_at,omitempty"`
 	// Priority holds the value of the "priority" field.
 	Priority int `json:"priority,omitempty"`
 	// RateMultiplier holds the value of the "rate_multiplier" field.
@@ -169,15 +177,15 @@ func (*Account) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case account.FieldCredentials, account.FieldExtra:
 			values[i] = new([]byte)
-		case account.FieldAutoPauseOnExpired, account.FieldSchedulable:
+		case account.FieldSelfOnboarded, account.FieldAutoPauseOnExpired, account.FieldSchedulable:
 			values[i] = new(sql.NullBool)
 		case account.FieldRateMultiplier, account.FieldPaygDiscountMultiplier:
 			values[i] = new(sql.NullFloat64)
 		case account.FieldID, account.FieldProxyID, account.FieldConcurrency, account.FieldLoadFactor, account.FieldOwnerUserID, account.FieldPriority:
 			values[i] = new(sql.NullInt64)
-		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus:
+		case account.FieldName, account.FieldNotes, account.FieldPlatform, account.FieldType, account.FieldUpstreamAccountUUID, account.FieldStatus, account.FieldErrorMessage, account.FieldTempUnschedulableReason, account.FieldSessionWindowStatus:
 			values[i] = new(sql.NullString)
-		case account.FieldCreatedAt, account.FieldUpdatedAt, account.FieldDeletedAt, account.FieldErrorAt, account.FieldLastUsedAt, account.FieldExpiresAt, account.FieldRateLimitedAt, account.FieldRateLimitResetAt, account.FieldOverloadUntil, account.FieldTempUnschedulableUntil, account.FieldSessionWindowStart, account.FieldSessionWindowEnd:
+		case account.FieldCreatedAt, account.FieldUpdatedAt, account.FieldDeletedAt, account.FieldOwnerPausedAt, account.FieldOwnerWithdrawRequestedAt, account.FieldErrorAt, account.FieldLastUsedAt, account.FieldExpiresAt, account.FieldRateLimitedAt, account.FieldRateLimitResetAt, account.FieldOverloadUntil, account.FieldTempUnschedulableUntil, account.FieldSessionWindowStart, account.FieldSessionWindowEnd:
 			values[i] = new(sql.NullTime)
 		default:
 			values[i] = new(sql.UnknownType)
@@ -286,6 +294,33 @@ func (_m *Account) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.OwnerUserID = new(int64)
 				*_m.OwnerUserID = value.Int64
+			}
+		case account.FieldUpstreamAccountUUID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_account_uuid", values[i])
+			} else if value.Valid {
+				_m.UpstreamAccountUUID = new(string)
+				*_m.UpstreamAccountUUID = value.String
+			}
+		case account.FieldSelfOnboarded:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field self_onboarded", values[i])
+			} else if value.Valid {
+				_m.SelfOnboarded = value.Bool
+			}
+		case account.FieldOwnerPausedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field owner_paused_at", values[i])
+			} else if value.Valid {
+				_m.OwnerPausedAt = new(time.Time)
+				*_m.OwnerPausedAt = value.Time
+			}
+		case account.FieldOwnerWithdrawRequestedAt:
+			if value, ok := values[i].(*sql.NullTime); !ok {
+				return fmt.Errorf("unexpected type %T for field owner_withdraw_requested_at", values[i])
+			} else if value.Valid {
+				_m.OwnerWithdrawRequestedAt = new(time.Time)
+				*_m.OwnerWithdrawRequestedAt = value.Time
 			}
 		case account.FieldPriority:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -520,6 +555,24 @@ func (_m *Account) String() string {
 	if v := _m.OwnerUserID; v != nil {
 		builder.WriteString("owner_user_id=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.UpstreamAccountUUID; v != nil {
+		builder.WriteString("upstream_account_uuid=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	builder.WriteString("self_onboarded=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SelfOnboarded))
+	builder.WriteString(", ")
+	if v := _m.OwnerPausedAt; v != nil {
+		builder.WriteString("owner_paused_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
+	builder.WriteString(", ")
+	if v := _m.OwnerWithdrawRequestedAt; v != nil {
+		builder.WriteString("owner_withdraw_requested_at=")
+		builder.WriteString(v.Format(time.ANSIC))
 	}
 	builder.WriteString(", ")
 	builder.WriteString("priority=")

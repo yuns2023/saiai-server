@@ -115,9 +115,9 @@ func (s *GatewayService) fetchAnthropicModelsFromAccount(ctx context.Context, ac
 			fingerprint = fp
 		}
 	}
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return nil, err
 	}
 
 	models := make([]ModelsCatalogEntry, 0, 32)

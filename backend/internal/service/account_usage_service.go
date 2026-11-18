@@ -1418,9 +1418,9 @@ func (s *AccountUsageService) fetchOAuthUsageRaw(ctx context.Context, account *A
 		return nil, fmt.Errorf("no access token available")
 	}
 
-	var proxyURL string
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return nil, err
 	}
 
 	// 构建完整的选项

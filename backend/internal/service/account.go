@@ -51,6 +51,19 @@ type Account struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
+	// UpstreamAccountUUID is the normalized upstream identity (Anthropic
+	// account.uuid); nil = identity unknown. Unique among live accounts of a
+	// platform (database index).
+	UpstreamAccountUUID *string
+	// SelfOnboarded accounts came from a user hosting application and must
+	// never be used without a working proxy (see EgressProxyURL).
+	SelfOnboarded bool
+	// OwnerPausedAt / OwnerWithdrawRequestedAt: the hosted owner stopped new
+	// scheduling. Same effect as an admin turning schedulable off: queued or
+	// in-flight requests are not interrupted.
+	OwnerPausedAt            *time.Time
+	OwnerWithdrawRequestedAt *time.Time
+
 	Schedulable bool
 
 	RateLimitedAt    *time.Time
@@ -153,7 +166,50 @@ func (a *Account) IsSchedulable() bool {
 	if a.IsClaudeOAuthTokenSchedulingDisabled(now) {
 		return false
 	}
+	if a.IsOwnerOrProxyBlocked() {
+		return false
+	}
 	return true
+}
+
+// IsOwnerOrProxyBlocked reports conditions that stop new scheduling on top of
+// the admin switches: the hosted owner paused the account or asked for its
+// removal, or a self-onboarded account has no usable proxy.
+func (a *Account) IsOwnerOrProxyBlocked() bool {
+	if a == nil {
+		return false
+	}
+	if a.OwnerPausedAt != nil || a.OwnerWithdrawRequestedAt != nil {
+		return true
+	}
+	return a.SelfOnboarded && !a.hasUsableProxy()
+}
+
+func (a *Account) hasUsableProxy() bool {
+	return a.ProxyID != nil && a.Proxy != nil && a.Proxy.IsActive() && strings.TrimSpace(a.Proxy.Host) != ""
+}
+
+// ErrAccountProxyRequired: a self-onboarded account would otherwise be sent
+// directly from the server.
+var ErrAccountProxyRequired = errors.New("account requires a proxy but none is usable")
+
+// EgressProxyURL is the proxy URL for upstream requests of this account.
+// "" means direct egress, which self-onboarded accounts never get: for them a
+// missing, deleted or disabled proxy is an error.
+func (a *Account) EgressProxyURL() (string, error) {
+	if a == nil {
+		return "", nil
+	}
+	if a.SelfOnboarded {
+		if !a.hasUsableProxy() {
+			return "", ErrAccountProxyRequired
+		}
+		return a.Proxy.URL(), nil
+	}
+	if a.ProxyID != nil && a.Proxy != nil {
+		return a.Proxy.URL(), nil
+	}
+	return "", nil
 }
 
 func (a *Account) IsRateLimited() bool {

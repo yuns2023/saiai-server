@@ -97,6 +97,23 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	hostedOwnerRepository := repository.NewHostedOwnerRepository(client, db, schedulerCache)
 	hostedOwnerService := service.NewHostedOwnerService(hostedOwnerRepository, accountRepository)
 	hostedOwnerHandler := handler.NewHostedOwnerHandler(hostedOwnerService)
+	hostedApplicationRepository := repository.NewHostedApplicationRepository(client, db, schedulerCache)
+	hostedOnboardStore := repository.NewHostedOnboardStore(redisClient)
+	proxyRepository := repository.NewProxyRepository(client, db)
+	claudeOAuthClient := repository.NewClaudeOAuthClient()
+	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
+	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
+	privacyClientFactory := providePrivacyClientFactory()
+	accessLevelRepository := repository.NewAccessLevelRepository(client, db)
+	geminiQuotaService := service.NewGeminiQuotaService(configConfig, settingRepository)
+	tempUnschedCache := repository.NewTempUnschedCache(redisClient)
+	timeoutCounterCache := repository.NewTimeoutCounterCache(redisClient)
+	geminiTokenCache := repository.NewGeminiTokenCache(redisClient)
+	compositeTokenCacheInvalidator := service.NewCompositeTokenCacheInvalidator(geminiTokenCache)
+	rateLimitService := service.ProvideRateLimitService(accountRepository, usageLogRepository, configConfig, geminiQuotaService, tempUnschedCache, timeoutCounterCache, settingService, compositeTokenCacheInvalidator)
+	adminService := service.ProvideAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, inputModerationEventRepository, inputModerationStateCache, accessLevelRepository, rateLimitService)
+	hostedSelfOnboardService := service.ProvideHostedSelfOnboardService(hostedApplicationRepository, hostedOnboardStore, settingRepository, proxyRepository, claudeOAuthClient, adminService, apiKeyAuthCacheInvalidator)
+	hostedSelfOnboardHandler := handler.NewHostedSelfOnboardHandler(hostedSelfOnboardService)
 	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService)
 	redeemHandler := handler.NewRedeemHandler(redeemService)
@@ -120,18 +137,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	}
 	dashboardAggregationService := service.ProvideDashboardAggregationService(dashboardAggregationRepository, timingWheelService, configConfig)
 	dashboardHandler := admin.NewDashboardHandler(dashboardService, dashboardAggregationService)
-	proxyRepository := repository.NewProxyRepository(client, db)
-	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
-	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient)
-	privacyClientFactory := providePrivacyClientFactory()
-	accessLevelRepository := repository.NewAccessLevelRepository(client, db)
-	geminiQuotaService := service.NewGeminiQuotaService(configConfig, settingRepository)
-	tempUnschedCache := repository.NewTempUnschedCache(redisClient)
-	timeoutCounterCache := repository.NewTimeoutCounterCache(redisClient)
-	geminiTokenCache := repository.NewGeminiTokenCache(redisClient)
-	compositeTokenCacheInvalidator := service.NewCompositeTokenCacheInvalidator(geminiTokenCache)
-	rateLimitService := service.ProvideRateLimitService(accountRepository, usageLogRepository, configConfig, geminiQuotaService, tempUnschedCache, timeoutCounterCache, settingService, compositeTokenCacheInvalidator)
-	adminService := service.ProvideAdminService(userRepository, groupRepository, accountRepository, proxyRepository, apiKeyRepository, redeemCodeRepository, userGroupRateRepository, billingCacheService, proxyExitInfoProber, proxyLatencyCache, apiKeyAuthCacheInvalidator, client, settingService, subscriptionService, userSubscriptionRepository, privacyClientFactory, inputModerationEventRepository, inputModerationStateCache, accessLevelRepository, rateLimitService)
 	concurrencyCache := repository.ProvideConcurrencyCache(redisClient, configConfig)
 	concurrencyService := service.ProvideConcurrencyService(concurrencyCache, accountRepository, configConfig)
 	claudeDeviceService := service.NewClaudeDeviceService(claudeDeviceRepository)
@@ -144,7 +149,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	groupHandler := admin.NewGroupHandler(adminService, dashboardService, groupCapacityService, claudeEntrypointObservationService)
 	accessLevelService := service.NewAccessLevelService(accessLevelRepository, settingRepository, apiKeyAuthCacheInvalidator)
 	accessLevelHandler := admin.NewAccessLevelHandler(accessLevelService)
-	claudeOAuthClient := repository.NewClaudeOAuthClient()
 	oAuthService := service.NewOAuthService(proxyRepository, claudeOAuthClient)
 	openAIOAuthClient := repository.NewOpenAIOAuthClient()
 	openAIOAuthService := service.NewOpenAIOAuthService(proxyRepository, openAIOAuthClient)
@@ -232,7 +236,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	settlementReconcileRepository := repository.NewSettlementReconcileRepository(db)
 	settlementReconcileService := service.NewSettlementReconcileService(settlementReconcileRepository, configConfig)
 	settlementHandler := admin.NewSettlementHandler(settlementReconcileService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler, cryptoPayHandler, settlementHandler, hostedOwnerService)
+	hostedApplicationHandler := admin.NewHostedApplicationHandler(hostedSelfOnboardService)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler, cryptoPayHandler, settlementHandler, hostedApplicationHandler, hostedOwnerService)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	inputModerationClient := repository.NewConfiguredInputModerationClient(jevSettingsService)
 	inputModerationTaskQueue := repository.NewInputModerationTaskQueue(redisClient)
@@ -252,7 +257,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	idempotencyRepository := repository.NewIdempotencyRepository(client, db)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
-	handlers := handler.ProvideHandlers(authHandler, clientHandler, userHandler, apiKeyHandler, hostedAccountHandler, hostedOwnerHandler, usageHandler, redeemHandler, userInviteHandler, redeemPurchaseHandler, subscriptionHandler, announcementHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, paymentWebhookHandler, handlerCryptoPayHandler, aitpInstallCodeHandler, idempotencyCoordinator, idempotencyCleanupService)
+	handlers := handler.ProvideHandlers(authHandler, clientHandler, userHandler, apiKeyHandler, hostedAccountHandler, hostedOwnerHandler, hostedSelfOnboardHandler, usageHandler, redeemHandler, userInviteHandler, redeemPurchaseHandler, subscriptionHandler, announcementHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, paymentWebhookHandler, handlerCryptoPayHandler, aitpInstallCodeHandler, idempotencyCoordinator, idempotencyCleanupService)
 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(authService, userService)
 	adminAuthMiddleware := middleware.NewAdminAuthMiddleware(authService, userService, settingService)
 	apiKeyAuthMiddleware := middleware.NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, inputModerationService, configConfig)
@@ -270,7 +275,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	paymentExpiryService := service.ProvidePaymentExpiryService(db, paymentService)
 	cryptoPayWorker := service.ProvideCryptoPayWorker(db, cryptoPayService)
 	moderationEvidenceCleanupService := service.ProvideModerationEvidenceCleanupService(db, inputModerationEvidenceRepository)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, cryptoPayWorker, moderationEvidenceCleanupService, usageCleanupService, idempotencyCleanupService, claudeEntrypointObservationService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
+	hostedApplicationExpiryWorker := service.ProvideHostedApplicationExpiryWorker(hostedSelfOnboardService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, cryptoPayWorker, moderationEvidenceCleanupService, hostedApplicationExpiryWorker, usageCleanupService, idempotencyCleanupService, claudeEntrypointObservationService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -306,6 +312,7 @@ func provideCleanup(
 	paymentExpiry *service.PaymentExpiryService,
 	cryptoPayWorker *service.CryptoPayWorker,
 	moderationEvidenceCleanup *service.ModerationEvidenceCleanupService,
+	hostedApplicationExpiry *service.HostedApplicationExpiryWorker,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	claudeEntrypointObservations *service.ClaudeEntrypointObservationService,
@@ -417,6 +424,12 @@ func provideCleanup(
 			}},
 			{"ModerationEvidenceCleanupService", func() error {
 				moderationEvidenceCleanup.Stop()
+				return nil
+			}},
+			{"HostedApplicationExpiryWorker", func() error {
+				if hostedApplicationExpiry != nil {
+					hostedApplicationExpiry.Stop()
+				}
 				return nil
 			}},
 			{"SubscriptionService", func() error {

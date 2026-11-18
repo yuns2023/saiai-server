@@ -169,6 +169,62 @@ func (_c *AccountCreate) SetNillableOwnerUserID(v *int64) *AccountCreate {
 	return _c
 }
 
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (_c *AccountCreate) SetUpstreamAccountUUID(v string) *AccountCreate {
+	_c.mutation.SetUpstreamAccountUUID(v)
+	return _c
+}
+
+// SetNillableUpstreamAccountUUID sets the "upstream_account_uuid" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableUpstreamAccountUUID(v *string) *AccountCreate {
+	if v != nil {
+		_c.SetUpstreamAccountUUID(*v)
+	}
+	return _c
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (_c *AccountCreate) SetSelfOnboarded(v bool) *AccountCreate {
+	_c.mutation.SetSelfOnboarded(v)
+	return _c
+}
+
+// SetNillableSelfOnboarded sets the "self_onboarded" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableSelfOnboarded(v *bool) *AccountCreate {
+	if v != nil {
+		_c.SetSelfOnboarded(*v)
+	}
+	return _c
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (_c *AccountCreate) SetOwnerPausedAt(v time.Time) *AccountCreate {
+	_c.mutation.SetOwnerPausedAt(v)
+	return _c
+}
+
+// SetNillableOwnerPausedAt sets the "owner_paused_at" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableOwnerPausedAt(v *time.Time) *AccountCreate {
+	if v != nil {
+		_c.SetOwnerPausedAt(*v)
+	}
+	return _c
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (_c *AccountCreate) SetOwnerWithdrawRequestedAt(v time.Time) *AccountCreate {
+	_c.mutation.SetOwnerWithdrawRequestedAt(v)
+	return _c
+}
+
+// SetNillableOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableOwnerWithdrawRequestedAt(v *time.Time) *AccountCreate {
+	if v != nil {
+		_c.SetOwnerWithdrawRequestedAt(*v)
+	}
+	return _c
+}
+
 // SetPriority sets the "priority" field.
 func (_c *AccountCreate) SetPriority(v int) *AccountCreate {
 	_c.mutation.SetPriority(v)
@@ -555,6 +611,10 @@ func (_c *AccountCreate) defaults() error {
 		v := account.DefaultConcurrency
 		_c.mutation.SetConcurrency(v)
 	}
+	if _, ok := _c.mutation.SelfOnboarded(); !ok {
+		v := account.DefaultSelfOnboarded
+		_c.mutation.SetSelfOnboarded(v)
+	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		v := account.DefaultPriority
 		_c.mutation.SetPriority(v)
@@ -622,6 +682,9 @@ func (_c *AccountCreate) check() error {
 	}
 	if _, ok := _c.mutation.Concurrency(); !ok {
 		return &ValidationError{Name: "concurrency", err: errors.New(`ent: missing required field "Account.concurrency"`)}
+	}
+	if _, ok := _c.mutation.SelfOnboarded(); !ok {
+		return &ValidationError{Name: "self_onboarded", err: errors.New(`ent: missing required field "Account.self_onboarded"`)}
 	}
 	if _, ok := _c.mutation.Priority(); !ok {
 		return &ValidationError{Name: "priority", err: errors.New(`ent: missing required field "Account.priority"`)}
@@ -725,6 +788,22 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.OwnerUserID(); ok {
 		_spec.SetField(account.FieldOwnerUserID, field.TypeInt64, value)
 		_node.OwnerUserID = &value
+	}
+	if value, ok := _c.mutation.UpstreamAccountUUID(); ok {
+		_spec.SetField(account.FieldUpstreamAccountUUID, field.TypeString, value)
+		_node.UpstreamAccountUUID = &value
+	}
+	if value, ok := _c.mutation.SelfOnboarded(); ok {
+		_spec.SetField(account.FieldSelfOnboarded, field.TypeBool, value)
+		_node.SelfOnboarded = value
+	}
+	if value, ok := _c.mutation.OwnerPausedAt(); ok {
+		_spec.SetField(account.FieldOwnerPausedAt, field.TypeTime, value)
+		_node.OwnerPausedAt = &value
+	}
+	if value, ok := _c.mutation.OwnerWithdrawRequestedAt(); ok {
+		_spec.SetField(account.FieldOwnerWithdrawRequestedAt, field.TypeTime, value)
+		_node.OwnerWithdrawRequestedAt = &value
 	}
 	if value, ok := _c.mutation.Priority(); ok {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)
@@ -1124,6 +1203,72 @@ func (u *AccountUpsert) AddOwnerUserID(v int64) *AccountUpsert {
 // ClearOwnerUserID clears the value of the "owner_user_id" field.
 func (u *AccountUpsert) ClearOwnerUserID() *AccountUpsert {
 	u.SetNull(account.FieldOwnerUserID)
+	return u
+}
+
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (u *AccountUpsert) SetUpstreamAccountUUID(v string) *AccountUpsert {
+	u.Set(account.FieldUpstreamAccountUUID, v)
+	return u
+}
+
+// UpdateUpstreamAccountUUID sets the "upstream_account_uuid" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateUpstreamAccountUUID() *AccountUpsert {
+	u.SetExcluded(account.FieldUpstreamAccountUUID)
+	return u
+}
+
+// ClearUpstreamAccountUUID clears the value of the "upstream_account_uuid" field.
+func (u *AccountUpsert) ClearUpstreamAccountUUID() *AccountUpsert {
+	u.SetNull(account.FieldUpstreamAccountUUID)
+	return u
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (u *AccountUpsert) SetSelfOnboarded(v bool) *AccountUpsert {
+	u.Set(account.FieldSelfOnboarded, v)
+	return u
+}
+
+// UpdateSelfOnboarded sets the "self_onboarded" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateSelfOnboarded() *AccountUpsert {
+	u.SetExcluded(account.FieldSelfOnboarded)
+	return u
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (u *AccountUpsert) SetOwnerPausedAt(v time.Time) *AccountUpsert {
+	u.Set(account.FieldOwnerPausedAt, v)
+	return u
+}
+
+// UpdateOwnerPausedAt sets the "owner_paused_at" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateOwnerPausedAt() *AccountUpsert {
+	u.SetExcluded(account.FieldOwnerPausedAt)
+	return u
+}
+
+// ClearOwnerPausedAt clears the value of the "owner_paused_at" field.
+func (u *AccountUpsert) ClearOwnerPausedAt() *AccountUpsert {
+	u.SetNull(account.FieldOwnerPausedAt)
+	return u
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (u *AccountUpsert) SetOwnerWithdrawRequestedAt(v time.Time) *AccountUpsert {
+	u.Set(account.FieldOwnerWithdrawRequestedAt, v)
+	return u
+}
+
+// UpdateOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateOwnerWithdrawRequestedAt() *AccountUpsert {
+	u.SetExcluded(account.FieldOwnerWithdrawRequestedAt)
+	return u
+}
+
+// ClearOwnerWithdrawRequestedAt clears the value of the "owner_withdraw_requested_at" field.
+func (u *AccountUpsert) ClearOwnerWithdrawRequestedAt() *AccountUpsert {
+	u.SetNull(account.FieldOwnerWithdrawRequestedAt)
 	return u
 }
 
@@ -1699,6 +1844,83 @@ func (u *AccountUpsertOne) UpdateOwnerUserID() *AccountUpsertOne {
 func (u *AccountUpsertOne) ClearOwnerUserID() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearOwnerUserID()
+	})
+}
+
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (u *AccountUpsertOne) SetUpstreamAccountUUID(v string) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetUpstreamAccountUUID(v)
+	})
+}
+
+// UpdateUpstreamAccountUUID sets the "upstream_account_uuid" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateUpstreamAccountUUID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateUpstreamAccountUUID()
+	})
+}
+
+// ClearUpstreamAccountUUID clears the value of the "upstream_account_uuid" field.
+func (u *AccountUpsertOne) ClearUpstreamAccountUUID() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearUpstreamAccountUUID()
+	})
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (u *AccountUpsertOne) SetSelfOnboarded(v bool) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetSelfOnboarded(v)
+	})
+}
+
+// UpdateSelfOnboarded sets the "self_onboarded" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateSelfOnboarded() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateSelfOnboarded()
+	})
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (u *AccountUpsertOne) SetOwnerPausedAt(v time.Time) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetOwnerPausedAt(v)
+	})
+}
+
+// UpdateOwnerPausedAt sets the "owner_paused_at" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateOwnerPausedAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateOwnerPausedAt()
+	})
+}
+
+// ClearOwnerPausedAt clears the value of the "owner_paused_at" field.
+func (u *AccountUpsertOne) ClearOwnerPausedAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearOwnerPausedAt()
+	})
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (u *AccountUpsertOne) SetOwnerWithdrawRequestedAt(v time.Time) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetOwnerWithdrawRequestedAt(v)
+	})
+}
+
+// UpdateOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateOwnerWithdrawRequestedAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateOwnerWithdrawRequestedAt()
+	})
+}
+
+// ClearOwnerWithdrawRequestedAt clears the value of the "owner_withdraw_requested_at" field.
+func (u *AccountUpsertOne) ClearOwnerWithdrawRequestedAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearOwnerWithdrawRequestedAt()
 	})
 }
 
@@ -2491,6 +2713,83 @@ func (u *AccountUpsertBulk) UpdateOwnerUserID() *AccountUpsertBulk {
 func (u *AccountUpsertBulk) ClearOwnerUserID() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.ClearOwnerUserID()
+	})
+}
+
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (u *AccountUpsertBulk) SetUpstreamAccountUUID(v string) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetUpstreamAccountUUID(v)
+	})
+}
+
+// UpdateUpstreamAccountUUID sets the "upstream_account_uuid" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateUpstreamAccountUUID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateUpstreamAccountUUID()
+	})
+}
+
+// ClearUpstreamAccountUUID clears the value of the "upstream_account_uuid" field.
+func (u *AccountUpsertBulk) ClearUpstreamAccountUUID() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearUpstreamAccountUUID()
+	})
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (u *AccountUpsertBulk) SetSelfOnboarded(v bool) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetSelfOnboarded(v)
+	})
+}
+
+// UpdateSelfOnboarded sets the "self_onboarded" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateSelfOnboarded() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateSelfOnboarded()
+	})
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (u *AccountUpsertBulk) SetOwnerPausedAt(v time.Time) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetOwnerPausedAt(v)
+	})
+}
+
+// UpdateOwnerPausedAt sets the "owner_paused_at" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateOwnerPausedAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateOwnerPausedAt()
+	})
+}
+
+// ClearOwnerPausedAt clears the value of the "owner_paused_at" field.
+func (u *AccountUpsertBulk) ClearOwnerPausedAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearOwnerPausedAt()
+	})
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (u *AccountUpsertBulk) SetOwnerWithdrawRequestedAt(v time.Time) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetOwnerWithdrawRequestedAt(v)
+	})
+}
+
+// UpdateOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateOwnerWithdrawRequestedAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateOwnerWithdrawRequestedAt()
+	})
+}
+
+// ClearOwnerWithdrawRequestedAt clears the value of the "owner_withdraw_requested_at" field.
+func (u *AccountUpsertBulk) ClearOwnerWithdrawRequestedAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearOwnerWithdrawRequestedAt()
 	})
 }
 

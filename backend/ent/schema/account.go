@@ -108,6 +108,31 @@ func (Account) Fields() []ent.Field {
 			Optional().
 			Nillable(),
 
+		// upstream_account_uuid: normalized upstream identity (Anthropic
+		// account.uuid) for duplicate detection; partial unique index on
+		// (platform, upstream_account_uuid) for live rows (migration 133).
+		// Written on create and by the locked admin update, never by the
+		// generic whole-row Update.
+		field.String("upstream_account_uuid").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "uuid"}),
+		// self_onboarded: created from a user-submitted hosting application.
+		// Such accounts must always use a proxy (never direct egress).
+		field.Bool("self_onboarded").
+			Default(false),
+		// owner_paused_at / owner_withdraw_requested_at: the hosted owner
+		// stopped new scheduling (pause, resumable) or asked for removal
+		// (not owner-revocable). Written only by the owner endpoints.
+		field.Time("owner_paused_at").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+		field.Time("owner_withdraw_requested_at").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
+
 		// priority: 账户优先级，数值越小优先级越高
 		// 调度器会优先使用高优先级的账户
 		field.Int("priority").

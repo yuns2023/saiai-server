@@ -626,6 +626,11 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	if account.Status == StatusError || account.Status == StatusDisabled || !account.Schedulable {
 		return true
 	}
+	// Owner pause / withdraw request, or a self-onboarded account without a
+	// usable proxy: same as the admin switch.
+	if account.IsOwnerOrProxyBlocked() {
+		return true
+	}
 	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
 		return true
 	}
@@ -3091,6 +3096,26 @@ func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, gr
 }
 
 func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
+	accounts, useMixed, err := s.listSchedulableAccountsUnfiltered(ctx, groupID, platform, hasForcePlatform)
+	// Simple mode has no group isolation: self-onboarded accounts are never
+	// candidates there, whatever the source (snapshot, stale bucket, DB).
+	if s.isRunModeSimple() {
+		accounts = withoutSelfOnboarded(accounts)
+	}
+	return accounts, useMixed, err
+}
+
+func (s *GatewayService) isRunModeSimple() bool {
+	return s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
+}
+
+// excludedInSimpleMode: a self-onboarded account is never selectable in
+// simple mode (no exclusive-group isolation), including by sticky account ID.
+func (s *GatewayService) excludedInSimpleMode(account *Account) bool {
+	return account != nil && account.SelfOnboarded && s.isRunModeSimple()
+}
+
+func (s *GatewayService) listSchedulableAccountsUnfiltered(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
 	if platform == PlatformSora {
 		return s.listSoraSchedulableAccounts(ctx, groupID)
 	}
@@ -3123,6 +3148,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, platforms)
 		} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, platforms)
+			accounts = withoutSelfOnboarded(accounts)
 		} else {
 			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, platforms)
 		}
@@ -3161,6 +3187,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	var err error
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
+		accounts = withoutSelfOnboarded(accounts)
 	} else if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
 		// 分组内无账号则返回空列表，由上层处理错误，不再回退到全平台查询
@@ -3282,7 +3309,7 @@ func (s *GatewayService) soraUnschedulableReason(account *Account) string {
 }
 
 func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, account *Account) bool {
-	if !accountAllowsUser(ctx, account) {
+	if !accountAllowsUser(ctx, account) || s.excludedInSimpleMode(account) {
 		return false
 	}
 	if account.Platform == PlatformSora {
@@ -3292,7 +3319,7 @@ func (s *GatewayService) isAccountSchedulableForSelection(ctx context.Context, a
 }
 
 func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Context, account *Account, requestedModel string) bool {
-	if !accountAllowsUser(ctx, account) {
+	if !accountAllowsUser(ctx, account) || s.excludedInSimpleMode(account) {
 		return false
 	}
 	if account.Platform == PlatformSora {
@@ -3307,12 +3334,13 @@ func (s *GatewayService) isAccountSchedulableForModelSelection(ctx context.Conte
 // isAccountInGroup checks if the account belongs to the specified group.
 // When groupID is nil, returns true only for ungrouped accounts (no group assignments).
 func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool {
-	if account == nil {
+	if account == nil || s.excludedInSimpleMode(account) {
 		return false
 	}
 	if groupID == nil {
-		// 无分组的 API Key 只能使用未分组的账号
-		return len(account.AccountGroups) == 0
+		// 无分组的 API Key 只能使用未分组的账号；自助托管号只经号主专属组调度
+		// （专属组被删除后不会落入未分组池）。
+		return len(account.AccountGroups) == 0 && !account.SelfOnboarded
 	}
 	for _, ag := range account.AccountGroups {
 		if ag.GroupID == *groupID {
@@ -5563,15 +5591,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, err
 	}
 
-	// 获取代理URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	// 获取代理URL（自助托管号缺少可用代理时拒绝，绝不直连）
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return nil, err
 	}
 
-	// 调试日志：记录即将转发的账号信息
-	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
-		account.ID, account.Name, account.Platform, account.Type, account.IsTLSFingerprintEnabled(), proxyURL)
+	// 调试日志：记录即将转发的账号信息（只记代理 ID，代理 URL 可能含账号密码）
+	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v ProxyID=%s",
+		account.ID, account.Name, account.Platform, account.Type, account.IsTLSFingerprintEnabled(), formatProxyIDForLog(account.ProxyID))
 	// 重试间复用同一请求体，避免每次 string(body) 产生额外分配。
 	setOpsUpstreamRequestBody(c, body)
 
@@ -6163,9 +6191,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		return nil, fmt.Errorf("anthropic api key passthrough requires apikey token, got: %s", tokenType)
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return nil, err
 	}
 
 	logger.LegacyPrintf("service.gateway", "[Anthropic 自动透传] 命中 API Key 透传分支: account=%d name=%s model=%s stream=%v",
@@ -10234,10 +10262,11 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return err
 	}
 
-	// 获取代理URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	// 获取代理URL（自助托管号缺少可用代理时拒绝，绝不直连）
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "Upstream account unavailable")
+		return err
 	}
 
 	// 发送请求
@@ -10356,9 +10385,10 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		return err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "Upstream account unavailable")
+		return err
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
@@ -10899,6 +10929,31 @@ func redactDebugHeaders(headers http.Header) map[string][]string {
 			}
 		}
 		out[key] = next
+	}
+	return out
+}
+
+// formatProxyIDForLog logs the proxy by ID only: proxy URLs can carry
+// credentials.
+func formatProxyIDForLog(proxyID *int64) string {
+	if proxyID == nil {
+		return "none"
+	}
+	return strconv.FormatInt(*proxyID, 10)
+}
+
+// withoutSelfOnboarded drops self-onboarded accounts from group-less pools
+// (simple mode / ungrouped keys): they are only scheduled through their
+// owner's exclusive group.
+func withoutSelfOnboarded(accounts []Account) []Account {
+	out := accounts[:0:0]
+	for _, acc := range accounts {
+		if !acc.SelfOnboarded {
+			out = append(out, acc)
+		}
+	}
+	if out == nil {
+		return accounts[:0]
 	}
 	return out
 }

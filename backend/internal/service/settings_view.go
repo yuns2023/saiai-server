@@ -22,6 +22,9 @@ type SystemSettings struct {
 	RedeemPurchaseWindowMaxAmount float64
 	RedeemPurchaseWindowMaxCount  int
 
+	// Hosted self-onboarding (setting_hosted_self_onboard.go).
+	HostedSelfOnboard HostedSelfOnboardSettings
+
 	SMTPHost               string
 	SMTPPort               int
 	SMTPUsername           string

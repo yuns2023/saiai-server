@@ -65,17 +65,21 @@ type HostedOwnerUsageTotals struct {
 // deliberately excludes the admin name, notes, credentials, Extra, proxy,
 // groups and scheduling configuration (admin names can embed seller emails).
 type OwnedHostedAccount struct {
-	AccountID   int64                  `json:"account_id"`
-	Current     bool                   `json:"current"`
-	DisplayName string                 `json:"display_name"`
-	Platform    *string                `json:"platform"`
-	Type        *string                `json:"type"`
-	Status      *string                `json:"status"`
-	UpdatedAt   *time.Time             `json:"updated_at"`
-	Stale       bool                   `json:"stale"`
-	Windows     []HostedQuotaWindow    `json:"windows"`
-	Last24h     HostedOwnerUsageTotals `json:"last_24h"`
-	Last7d      HostedOwnerUsageTotals `json:"last_7d"`
+	AccountID   int64      `json:"account_id"`
+	Current     bool       `json:"current"`
+	DisplayName string     `json:"display_name"`
+	Platform    *string    `json:"platform"`
+	Type        *string    `json:"type"`
+	Status      *string    `json:"status"`
+	UpdatedAt   *time.Time `json:"updated_at"`
+	Stale       bool       `json:"stale"`
+	// OwnerPaused / WithdrawRequested: the owner's own pause and removal
+	// request (false for past accounts).
+	OwnerPaused       bool                   `json:"owner_paused"`
+	WithdrawRequested bool                   `json:"withdraw_requested"`
+	Windows           []HostedQuotaWindow    `json:"windows"`
+	Last24h           HostedOwnerUsageTotals `json:"last_24h"`
+	Last7d            HostedOwnerUsageTotals `json:"last_7d"`
 }
 
 // OwnedHostedAccountList is the response of GET /hosted/owned-accounts.
@@ -218,15 +222,17 @@ func (s *HostedOwnerService) ListOwnedAccounts(ctx context.Context, userID int64
 			}
 			current[account.ID] = true
 			items = append(items, OwnedHostedAccount{
-				AccountID:   account.ID,
-				Current:     true,
-				DisplayName: HostedAccountDisplayName(account.ID),
-				Platform:    &platform,
-				Type:        &accountType,
-				Status:      &status,
-				UpdatedAt:   snapshot.UpdatedAt,
-				Stale:       snapshot.Stale,
-				Windows:     windows,
+				AccountID:         account.ID,
+				Current:           true,
+				DisplayName:       HostedAccountDisplayName(account.ID),
+				Platform:          &platform,
+				Type:              &accountType,
+				Status:            &status,
+				UpdatedAt:         snapshot.UpdatedAt,
+				Stale:             snapshot.Stale,
+				OwnerPaused:       account.OwnerPausedAt != nil,
+				WithdrawRequested: account.OwnerWithdrawRequestedAt != nil,
+				Windows:           windows,
 			})
 		}
 	}

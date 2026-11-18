@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
@@ -81,7 +82,60 @@ func (r *proxyRepository) ListByIDs(ctx context.Context, ids []int64) ([]service
 }
 
 func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) error {
-	builder := r.client.Proxy.UpdateOneID(proxyIn.ID).
+	return updateProxyWithClient(ctx, r.client, proxyIn)
+}
+
+// UpdateAndQueueAccountRefresh saves the proxy and queues one
+// account_bulk_changed scheduler event listing every live account using it,
+// in one transaction: either
+// all accounts are told about the change or the update fails. It returns the
+// account ids so the caller can refresh their cached copies after commit.
+func (r *proxyRepository) UpdateAndQueueAccountRefresh(ctx context.Context, proxyIn *service.Proxy) ([]int64, error) {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txc := tx.Client()
+	if err := updateProxyWithClient(ctx, txc, proxyIn); err != nil {
+		return nil, err
+	}
+	rows, err := txc.QueryContext(ctx, "SELECT id FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL ORDER BY id", proxyIn.ID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// One account_bulk_changed event (not deduplicated, unlike per-account
+	// account_changed within 1 s): a quick disable → re-enable still leaves an
+	// event for the second change. Its consumer refreshes every listed
+	// account key and rebuilds their groups.
+	if len(ids) > 0 {
+		if err := enqueueSchedulerOutbox(ctx, txc, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, map[string]any{"account_ids": ids}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func updateProxyWithClient(ctx context.Context, client *dbent.Client, proxyIn *service.Proxy) error {
+	builder := client.Proxy.UpdateOneID(proxyIn.ID).
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).
@@ -112,6 +166,38 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
 	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
 	return err
+}
+
+// DeleteIfUnused soft-deletes a proxy only when no live account uses it. The
+// proxy row is locked first (FOR UPDATE), then references are counted and the
+// row is deleted in the same transaction: an approval that binds the proxy
+// (FOR SHARE) either commits first (counted, delete refused) or sees it
+// deleted.
+func (r *proxyRepository) DeleteIfUnused(ctx context.Context, id int64) error {
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txc := tx.Client()
+	var locked int64
+	if err := scanSingleRow(ctx, txc, "SELECT id FROM proxies WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", []any{id}, &locked); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // already gone: same result as the old count+delete path
+		}
+		return err
+	}
+	var count int64
+	if err := scanSingleRow(ctx, txc, "SELECT COUNT(*) FROM accounts WHERE proxy_id = $1 AND deleted_at IS NULL", []any{id}, &count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return service.ErrProxyInUse
+	}
+	if _, err := txc.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *proxyRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Proxy, *pagination.PaginationResult, error) {

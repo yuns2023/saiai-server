@@ -635,6 +635,8 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAIQuotaResetService,
 	NewHostedAccountService,
 	NewHostedOwnerService,
+	ProvideHostedSelfOnboardService,
+	ProvideHostedApplicationExpiryWorker,
 	NewSettlementReconcileService,
 	ProvideAccountTestService,
 	ProvideSettingService,
@@ -687,3 +689,17 @@ var ProviderSet = wire.NewSet(
 	ProvideModerationEvidenceCleanupService,
 	NewInputModerationEvidenceService,
 )
+
+// ProvideHostedSelfOnboardService wires the hosted self-onboarding service;
+// the admin service probes proxies created by an approval.
+func ProvideHostedSelfOnboardService(
+	repo HostedApplicationRepository,
+	store HostedOnboardStore,
+	settingRepo SettingRepository,
+	proxyRepo ProxyRepository,
+	oauthClient ClaudeOAuthClient,
+	adminService AdminService,
+	authCache APIKeyAuthCacheInvalidator,
+) *HostedSelfOnboardService {
+	return NewHostedSelfOnboardService(repo, store, settingRepo, proxyRepo, oauthClient, adminService, authCache)
+}

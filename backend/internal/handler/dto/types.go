@@ -211,6 +211,14 @@ type Account struct {
 	ProxyID        *int64                     `json:"proxy_id"`
 	Concurrency    int                        `json:"concurrency"`
 	LoadFactor     *int                       `json:"load_factor,omitempty"`
+	// Hosted self-onboarding (admin views): owner pause / removal request,
+	// created from a user application, and no known upstream identity
+	// (duplicates of such an account cannot be detected).
+	OwnerPausedAt            *time.Time `json:"owner_paused_at"`
+	OwnerWithdrawRequestedAt *time.Time `json:"owner_withdraw_requested_at"`
+	SelfOnboarded            bool       `json:"self_onboarded"`
+	IdentityUnknown          bool       `json:"identity_unknown"`
+
 	// OwnerUserID / OwnerEmail: hosted owner (admin views only).
 	OwnerUserID            *int64     `json:"owner_user_id"`
 	OwnerEmail             *string    `json:"owner_email"`

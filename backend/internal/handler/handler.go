@@ -31,6 +31,8 @@ type AdminHandlers struct {
 	Payment          *admin.PaymentHandler
 	CryptoPay        *admin.CryptoPayHandler
 	Settlement       *admin.SettlementHandler
+	// HostedApplication reviews hosting applications (P2c).
+	HostedApplication *admin.HostedApplicationHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -57,6 +59,8 @@ type Handlers struct {
 	CryptoPay      *CryptoPayHandler
 	// AITPInstallCode serves one-time install codes (/api/v1/keys/:id/install-code, /i/:code).
 	AITPInstallCode *AITPInstallCodeHandler
+	// HostedSelfOnboard: hosting applications and owner pause/withdraw (P2c).
+	HostedSelfOnboard *HostedSelfOnboardHandler
 }
 
 // BuildInfo contains build-time information

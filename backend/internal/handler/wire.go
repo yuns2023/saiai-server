@@ -34,6 +34,7 @@ func ProvideAdminHandlers(
 	paymentHandler *admin.PaymentHandler,
 	cryptoPayHandler *admin.CryptoPayHandler,
 	settlementHandler *admin.SettlementHandler,
+	hostedApplicationHandler *admin.HostedApplicationHandler,
 	hostedOwnerService *service.HostedOwnerService,
 ) *AdminHandlers {
 	accountHandler.SetHostedOwnerService(hostedOwnerService)
@@ -64,6 +65,8 @@ func ProvideAdminHandlers(
 		Payment:          paymentHandler,
 		CryptoPay:        cryptoPayHandler,
 		Settlement:       settlementHandler,
+
+		HostedApplication: hostedApplicationHandler,
 	}
 }
 
@@ -104,6 +107,7 @@ func ProvideHandlers(
 	apiKeyHandler *APIKeyHandler,
 	hostedAccountHandler *HostedAccountHandler,
 	hostedOwnerHandler *HostedOwnerHandler,
+	hostedSelfOnboardHandler *HostedSelfOnboardHandler,
 	usageHandler *UsageHandler,
 	redeemHandler *RedeemHandler,
 	userInviteHandler *UserInviteHandler,
@@ -144,7 +148,8 @@ func ProvideHandlers(
 		PaymentWebhook: paymentWebhookHandler,
 		CryptoPay:      cryptoPayHandler,
 
-		AITPInstallCode: aitpInstallCodeHandler,
+		AITPInstallCode:   aitpInstallCodeHandler,
+		HostedSelfOnboard: hostedSelfOnboardHandler,
 	}
 }
 
@@ -157,6 +162,7 @@ var ProviderSet = wire.NewSet(
 	NewAPIKeyHandler,
 	NewHostedAccountHandler,
 	NewHostedOwnerHandler,
+	NewHostedSelfOnboardHandler,
 	NewUsageHandler,
 	NewRedeemHandler,
 	NewUserInviteHandler,
@@ -198,6 +204,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewCryptoPayHandler,
 	admin.NewSettlementHandler,
+	admin.NewHostedApplicationHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,
