@@ -41,6 +41,14 @@ const (
 	FieldLoadFactor = "load_factor"
 	// FieldOwnerUserID holds the string denoting the owner_user_id field in the database.
 	FieldOwnerUserID = "owner_user_id"
+	// FieldUpstreamAccountUUID holds the string denoting the upstream_account_uuid field in the database.
+	FieldUpstreamAccountUUID = "upstream_account_uuid"
+	// FieldSelfOnboarded holds the string denoting the self_onboarded field in the database.
+	FieldSelfOnboarded = "self_onboarded"
+	// FieldOwnerPausedAt holds the string denoting the owner_paused_at field in the database.
+	FieldOwnerPausedAt = "owner_paused_at"
+	// FieldOwnerWithdrawRequestedAt holds the string denoting the owner_withdraw_requested_at field in the database.
+	FieldOwnerWithdrawRequestedAt = "owner_withdraw_requested_at"
 	// FieldPriority holds the string denoting the priority field in the database.
 	FieldPriority = "priority"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
@@ -145,6 +153,10 @@ var Columns = []string{
 	FieldConcurrency,
 	FieldLoadFactor,
 	FieldOwnerUserID,
+	FieldUpstreamAccountUUID,
+	FieldSelfOnboarded,
+	FieldOwnerPausedAt,
+	FieldOwnerWithdrawRequestedAt,
 	FieldPriority,
 	FieldRateMultiplier,
 	FieldPaygDiscountMultiplier,
@@ -213,6 +225,8 @@ var (
 	DefaultExtra func() map[string]interface{}
 	// DefaultConcurrency holds the default value on creation for the "concurrency" field.
 	DefaultConcurrency int
+	// DefaultSelfOnboarded holds the default value on creation for the "self_onboarded" field.
+	DefaultSelfOnboarded bool
 	// DefaultPriority holds the default value on creation for the "priority" field.
 	DefaultPriority int
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
@@ -292,6 +306,26 @@ func ByLoadFactor(opts ...sql.OrderTermOption) OrderOption {
 // ByOwnerUserID orders the results by the owner_user_id field.
 func ByOwnerUserID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldOwnerUserID, opts...).ToFunc()
+}
+
+// ByUpstreamAccountUUID orders the results by the upstream_account_uuid field.
+func ByUpstreamAccountUUID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamAccountUUID, opts...).ToFunc()
+}
+
+// BySelfOnboarded orders the results by the self_onboarded field.
+func BySelfOnboarded(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSelfOnboarded, opts...).ToFunc()
+}
+
+// ByOwnerPausedAt orders the results by the owner_paused_at field.
+func ByOwnerPausedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOwnerPausedAt, opts...).ToFunc()
+}
+
+// ByOwnerWithdrawRequestedAt orders the results by the owner_withdraw_requested_at field.
+func ByOwnerWithdrawRequestedAt(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldOwnerWithdrawRequestedAt, opts...).ToFunc()
 }
 
 // ByPriority orders the results by the priority field.

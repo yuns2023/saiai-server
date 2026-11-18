@@ -53,6 +53,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // paymentExpirySvc
 		nil, // cryptoPayWorker (Stop is nil-safe)
 		nil, // moderationEvidenceCleanup
+		nil, // hostedApplicationExpiry (Stop is nil-safe)
 		&service.UsageCleanupService{},
 		idempotencyCleanupSvc,
 		nil, // claudeEntrypointObservations (Stop is nil-safe)

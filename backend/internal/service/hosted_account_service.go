@@ -322,7 +322,7 @@ func hostedAccountStatus(a *Account, now time.Time) string {
 	switch {
 	case a.Status == StatusError:
 		return "needs_attention"
-	case a.Status != StatusActive || !a.Schedulable:
+	case a.Status != StatusActive || !a.Schedulable || a.IsOwnerOrProxyBlocked():
 		return "paused"
 	case a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt):
 		return "expired"

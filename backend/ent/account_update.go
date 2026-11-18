@@ -228,6 +228,80 @@ func (_u *AccountUpdate) ClearOwnerUserID() *AccountUpdate {
 	return _u
 }
 
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (_u *AccountUpdate) SetUpstreamAccountUUID(v string) *AccountUpdate {
+	_u.mutation.SetUpstreamAccountUUID(v)
+	return _u
+}
+
+// SetNillableUpstreamAccountUUID sets the "upstream_account_uuid" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableUpstreamAccountUUID(v *string) *AccountUpdate {
+	if v != nil {
+		_u.SetUpstreamAccountUUID(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamAccountUUID clears the value of the "upstream_account_uuid" field.
+func (_u *AccountUpdate) ClearUpstreamAccountUUID() *AccountUpdate {
+	_u.mutation.ClearUpstreamAccountUUID()
+	return _u
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (_u *AccountUpdate) SetSelfOnboarded(v bool) *AccountUpdate {
+	_u.mutation.SetSelfOnboarded(v)
+	return _u
+}
+
+// SetNillableSelfOnboarded sets the "self_onboarded" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableSelfOnboarded(v *bool) *AccountUpdate {
+	if v != nil {
+		_u.SetSelfOnboarded(*v)
+	}
+	return _u
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (_u *AccountUpdate) SetOwnerPausedAt(v time.Time) *AccountUpdate {
+	_u.mutation.SetOwnerPausedAt(v)
+	return _u
+}
+
+// SetNillableOwnerPausedAt sets the "owner_paused_at" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableOwnerPausedAt(v *time.Time) *AccountUpdate {
+	if v != nil {
+		_u.SetOwnerPausedAt(*v)
+	}
+	return _u
+}
+
+// ClearOwnerPausedAt clears the value of the "owner_paused_at" field.
+func (_u *AccountUpdate) ClearOwnerPausedAt() *AccountUpdate {
+	_u.mutation.ClearOwnerPausedAt()
+	return _u
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (_u *AccountUpdate) SetOwnerWithdrawRequestedAt(v time.Time) *AccountUpdate {
+	_u.mutation.SetOwnerWithdrawRequestedAt(v)
+	return _u
+}
+
+// SetNillableOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableOwnerWithdrawRequestedAt(v *time.Time) *AccountUpdate {
+	if v != nil {
+		_u.SetOwnerWithdrawRequestedAt(*v)
+	}
+	return _u
+}
+
+// ClearOwnerWithdrawRequestedAt clears the value of the "owner_withdraw_requested_at" field.
+func (_u *AccountUpdate) ClearOwnerWithdrawRequestedAt() *AccountUpdate {
+	_u.mutation.ClearOwnerWithdrawRequestedAt()
+	return _u
+}
+
 // SetPriority sets the "priority" field.
 func (_u *AccountUpdate) SetPriority(v int) *AccountUpdate {
 	_u.mutation.ResetPriority()
@@ -871,6 +945,27 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.OwnerUserIDCleared() {
 		_spec.ClearField(account.FieldOwnerUserID, field.TypeInt64)
 	}
+	if value, ok := _u.mutation.UpstreamAccountUUID(); ok {
+		_spec.SetField(account.FieldUpstreamAccountUUID, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamAccountUUIDCleared() {
+		_spec.ClearField(account.FieldUpstreamAccountUUID, field.TypeString)
+	}
+	if value, ok := _u.mutation.SelfOnboarded(); ok {
+		_spec.SetField(account.FieldSelfOnboarded, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OwnerPausedAt(); ok {
+		_spec.SetField(account.FieldOwnerPausedAt, field.TypeTime, value)
+	}
+	if _u.mutation.OwnerPausedAtCleared() {
+		_spec.ClearField(account.FieldOwnerPausedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OwnerWithdrawRequestedAt(); ok {
+		_spec.SetField(account.FieldOwnerWithdrawRequestedAt, field.TypeTime, value)
+	}
+	if _u.mutation.OwnerWithdrawRequestedAtCleared() {
+		_spec.ClearField(account.FieldOwnerWithdrawRequestedAt, field.TypeTime)
+	}
 	if value, ok := _u.mutation.Priority(); ok {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)
 	}
@@ -1403,6 +1498,80 @@ func (_u *AccountUpdateOne) AddOwnerUserID(v int64) *AccountUpdateOne {
 // ClearOwnerUserID clears the value of the "owner_user_id" field.
 func (_u *AccountUpdateOne) ClearOwnerUserID() *AccountUpdateOne {
 	_u.mutation.ClearOwnerUserID()
+	return _u
+}
+
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (_u *AccountUpdateOne) SetUpstreamAccountUUID(v string) *AccountUpdateOne {
+	_u.mutation.SetUpstreamAccountUUID(v)
+	return _u
+}
+
+// SetNillableUpstreamAccountUUID sets the "upstream_account_uuid" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableUpstreamAccountUUID(v *string) *AccountUpdateOne {
+	if v != nil {
+		_u.SetUpstreamAccountUUID(*v)
+	}
+	return _u
+}
+
+// ClearUpstreamAccountUUID clears the value of the "upstream_account_uuid" field.
+func (_u *AccountUpdateOne) ClearUpstreamAccountUUID() *AccountUpdateOne {
+	_u.mutation.ClearUpstreamAccountUUID()
+	return _u
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (_u *AccountUpdateOne) SetSelfOnboarded(v bool) *AccountUpdateOne {
+	_u.mutation.SetSelfOnboarded(v)
+	return _u
+}
+
+// SetNillableSelfOnboarded sets the "self_onboarded" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableSelfOnboarded(v *bool) *AccountUpdateOne {
+	if v != nil {
+		_u.SetSelfOnboarded(*v)
+	}
+	return _u
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (_u *AccountUpdateOne) SetOwnerPausedAt(v time.Time) *AccountUpdateOne {
+	_u.mutation.SetOwnerPausedAt(v)
+	return _u
+}
+
+// SetNillableOwnerPausedAt sets the "owner_paused_at" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableOwnerPausedAt(v *time.Time) *AccountUpdateOne {
+	if v != nil {
+		_u.SetOwnerPausedAt(*v)
+	}
+	return _u
+}
+
+// ClearOwnerPausedAt clears the value of the "owner_paused_at" field.
+func (_u *AccountUpdateOne) ClearOwnerPausedAt() *AccountUpdateOne {
+	_u.mutation.ClearOwnerPausedAt()
+	return _u
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (_u *AccountUpdateOne) SetOwnerWithdrawRequestedAt(v time.Time) *AccountUpdateOne {
+	_u.mutation.SetOwnerWithdrawRequestedAt(v)
+	return _u
+}
+
+// SetNillableOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableOwnerWithdrawRequestedAt(v *time.Time) *AccountUpdateOne {
+	if v != nil {
+		_u.SetOwnerWithdrawRequestedAt(*v)
+	}
+	return _u
+}
+
+// ClearOwnerWithdrawRequestedAt clears the value of the "owner_withdraw_requested_at" field.
+func (_u *AccountUpdateOne) ClearOwnerWithdrawRequestedAt() *AccountUpdateOne {
+	_u.mutation.ClearOwnerWithdrawRequestedAt()
 	return _u
 }
 
@@ -2078,6 +2247,27 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if _u.mutation.OwnerUserIDCleared() {
 		_spec.ClearField(account.FieldOwnerUserID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.UpstreamAccountUUID(); ok {
+		_spec.SetField(account.FieldUpstreamAccountUUID, field.TypeString, value)
+	}
+	if _u.mutation.UpstreamAccountUUIDCleared() {
+		_spec.ClearField(account.FieldUpstreamAccountUUID, field.TypeString)
+	}
+	if value, ok := _u.mutation.SelfOnboarded(); ok {
+		_spec.SetField(account.FieldSelfOnboarded, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.OwnerPausedAt(); ok {
+		_spec.SetField(account.FieldOwnerPausedAt, field.TypeTime, value)
+	}
+	if _u.mutation.OwnerPausedAtCleared() {
+		_spec.ClearField(account.FieldOwnerPausedAt, field.TypeTime)
+	}
+	if value, ok := _u.mutation.OwnerWithdrawRequestedAt(); ok {
+		_spec.SetField(account.FieldOwnerWithdrawRequestedAt, field.TypeTime, value)
+	}
+	if _u.mutation.OwnerWithdrawRequestedAtCleared() {
+		_spec.ClearField(account.FieldOwnerWithdrawRequestedAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.Priority(); ok {
 		_spec.SetField(account.FieldPriority, field.TypeInt, value)

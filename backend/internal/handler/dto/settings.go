@@ -35,6 +35,9 @@ type SystemSettings struct {
 	// User-bought balance redeem codes (flattened into this object).
 	RedeemPurchaseSettings
 
+	// Hosted self-onboarding (flattened into this object).
+	HostedSelfOnboardSettings
+
 	SMTPHost               string `json:"smtp_host"`
 	SMTPPort               int    `json:"smtp_port"`
 	SMTPUsername           string `json:"smtp_username"`

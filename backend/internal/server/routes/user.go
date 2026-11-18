@@ -64,6 +64,16 @@ func RegisterUserRoutes(
 		{
 			hosted.GET("/owned-accounts", h.HostedOwner.ListOwnedAccounts)
 			hosted.GET("/owned-accounts/:id/usage", h.HostedOwner.ListOwnedAccountUsage)
+			// 号主暂停/恢复/申请下架（只作用于本人当前拥有的号）
+			hosted.POST("/owned-accounts/:id/pause", h.HostedSelfOnboard.PauseOwnedAccount)
+			hosted.POST("/owned-accounts/:id/resume", h.HostedSelfOnboard.ResumeOwnedAccount)
+			hosted.POST("/owned-accounts/:id/withdraw", h.HostedSelfOnboard.WithdrawOwnedAccount)
+			// 自助上号（开关 hosted_self_onboard_enabled）
+			hosted.GET("/self-onboard/config", h.HostedSelfOnboard.Config)
+			hosted.POST("/applications/auth-url", h.HostedSelfOnboard.CreateAuthURL)
+			hosted.POST("/applications", h.HostedSelfOnboard.Submit)
+			hosted.GET("/applications", h.HostedSelfOnboard.List)
+			hosted.POST("/applications/:id/cancel", h.HostedSelfOnboard.Cancel)
 		}
 
 		// 使用记录

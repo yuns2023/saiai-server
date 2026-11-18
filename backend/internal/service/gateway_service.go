@@ -626,6 +626,11 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	if account.Status == StatusError || account.Status == StatusDisabled || !account.Schedulable {
 		return true
 	}
+	// Owner pause / withdraw request, or a self-onboarded account without a
+	// usable proxy: same as the admin switch.
+	if account.IsOwnerOrProxyBlocked() {
+		return true
+	}
 	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
 		return true
 	}
@@ -5563,15 +5568,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, err
 	}
 
-	// 获取代理URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	// 获取代理URL（自助托管号缺少可用代理时拒绝，绝不直连）
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return nil, err
 	}
 
-	// 调试日志：记录即将转发的账号信息
-	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
-		account.ID, account.Name, account.Platform, account.Type, account.IsTLSFingerprintEnabled(), proxyURL)
+	// 调试日志：记录即将转发的账号信息（只记代理 ID，代理 URL 可能含账号密码）
+	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v ProxyID=%s",
+		account.ID, account.Name, account.Platform, account.Type, account.IsTLSFingerprintEnabled(), formatProxyIDForLog(account.ProxyID))
 	// 重试间复用同一请求体，避免每次 string(body) 产生额外分配。
 	setOpsUpstreamRequestBody(c, body)
 
@@ -6163,9 +6168,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		return nil, fmt.Errorf("anthropic api key passthrough requires apikey token, got: %s", tokenType)
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		return nil, err
 	}
 
 	logger.LegacyPrintf("service.gateway", "[Anthropic 自动透传] 命中 API Key 透传分支: account=%d name=%s model=%s stream=%v",
@@ -10234,10 +10239,11 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return err
 	}
 
-	// 获取代理URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	// 获取代理URL（自助托管号缺少可用代理时拒绝，绝不直连）
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "Upstream account unavailable")
+		return err
 	}
 
 	// 发送请求
@@ -10356,9 +10362,10 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		return err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := account.EgressProxyURL()
+	if err != nil {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "Upstream account unavailable")
+		return err
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
@@ -10901,4 +10908,13 @@ func redactDebugHeaders(headers http.Header) map[string][]string {
 		out[key] = next
 	}
 	return out
+}
+
+// formatProxyIDForLog logs the proxy by ID only: proxy URLs can carry
+// credentials.
+func formatProxyIDForLog(proxyID *int64) string {
+	if proxyID == nil {
+		return "none"
+	}
+	return strconv.FormatInt(*proxyID, 10)
 }

@@ -38,14 +38,32 @@ func (r *hostedOwnerRepository) SetAccountOwner(ctx context.Context, accountID i
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	changed, err := setAccountOwnerTx(ctx, tx, accountID, ownerUserID, adminUserID)
+	if err != nil || !changed {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	// Best-effort refresh of the cached copy (informational only; nothing
+	// attributes usage or authorizes from the cached owner).
+	r.accounts.syncSchedulerAccountSnapshot(ctx, accountID)
+	return true, nil
+}
+
+// setAccountOwnerTx applies the ownership state machine inside the caller's
+// transaction (exec must be a transaction): lock the account row, no-op on
+// the same value, reject a transfer to anyone but a previous owner, write the
+// column and the history row. The caller commits and syncs caches.
+func setAccountOwnerTx(ctx context.Context, exec sqlExecutor, accountID int64, ownerUserID *int64, adminUserID int64) (bool, error) {
 	// FOR NO KEY UPDATE serializes owner changes per account without
 	// conflicting with the KEY SHARE locks taken by foreign-key checks of
 	// concurrent inserts that reference this account.
 	var current sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
+	if err := scanSingleRow(ctx, exec,
 		"SELECT owner_user_id FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE",
-		accountID,
-	).Scan(&current); err != nil {
+		[]any{accountID}, &current,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, service.ErrAccountNotFound
 		}
@@ -62,13 +80,13 @@ func (r *hostedOwnerRepository) SetAccountOwner(ctx context.Context, accountID i
 			return false, service.ErrAccountOwnerTransferForbidden
 		}
 		var foreign bool
-		if err := tx.QueryRowContext(ctx, `
+		if err := scanSingleRow(ctx, exec, `
 			SELECT EXISTS (
 				SELECT 1 FROM account_owner_events
 				WHERE account_id = $1
 				  AND ((old_owner_user_id IS NOT NULL AND old_owner_user_id <> $2)
 				    OR (new_owner_user_id IS NOT NULL AND new_owner_user_id <> $2))
-			)`, accountID, target).Scan(&foreign); err != nil {
+			)`, []any{accountID, target}, &foreign); err != nil {
 			return false, err
 		}
 		if foreign {
@@ -80,7 +98,7 @@ func (r *hostedOwnerRepository) SetAccountOwner(ctx context.Context, accountID i
 	if ownerUserID != nil {
 		newValue = *ownerUserID
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := exec.ExecContext(ctx,
 		"UPDATE accounts SET owner_user_id = $2, updated_at = NOW() WHERE id = $1",
 		accountID, newValue,
 	); err != nil {
@@ -94,18 +112,12 @@ func (r *hostedOwnerRepository) SetAccountOwner(ctx context.Context, accountID i
 	if adminUserID > 0 {
 		adminValue = adminUserID
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := exec.ExecContext(ctx,
 		"INSERT INTO account_owner_events (account_id, old_owner_user_id, new_owner_user_id, admin_user_id) VALUES ($1, $2, $3, $4)",
 		accountID, oldValue, newValue, adminValue,
 	); err != nil {
 		return false, err
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	// Best-effort refresh of the cached copy (informational only; nothing
-	// attributes usage or authorizes from the cached owner).
-	r.accounts.syncSchedulerAccountSnapshot(ctx, accountID)
 	return true, nil
 }
 

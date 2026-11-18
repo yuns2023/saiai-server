@@ -223,7 +223,9 @@ func (s *claudeOAuthService) ExchangeCodeForToken(ctx context.Context, code, cod
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 
-	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Response - Status: %d, Body: %s", resp.StatusCode, logredact.RedactJSON(resp.Bytes()))
+	// Status only: the body carries the account identity and e-mail (tokens
+	// were already redacted, but hosted self-onboarding logs no bodies).
+	logger.LegacyPrintf("repository.claude_oauth", "[OAuth] Step 3 Response - Status: %d", resp.StatusCode)
 
 	if !resp.IsSuccessState() {
 		return nil, fmt.Errorf("token exchange failed: status %d, body: %s", resp.StatusCode, resp.String())

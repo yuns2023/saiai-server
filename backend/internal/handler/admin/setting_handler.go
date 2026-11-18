@@ -157,6 +157,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		UserInviteMaxTotal:                   settings.UserInviteMaxTotal,
 		UserInviteMaxPerWeek:                 settings.UserInviteMaxPerWeek,
 		RedeemPurchaseSettings:               dto.RedeemPurchaseSettingsFromService(settings),
+		HostedSelfOnboardSettings:            dto.HostedSelfOnboardSettingsFromService(settings),
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -252,6 +253,16 @@ type UpdateSettingsRequest struct {
 	RedeemPurchaseMaxAmount       *float64 `json:"redeem_purchase_max_amount"`
 	RedeemPurchaseWindowMaxAmount *float64 `json:"redeem_purchase_window_max_amount"`
 	RedeemPurchaseWindowMaxCount  *int     `json:"redeem_purchase_window_max_count"`
+
+	// Hosted self-onboarding (P2c); nil = keep the stored value.
+	HostedSelfOnboardEnabled                   *bool    `json:"hosted_self_onboard_enabled"`
+	HostedSelfOnboardExchangeProxyID           *int64   `json:"hosted_self_onboard_exchange_proxy_id"`
+	HostedSelfFeeRate                          *float64 `json:"hosted_self_fee_rate"`
+	HostedSelfOnboardDefaultConcurrency        *int     `json:"hosted_self_onboard_default_concurrency"`
+	HostedSelfOnboardDefaultPriority           *int     `json:"hosted_self_onboard_default_priority"`
+	HostedSelfOnboardDefaultDeviceLimit        *int     `json:"hosted_self_onboard_default_device_limit"`
+	HostedSelfOnboardDefaultAdmissionsPerCycle *int     `json:"hosted_self_onboard_default_admissions_per_cycle"`
+	HostedSelfOnboardDefaultIntervalHours      *int     `json:"hosted_self_onboard_default_interval_hours"`
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -694,6 +705,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 		userInviteMaxPerWeek = *req.UserInviteMaxPerWeek
 	}
+	hostedSelfOnboard, msg := resolveHostedSelfOnboardSettings(&req, previousSettings)
+	if msg != "" {
+		response.Error(c, http.StatusBadRequest, msg)
+		return
+	}
 	redeemPurchase, msg := resolveRedeemPurchaseSettings(&req, previousSettings)
 	if msg != "" {
 		response.Error(c, http.StatusBadRequest, msg)
@@ -835,6 +851,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	redeemPurchase.apply(settings)
+	settings.HostedSelfOnboard = hostedSelfOnboard
 
 	if h.pricingService != nil && req.PricingModelAliases != nil {
 		for requestModel, pricingModel := range settings.PricingModelAliases {
@@ -886,6 +903,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		UserInviteMaxTotal:                   updatedSettings.UserInviteMaxTotal,
 		UserInviteMaxPerWeek:                 updatedSettings.UserInviteMaxPerWeek,
 		RedeemPurchaseSettings:               dto.RedeemPurchaseSettingsFromService(updatedSettings),
+		HostedSelfOnboardSettings:            dto.HostedSelfOnboardSettingsFromService(updatedSettings),
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -1067,6 +1085,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 		changed = append(changed, "user_invite_max_per_week")
 	}
 	changed = append(changed, diffRedeemPurchaseSettings(before, after)...)
+	changed = append(changed, diffHostedSelfOnboardSettings(before, after)...)
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")
 	}

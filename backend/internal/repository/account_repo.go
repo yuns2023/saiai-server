@@ -113,6 +113,12 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 	if account.ProxyID != nil {
 		builder.SetProxyID(*account.ProxyID)
 	}
+	// Known upstream identity: the explicit value, else (Anthropic) the
+	// canonical extra.account_uuid. A live duplicate violates the unique index.
+	if upstreamUUID := service.AccountUpstreamUUIDForCreate(account); upstreamUUID != nil {
+		builder.SetUpstreamAccountUUID(*upstreamUUID)
+		account.UpstreamAccountUUID = upstreamUUID
+	}
 	if account.LastUsedAt != nil {
 		builder.SetLastUsedAt(*account.LastUsedAt)
 	}
@@ -140,6 +146,9 @@ func (r *accountRepository) Create(ctx context.Context, account *service.Account
 
 	created, err := builder.Save(ctx)
 	if err != nil {
+		if isUpstreamIdentityConflict(err) {
+			return service.ErrUpstreamAccountAlreadyExists
+		}
 		return translatePersistenceError(err, service.ErrAccountNotFound, nil)
 	}
 
@@ -475,11 +484,35 @@ func (r *accountRepository) UpdateLocked(ctx context.Context, id int64, apply fu
 	if err := txRepo.Update(ctx, locked); err != nil {
 		return nil, err
 	}
+	// A re-authorization that switched the upstream account carries the new
+	// extra.account_uuid: keep the identity column in step (same lock, same
+	// transaction). An absent or invalid value leaves the column unchanged.
+	if newUUID, ok := service.AccountUpstreamUUIDFromExtra(locked); ok &&
+		(locked.UpstreamAccountUUID == nil || *locked.UpstreamAccountUUID != newUUID) {
+		if _, err := txClient.ExecContext(ctx,
+			"UPDATE accounts SET upstream_account_uuid = $2 WHERE id = $1", id, newUUID); err != nil {
+			if isUpstreamIdentityConflict(err) {
+				return nil, service.ErrUpstreamAccountAlreadyExists
+			}
+			return nil, err
+		}
+		locked.UpstreamAccountUUID = &newUUID
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	r.syncSchedulerAccountSnapshot(ctx, id)
 	return locked, nil
+}
+
+// isUpstreamIdentityConflict reports a violation of the live upstream
+// identity index (migration 133).
+func isUpstreamIdentityConflict(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505" && pqErr.Constraint == "accounts_platform_upstream_account_uuid_live_key"
+	}
+	return false
 }
 
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
@@ -956,6 +989,7 @@ func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Acco
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
+			ownerProxySchedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -983,6 +1017,7 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
+			ownerProxySchedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -1017,6 +1052,7 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
+			ownerProxySchedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -1038,6 +1074,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 			dbaccount.SchedulableEQ(true),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
+			ownerProxySchedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -1062,6 +1099,7 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 			dbaccount.SchedulableEQ(true),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
+			ownerProxySchedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -1774,6 +1812,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		preds = append(preds,
 			dbaccount.SchedulableEQ(true),
 			tempUnschedulablePredicate(),
+			ownerProxySchedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
 			dbaccount.Or(dbaccount.RateLimitResetAtIsNil(), dbaccount.RateLimitResetAtLTE(now)),
@@ -1885,6 +1924,24 @@ func tempUnschedulablePredicate() dbpredicate.Account {
 			entsql.LTE(col, entsql.Expr("NOW()")),
 		))
 	})
+}
+
+// ownerProxySchedulablePredicate mirrors Account.IsOwnerOrProxyBlocked: no
+// owner pause or withdraw request, and a self-onboarded account only with a
+// live, active proxy.
+func ownerProxySchedulablePredicate() dbpredicate.Account {
+	return dbaccount.And(
+		dbaccount.OwnerPausedAtIsNil(),
+		dbaccount.OwnerWithdrawRequestedAtIsNil(),
+		dbaccount.Or(
+			dbaccount.SelfOnboardedEQ(false),
+			dbaccount.HasProxyWith(
+				dbproxy.DeletedAtIsNil(),
+				dbproxy.StatusEQ(service.StatusActive),
+				dbproxy.HostNEQ(""),
+			),
+		),
+	)
 }
 
 func notExpiredPredicate(now time.Time) dbpredicate.Account {
@@ -2006,37 +2063,41 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 	paygDiscountMultiplier := m.PaygDiscountMultiplier
 
 	return &service.Account{
-		ID:                      m.ID,
-		Name:                    m.Name,
-		Notes:                   m.Notes,
-		Platform:                m.Platform,
-		Type:                    m.Type,
-		Credentials:             copyJSONMap(m.Credentials),
-		Extra:                   copyJSONMap(m.Extra),
-		ProxyID:                 m.ProxyID,
-		Concurrency:             m.Concurrency,
-		Priority:                m.Priority,
-		RateMultiplier:          &rateMultiplier,
-		PaygDiscountMultiplier:  &paygDiscountMultiplier,
-		LoadFactor:              m.LoadFactor,
-		OwnerUserID:             copyInt64Ptr(m.OwnerUserID),
-		Status:                  m.Status,
-		ErrorMessage:            derefString(m.ErrorMessage),
-		ErrorAt:                 m.ErrorAt,
-		LastUsedAt:              m.LastUsedAt,
-		ExpiresAt:               m.ExpiresAt,
-		AutoPauseOnExpired:      m.AutoPauseOnExpired,
-		CreatedAt:               m.CreatedAt,
-		UpdatedAt:               m.UpdatedAt,
-		Schedulable:             m.Schedulable,
-		RateLimitedAt:           m.RateLimitedAt,
-		RateLimitResetAt:        m.RateLimitResetAt,
-		OverloadUntil:           m.OverloadUntil,
-		TempUnschedulableUntil:  m.TempUnschedulableUntil,
-		TempUnschedulableReason: derefString(m.TempUnschedulableReason),
-		SessionWindowStart:      m.SessionWindowStart,
-		SessionWindowEnd:        m.SessionWindowEnd,
-		SessionWindowStatus:     derefString(m.SessionWindowStatus),
+		ID:                       m.ID,
+		Name:                     m.Name,
+		Notes:                    m.Notes,
+		Platform:                 m.Platform,
+		Type:                     m.Type,
+		Credentials:              copyJSONMap(m.Credentials),
+		Extra:                    copyJSONMap(m.Extra),
+		ProxyID:                  m.ProxyID,
+		Concurrency:              m.Concurrency,
+		Priority:                 m.Priority,
+		RateMultiplier:           &rateMultiplier,
+		PaygDiscountMultiplier:   &paygDiscountMultiplier,
+		LoadFactor:               m.LoadFactor,
+		OwnerUserID:              copyInt64Ptr(m.OwnerUserID),
+		UpstreamAccountUUID:      copyStringPtr(m.UpstreamAccountUUID),
+		SelfOnboarded:            m.SelfOnboarded,
+		OwnerPausedAt:            m.OwnerPausedAt,
+		OwnerWithdrawRequestedAt: m.OwnerWithdrawRequestedAt,
+		Status:                   m.Status,
+		ErrorMessage:             derefString(m.ErrorMessage),
+		ErrorAt:                  m.ErrorAt,
+		LastUsedAt:               m.LastUsedAt,
+		ExpiresAt:                m.ExpiresAt,
+		AutoPauseOnExpired:       m.AutoPauseOnExpired,
+		CreatedAt:                m.CreatedAt,
+		UpdatedAt:                m.UpdatedAt,
+		Schedulable:              m.Schedulable,
+		RateLimitedAt:            m.RateLimitedAt,
+		RateLimitResetAt:         m.RateLimitResetAt,
+		OverloadUntil:            m.OverloadUntil,
+		TempUnschedulableUntil:   m.TempUnschedulableUntil,
+		TempUnschedulableReason:  derefString(m.TempUnschedulableReason),
+		SessionWindowStart:       m.SessionWindowStart,
+		SessionWindowEnd:         m.SessionWindowEnd,
+		SessionWindowStatus:      derefString(m.SessionWindowStatus),
 	}
 }
 
@@ -2370,6 +2431,14 @@ func (r *accountRepository) AdvanceCarpoolMaintenance(ctx context.Context, id in
 }
 
 func copyInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	out := *v
+	return &out
+}
+
+func copyStringPtr(v *string) *string {
 	if v == nil {
 		return nil
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -297,7 +298,14 @@ func (s *OAuthService) RefreshAccountToken(ctx context.Context, account *Account
 		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
 		if err == nil && proxy != nil {
 			proxyURL = proxy.URL()
+			if account.SelfOnboarded && (!proxy.IsActive() || strings.TrimSpace(proxy.Host) == "") {
+				proxyURL = ""
+			}
 		}
+	}
+	// A self-onboarded account never refreshes from the server's own address.
+	if account.SelfOnboarded && proxyURL == "" {
+		return nil, ErrAccountProxyRequired
 	}
 
 	return s.RefreshToken(ctx, refreshToken, proxyURL)

@@ -279,6 +279,10 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		SessionWindowStatus:     a.SessionWindowStatus,
 		GroupIDs:                a.GroupIDs,
 	}
+	out.OwnerPausedAt = a.OwnerPausedAt
+	out.OwnerWithdrawRequestedAt = a.OwnerWithdrawRequestedAt
+	out.SelfOnboarded = a.SelfOnboarded
+	out.IdentityUnknown = service.AccountIdentityUnknown(a)
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
 	if a.IsAnthropicOAuthOrSetupToken() {

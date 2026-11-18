@@ -79,6 +79,9 @@ func RegisterAdminRoutes(
 		// 影子结算事件核对（只读）
 		registerSettlementRoutes(admin, h)
 
+		// 自助托管申请审核（P2c）
+		registerHostedApplicationRoutes(admin, h)
+
 	}
 }
 
@@ -541,5 +544,14 @@ func registerSettlementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	settlement := admin.Group("/settlement")
 	{
 		settlement.GET("/reconcile", h.Admin.Settlement.Reconcile)
+	}
+}
+
+func registerHostedApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	apps := admin.Group("/hosted-applications")
+	{
+		apps.GET("", h.Admin.HostedApplication.List)
+		apps.POST("/:id/approve", h.Admin.HostedApplication.Approve)
+		apps.POST("/:id/reject", h.Admin.HostedApplication.Reject)
 	}
 }

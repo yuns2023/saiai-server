@@ -3667,6 +3667,10 @@ type AccountMutation struct {
 	addload_factor              *int
 	owner_user_id               *int64
 	addowner_user_id            *int64
+	upstream_account_uuid       *string
+	self_onboarded              *bool
+	owner_paused_at             *time.Time
+	owner_withdraw_requested_at *time.Time
 	priority                    *int
 	addpriority                 *int
 	rate_multiplier             *float64
@@ -4399,6 +4403,189 @@ func (m *AccountMutation) ResetOwnerUserID() {
 	m.owner_user_id = nil
 	m.addowner_user_id = nil
 	delete(m.clearedFields, account.FieldOwnerUserID)
+}
+
+// SetUpstreamAccountUUID sets the "upstream_account_uuid" field.
+func (m *AccountMutation) SetUpstreamAccountUUID(s string) {
+	m.upstream_account_uuid = &s
+}
+
+// UpstreamAccountUUID returns the value of the "upstream_account_uuid" field in the mutation.
+func (m *AccountMutation) UpstreamAccountUUID() (r string, exists bool) {
+	v := m.upstream_account_uuid
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpstreamAccountUUID returns the old "upstream_account_uuid" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldUpstreamAccountUUID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpstreamAccountUUID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpstreamAccountUUID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpstreamAccountUUID: %w", err)
+	}
+	return oldValue.UpstreamAccountUUID, nil
+}
+
+// ClearUpstreamAccountUUID clears the value of the "upstream_account_uuid" field.
+func (m *AccountMutation) ClearUpstreamAccountUUID() {
+	m.upstream_account_uuid = nil
+	m.clearedFields[account.FieldUpstreamAccountUUID] = struct{}{}
+}
+
+// UpstreamAccountUUIDCleared returns if the "upstream_account_uuid" field was cleared in this mutation.
+func (m *AccountMutation) UpstreamAccountUUIDCleared() bool {
+	_, ok := m.clearedFields[account.FieldUpstreamAccountUUID]
+	return ok
+}
+
+// ResetUpstreamAccountUUID resets all changes to the "upstream_account_uuid" field.
+func (m *AccountMutation) ResetUpstreamAccountUUID() {
+	m.upstream_account_uuid = nil
+	delete(m.clearedFields, account.FieldUpstreamAccountUUID)
+}
+
+// SetSelfOnboarded sets the "self_onboarded" field.
+func (m *AccountMutation) SetSelfOnboarded(b bool) {
+	m.self_onboarded = &b
+}
+
+// SelfOnboarded returns the value of the "self_onboarded" field in the mutation.
+func (m *AccountMutation) SelfOnboarded() (r bool, exists bool) {
+	v := m.self_onboarded
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSelfOnboarded returns the old "self_onboarded" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldSelfOnboarded(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSelfOnboarded is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSelfOnboarded requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSelfOnboarded: %w", err)
+	}
+	return oldValue.SelfOnboarded, nil
+}
+
+// ResetSelfOnboarded resets all changes to the "self_onboarded" field.
+func (m *AccountMutation) ResetSelfOnboarded() {
+	m.self_onboarded = nil
+}
+
+// SetOwnerPausedAt sets the "owner_paused_at" field.
+func (m *AccountMutation) SetOwnerPausedAt(t time.Time) {
+	m.owner_paused_at = &t
+}
+
+// OwnerPausedAt returns the value of the "owner_paused_at" field in the mutation.
+func (m *AccountMutation) OwnerPausedAt() (r time.Time, exists bool) {
+	v := m.owner_paused_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerPausedAt returns the old "owner_paused_at" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldOwnerPausedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerPausedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerPausedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerPausedAt: %w", err)
+	}
+	return oldValue.OwnerPausedAt, nil
+}
+
+// ClearOwnerPausedAt clears the value of the "owner_paused_at" field.
+func (m *AccountMutation) ClearOwnerPausedAt() {
+	m.owner_paused_at = nil
+	m.clearedFields[account.FieldOwnerPausedAt] = struct{}{}
+}
+
+// OwnerPausedAtCleared returns if the "owner_paused_at" field was cleared in this mutation.
+func (m *AccountMutation) OwnerPausedAtCleared() bool {
+	_, ok := m.clearedFields[account.FieldOwnerPausedAt]
+	return ok
+}
+
+// ResetOwnerPausedAt resets all changes to the "owner_paused_at" field.
+func (m *AccountMutation) ResetOwnerPausedAt() {
+	m.owner_paused_at = nil
+	delete(m.clearedFields, account.FieldOwnerPausedAt)
+}
+
+// SetOwnerWithdrawRequestedAt sets the "owner_withdraw_requested_at" field.
+func (m *AccountMutation) SetOwnerWithdrawRequestedAt(t time.Time) {
+	m.owner_withdraw_requested_at = &t
+}
+
+// OwnerWithdrawRequestedAt returns the value of the "owner_withdraw_requested_at" field in the mutation.
+func (m *AccountMutation) OwnerWithdrawRequestedAt() (r time.Time, exists bool) {
+	v := m.owner_withdraw_requested_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOwnerWithdrawRequestedAt returns the old "owner_withdraw_requested_at" field's value of the Account entity.
+// If the Account object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccountMutation) OldOwnerWithdrawRequestedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOwnerWithdrawRequestedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOwnerWithdrawRequestedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOwnerWithdrawRequestedAt: %w", err)
+	}
+	return oldValue.OwnerWithdrawRequestedAt, nil
+}
+
+// ClearOwnerWithdrawRequestedAt clears the value of the "owner_withdraw_requested_at" field.
+func (m *AccountMutation) ClearOwnerWithdrawRequestedAt() {
+	m.owner_withdraw_requested_at = nil
+	m.clearedFields[account.FieldOwnerWithdrawRequestedAt] = struct{}{}
+}
+
+// OwnerWithdrawRequestedAtCleared returns if the "owner_withdraw_requested_at" field was cleared in this mutation.
+func (m *AccountMutation) OwnerWithdrawRequestedAtCleared() bool {
+	_, ok := m.clearedFields[account.FieldOwnerWithdrawRequestedAt]
+	return ok
+}
+
+// ResetOwnerWithdrawRequestedAt resets all changes to the "owner_withdraw_requested_at" field.
+func (m *AccountMutation) ResetOwnerWithdrawRequestedAt() {
+	m.owner_withdraw_requested_at = nil
+	delete(m.clearedFields, account.FieldOwnerWithdrawRequestedAt)
 }
 
 // SetPriority sets the "priority" field.
@@ -5542,7 +5729,7 @@ func (m *AccountMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountMutation) Fields() []string {
-	fields := make([]string, 0, 31)
+	fields := make([]string, 0, 35)
 	if m.created_at != nil {
 		fields = append(fields, account.FieldCreatedAt)
 	}
@@ -5581,6 +5768,18 @@ func (m *AccountMutation) Fields() []string {
 	}
 	if m.owner_user_id != nil {
 		fields = append(fields, account.FieldOwnerUserID)
+	}
+	if m.upstream_account_uuid != nil {
+		fields = append(fields, account.FieldUpstreamAccountUUID)
+	}
+	if m.self_onboarded != nil {
+		fields = append(fields, account.FieldSelfOnboarded)
+	}
+	if m.owner_paused_at != nil {
+		fields = append(fields, account.FieldOwnerPausedAt)
+	}
+	if m.owner_withdraw_requested_at != nil {
+		fields = append(fields, account.FieldOwnerWithdrawRequestedAt)
 	}
 	if m.priority != nil {
 		fields = append(fields, account.FieldPriority)
@@ -5670,6 +5869,14 @@ func (m *AccountMutation) Field(name string) (ent.Value, bool) {
 		return m.LoadFactor()
 	case account.FieldOwnerUserID:
 		return m.OwnerUserID()
+	case account.FieldUpstreamAccountUUID:
+		return m.UpstreamAccountUUID()
+	case account.FieldSelfOnboarded:
+		return m.SelfOnboarded()
+	case account.FieldOwnerPausedAt:
+		return m.OwnerPausedAt()
+	case account.FieldOwnerWithdrawRequestedAt:
+		return m.OwnerWithdrawRequestedAt()
 	case account.FieldPriority:
 		return m.Priority()
 	case account.FieldRateMultiplier:
@@ -5741,6 +5948,14 @@ func (m *AccountMutation) OldField(ctx context.Context, name string) (ent.Value,
 		return m.OldLoadFactor(ctx)
 	case account.FieldOwnerUserID:
 		return m.OldOwnerUserID(ctx)
+	case account.FieldUpstreamAccountUUID:
+		return m.OldUpstreamAccountUUID(ctx)
+	case account.FieldSelfOnboarded:
+		return m.OldSelfOnboarded(ctx)
+	case account.FieldOwnerPausedAt:
+		return m.OldOwnerPausedAt(ctx)
+	case account.FieldOwnerWithdrawRequestedAt:
+		return m.OldOwnerWithdrawRequestedAt(ctx)
 	case account.FieldPriority:
 		return m.OldPriority(ctx)
 	case account.FieldRateMultiplier:
@@ -5876,6 +6091,34 @@ func (m *AccountMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetOwnerUserID(v)
+		return nil
+	case account.FieldUpstreamAccountUUID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpstreamAccountUUID(v)
+		return nil
+	case account.FieldSelfOnboarded:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSelfOnboarded(v)
+		return nil
+	case account.FieldOwnerPausedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerPausedAt(v)
+		return nil
+	case account.FieldOwnerWithdrawRequestedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOwnerWithdrawRequestedAt(v)
 		return nil
 	case account.FieldPriority:
 		v, ok := value.(int)
@@ -6123,6 +6366,15 @@ func (m *AccountMutation) ClearedFields() []string {
 	if m.FieldCleared(account.FieldOwnerUserID) {
 		fields = append(fields, account.FieldOwnerUserID)
 	}
+	if m.FieldCleared(account.FieldUpstreamAccountUUID) {
+		fields = append(fields, account.FieldUpstreamAccountUUID)
+	}
+	if m.FieldCleared(account.FieldOwnerPausedAt) {
+		fields = append(fields, account.FieldOwnerPausedAt)
+	}
+	if m.FieldCleared(account.FieldOwnerWithdrawRequestedAt) {
+		fields = append(fields, account.FieldOwnerWithdrawRequestedAt)
+	}
 	if m.FieldCleared(account.FieldErrorMessage) {
 		fields = append(fields, account.FieldErrorMessage)
 	}
@@ -6187,6 +6439,15 @@ func (m *AccountMutation) ClearField(name string) error {
 		return nil
 	case account.FieldOwnerUserID:
 		m.ClearOwnerUserID()
+		return nil
+	case account.FieldUpstreamAccountUUID:
+		m.ClearUpstreamAccountUUID()
+		return nil
+	case account.FieldOwnerPausedAt:
+		m.ClearOwnerPausedAt()
+		return nil
+	case account.FieldOwnerWithdrawRequestedAt:
+		m.ClearOwnerWithdrawRequestedAt()
 		return nil
 	case account.FieldErrorMessage:
 		m.ClearErrorMessage()
@@ -6270,6 +6531,18 @@ func (m *AccountMutation) ResetField(name string) error {
 		return nil
 	case account.FieldOwnerUserID:
 		m.ResetOwnerUserID()
+		return nil
+	case account.FieldUpstreamAccountUUID:
+		m.ResetUpstreamAccountUUID()
+		return nil
+	case account.FieldSelfOnboarded:
+		m.ResetSelfOnboarded()
+		return nil
+	case account.FieldOwnerPausedAt:
+		m.ResetOwnerPausedAt()
+		return nil
+	case account.FieldOwnerWithdrawRequestedAt:
+		m.ResetOwnerWithdrawRequestedAt()
 		return nil
 	case account.FieldPriority:
 		m.ResetPriority()

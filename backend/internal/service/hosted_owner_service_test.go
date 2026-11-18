@@ -216,7 +216,7 @@ func TestHostedOwnerJSONAllowlists(t *testing.T) {
 		sort.Strings(out)
 		return out
 	}
-	require.Equal(t, []string{"account_id", "current", "display_name", "last_24h", "last_7d", "platform", "stale", "status", "type", "updated_at", "windows"},
+	require.Equal(t, []string{"account_id", "current", "display_name", "last_24h", "last_7d", "owner_paused", "platform", "stale", "status", "type", "updated_at", "windows", "withdraw_requested"},
 		keysOf(OwnedHostedAccount{}))
 	require.Equal(t, []string{"api_key_name", "cache_creation_tokens", "cache_read_tokens", "charged", "created_at", "input_tokens", "is_self", "model", "output_tokens", "standard_cost"},
 		keysOf(HostedOwnerUsageRow{}))

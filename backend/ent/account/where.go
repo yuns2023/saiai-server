@@ -110,6 +110,26 @@ func OwnerUserID(v int64) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldOwnerUserID, v))
 }
 
+// UpstreamAccountUUID applies equality check predicate on the "upstream_account_uuid" field. It's identical to UpstreamAccountUUIDEQ.
+func UpstreamAccountUUID(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldUpstreamAccountUUID, v))
+}
+
+// SelfOnboarded applies equality check predicate on the "self_onboarded" field. It's identical to SelfOnboardedEQ.
+func SelfOnboarded(v bool) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldSelfOnboarded, v))
+}
+
+// OwnerPausedAt applies equality check predicate on the "owner_paused_at" field. It's identical to OwnerPausedAtEQ.
+func OwnerPausedAt(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldOwnerPausedAt, v))
+}
+
+// OwnerWithdrawRequestedAt applies equality check predicate on the "owner_withdraw_requested_at" field. It's identical to OwnerWithdrawRequestedAtEQ.
+func OwnerWithdrawRequestedAt(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldOwnerWithdrawRequestedAt, v))
+}
+
 // Priority applies equality check predicate on the "priority" field. It's identical to PriorityEQ.
 func Priority(v int) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldPriority, v))
@@ -768,6 +788,191 @@ func OwnerUserIDIsNil() predicate.Account {
 // OwnerUserIDNotNil applies the NotNil predicate on the "owner_user_id" field.
 func OwnerUserIDNotNil() predicate.Account {
 	return predicate.Account(sql.FieldNotNull(FieldOwnerUserID))
+}
+
+// UpstreamAccountUUIDEQ applies the EQ predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDNEQ applies the NEQ predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDNEQ(v string) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDIn applies the In predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldUpstreamAccountUUID, vs...))
+}
+
+// UpstreamAccountUUIDNotIn applies the NotIn predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDNotIn(vs ...string) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldUpstreamAccountUUID, vs...))
+}
+
+// UpstreamAccountUUIDGT applies the GT predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDGT(v string) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDGTE applies the GTE predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDGTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDLT applies the LT predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDLT(v string) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDLTE applies the LTE predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDLTE(v string) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDContains applies the Contains predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDContains(v string) predicate.Account {
+	return predicate.Account(sql.FieldContains(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDHasPrefix applies the HasPrefix predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDHasPrefix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasPrefix(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDHasSuffix applies the HasSuffix predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDHasSuffix(v string) predicate.Account {
+	return predicate.Account(sql.FieldHasSuffix(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDIsNil applies the IsNil predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldUpstreamAccountUUID))
+}
+
+// UpstreamAccountUUIDNotNil applies the NotNil predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldUpstreamAccountUUID))
+}
+
+// UpstreamAccountUUIDEqualFold applies the EqualFold predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDEqualFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldEqualFold(FieldUpstreamAccountUUID, v))
+}
+
+// UpstreamAccountUUIDContainsFold applies the ContainsFold predicate on the "upstream_account_uuid" field.
+func UpstreamAccountUUIDContainsFold(v string) predicate.Account {
+	return predicate.Account(sql.FieldContainsFold(FieldUpstreamAccountUUID, v))
+}
+
+// SelfOnboardedEQ applies the EQ predicate on the "self_onboarded" field.
+func SelfOnboardedEQ(v bool) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldSelfOnboarded, v))
+}
+
+// SelfOnboardedNEQ applies the NEQ predicate on the "self_onboarded" field.
+func SelfOnboardedNEQ(v bool) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldSelfOnboarded, v))
+}
+
+// OwnerPausedAtEQ applies the EQ predicate on the "owner_paused_at" field.
+func OwnerPausedAtEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldOwnerPausedAt, v))
+}
+
+// OwnerPausedAtNEQ applies the NEQ predicate on the "owner_paused_at" field.
+func OwnerPausedAtNEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldOwnerPausedAt, v))
+}
+
+// OwnerPausedAtIn applies the In predicate on the "owner_paused_at" field.
+func OwnerPausedAtIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldOwnerPausedAt, vs...))
+}
+
+// OwnerPausedAtNotIn applies the NotIn predicate on the "owner_paused_at" field.
+func OwnerPausedAtNotIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldOwnerPausedAt, vs...))
+}
+
+// OwnerPausedAtGT applies the GT predicate on the "owner_paused_at" field.
+func OwnerPausedAtGT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldOwnerPausedAt, v))
+}
+
+// OwnerPausedAtGTE applies the GTE predicate on the "owner_paused_at" field.
+func OwnerPausedAtGTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldOwnerPausedAt, v))
+}
+
+// OwnerPausedAtLT applies the LT predicate on the "owner_paused_at" field.
+func OwnerPausedAtLT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldOwnerPausedAt, v))
+}
+
+// OwnerPausedAtLTE applies the LTE predicate on the "owner_paused_at" field.
+func OwnerPausedAtLTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldOwnerPausedAt, v))
+}
+
+// OwnerPausedAtIsNil applies the IsNil predicate on the "owner_paused_at" field.
+func OwnerPausedAtIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldOwnerPausedAt))
+}
+
+// OwnerPausedAtNotNil applies the NotNil predicate on the "owner_paused_at" field.
+func OwnerPausedAtNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldOwnerPausedAt))
+}
+
+// OwnerWithdrawRequestedAtEQ applies the EQ predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldOwnerWithdrawRequestedAt, v))
+}
+
+// OwnerWithdrawRequestedAtNEQ applies the NEQ predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtNEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldOwnerWithdrawRequestedAt, v))
+}
+
+// OwnerWithdrawRequestedAtIn applies the In predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldOwnerWithdrawRequestedAt, vs...))
+}
+
+// OwnerWithdrawRequestedAtNotIn applies the NotIn predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtNotIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldOwnerWithdrawRequestedAt, vs...))
+}
+
+// OwnerWithdrawRequestedAtGT applies the GT predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtGT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldOwnerWithdrawRequestedAt, v))
+}
+
+// OwnerWithdrawRequestedAtGTE applies the GTE predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtGTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldOwnerWithdrawRequestedAt, v))
+}
+
+// OwnerWithdrawRequestedAtLT applies the LT predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtLT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldOwnerWithdrawRequestedAt, v))
+}
+
+// OwnerWithdrawRequestedAtLTE applies the LTE predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtLTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldOwnerWithdrawRequestedAt, v))
+}
+
+// OwnerWithdrawRequestedAtIsNil applies the IsNil predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldOwnerWithdrawRequestedAt))
+}
+
+// OwnerWithdrawRequestedAtNotNil applies the NotNil predicate on the "owner_withdraw_requested_at" field.
+func OwnerWithdrawRequestedAtNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldOwnerWithdrawRequestedAt))
 }
 
 // PriorityEQ applies the EQ predicate on the "priority" field.
