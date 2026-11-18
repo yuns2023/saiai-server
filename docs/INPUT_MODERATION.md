@@ -13,6 +13,23 @@ Group moderation remains opt-in. Each group policy has an input scope
 - `full`: the newest real user text and transmitted project instructions are
   classified, as described in the coverage and content-cache contract below.
 
+Messages a user types while a tool runs are user input. Claude Code delivers
+them inside the running turn (measured on 2.1.322/2.1.326: a role `system`
+message after the `tool_result`, framed as "The user sent a new message while
+you were working: …"). When the last message carries tool results, the user's
+words are taken from text blocks in the current turn (after the last assistant
+message) that open with that framing, optionally inside a `<system-reminder>`
+wrapper; text that merely quotes the sentence (files, reminders, tool output)
+is not user input. The words end at the client's first explanation paragraph
+or the wrapper's first closing tag, whichever comes first: an ambiguous
+boundary ends the words early rather than attributing client text to the user;
+appended reminders are dropped. In the same user message as a `tool_result`,
+text outside closed `<system-reminder>` envelopes counts as user text (an
+unclosed envelope drops the rest of its block; client interruption notices are
+skipped). Other
+system message text and earlier turns are not user input. In `full` scope the
+framed words are classified once, as user text, not again as instructions.
+
 The scope is applied when a request is queued and again when the worker
 processes the job with the current group policy, so jobs queued before a switch
 to `user_input` no longer send their instructions. Switching to `full` applies

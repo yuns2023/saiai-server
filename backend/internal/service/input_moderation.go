@@ -725,10 +725,14 @@ func (s *InputModerationService) Stop() {
 
 // ExtractLatestRealUserText returns only text blocks from the last genuine user
 // message. Tool results, prior assistant content, images and system scaffolding
-// are intentionally excluded.
+// are intentionally excluded. When the last message carries tool results, the
+// user's mid-turn messages of the current turn are returned instead.
 func ExtractLatestRealUserText(parsed *ParsedRequest) string {
-	if !IsRealUserMessage(parsed) || parsed == nil || len(parsed.Messages) == 0 {
+	if parsed == nil || len(parsed.Messages) == 0 {
 		return ""
+	}
+	if !IsRealUserMessage(parsed) {
+		return extractMidTurnUserText(parsed.Messages)
 	}
 	last, ok := parsed.Messages[len(parsed.Messages)-1].(map[string]any)
 	if !ok {
