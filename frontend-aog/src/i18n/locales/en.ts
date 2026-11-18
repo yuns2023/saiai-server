@@ -395,7 +395,7 @@ const en: typeof zh = {
     lead: 'Have your own Claude subscription hosted here and use it with your keys. Claude only (setup-token authorisation); an administrator reviews every submission.',
     fee: 'Once approved it goes into your own hosted group. Requests on it are billed at the standard price × the hosting service fee; the fee is set by the site and shown on your keys.',
     step1: 'Generate a link',
-    step1Lead: 'Generate an authorisation link just for you and open it in a new tab. It is valid for 10 minutes and works once.',
+    step1Lead: 'Generate an authorisation link just for you and open it in a new tab. It works once; finish before the countdown ends.',
     generate: 'Generate link',
     regenerate: 'Generate again',
     generating: 'Generating…',

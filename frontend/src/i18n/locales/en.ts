@@ -5326,7 +5326,7 @@ export default {
       },
       hostedSelfOnboard: {
         title: 'Hosted self-onboarding',
-        description: 'Signed-in users submit their own Claude account (setup-token) on the ccyou.dev hosted page; administrators review it under Hosting Applications. Each owner gets an own hosted group automatically.',
+        description: 'Signed-in users submit their own Claude account (setup-token) on the hosted page of the user UI (AOG); administrators review it under Hosting Applications. Each owner gets an own hosted group automatically.',
         enabled: 'Open self-onboarding',
         enabledHint: 'When off, the user entry is hidden, links and submissions are refused and admins cannot approve; existing applications can still be viewed, cancelled and rejected.',
         exchangeProxy: 'Exchange proxy',

@@ -35,9 +35,9 @@
           </template>
 
           <template #cell-proxy="{ row }">
-            <div v-if="row.proxy_display" class="text-sm">
+            <div v-if="row.proxy_display" class="flex max-w-[14rem] flex-col items-start gap-1 whitespace-normal text-sm [overflow-wrap:anywhere]">
               <span class="font-mono text-xs text-gray-700 dark:text-gray-300">{{ row.proxy_display }}</span>
-              <span v-if="row.has_proxy_auth" class="badge badge-gray ml-1">{{ t('admin.hostedApplications.proxyAuth') }}</span>
+              <span v-if="row.has_proxy_auth" class="badge badge-gray">{{ t('admin.hostedApplications.proxyAuth') }}</span>
             </div>
             <span v-else class="text-xs text-gray-400">{{ t('admin.hostedApplications.noProxy') }}</span>
           </template>
@@ -47,11 +47,12 @@
           </template>
 
           <template #cell-status="{ row }">
+            <div class="min-w-[10rem] whitespace-normal">
             <span :class="['badge', statusBadge(row.status)]" data-testid="status-badge">{{ statusLabel(row.status) }}</span>
             <div v-if="row.reviewed_at" class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ formatDateTime(row.reviewed_at) }}</div>
             <div
               v-if="row.status === 'rejected' && row.reject_reason"
-              class="mt-1 max-w-[16rem] whitespace-normal text-xs text-gray-600 dark:text-gray-300"
+              class="mt-1 max-w-[10rem] text-xs text-gray-600 dark:text-gray-300"
               :title="row.reject_reason"
             >
               {{ t('admin.hostedApplications.rejectReasonShort', { reason: row.reject_reason }) }}
@@ -64,6 +65,7 @@
             >
               {{ t('admin.hostedApplications.accountLink', { id: row.account_id }) }}
             </router-link>
+            </div>
           </template>
 
           <template #cell-actions="{ row }">

@@ -5489,7 +5489,7 @@ export default {
       },
       hostedSelfOnboard: {
         title: '托管自助上号',
-        description: '允许登录用户在 ccyou.dev「我的托管号」页提交自己的 Claude 号（setup-token），由管理员在「托管申请」页审核。每个号主自动建一个专属托管分组。',
+        description: '允许登录用户在用户端（AOG 界面）「我的托管号」页提交自己的 Claude 号（setup-token），由管理员在「托管申请」页审核。每个号主自动建一个专属托管分组。',
         enabled: '开放自助上号',
         enabledHint: '关闭后用户端入口隐藏、不能生成授权链接或提交，管理员不能批准；已有申请仍可查看、取消和驳回。',
         exchangeProxy: '兑换用代理',
