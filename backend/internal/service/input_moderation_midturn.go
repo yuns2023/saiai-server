@@ -140,24 +140,46 @@ func extractMidTurnUserText(messages []any) string {
 	return strings.Join(parts, "\n")
 }
 
-// plainUserText keeps the text outside closed <system-reminder> envelopes, in
-// order; an unclosed envelope drops the rest of the block, and client
-// interruption notices are not user words.
+// plainUserText keeps the text outside (possibly nested) closed
+// <system-reminder> envelopes, in order; an unclosed envelope drops the rest
+// of the block, and client interruption notices are not user words.
 func plainUserText(text string) string {
 	var out strings.Builder
-	for {
-		open := strings.Index(text, systemReminderOpen)
-		if open < 0 {
-			out.WriteString(text)
-			break
+	depth, pos := 0, 0
+	// Next tag positions are cached and only searched again after being
+	// passed, so the scan stays linear.
+	nextOpen, nextClose := -2, -2
+	find := func(cached int, tag string) int {
+		if cached == -1 || (cached >= pos) {
+			return cached
 		}
-		out.WriteString(text[:open])
-		closeAt := strings.Index(text[open:], systemReminderClose)
-		if closeAt < 0 {
-			break
+		if i := strings.Index(text[pos:], tag); i >= 0 {
+			return pos + i
 		}
-		out.WriteString("\n")
-		text = text[open+closeAt+len(systemReminderClose):]
+		return -1
+	}
+	for pos < len(text) {
+		nextOpen, nextClose = find(nextOpen, systemReminderOpen), find(nextClose, systemReminderClose)
+		if depth == 0 {
+			if nextOpen < 0 {
+				out.WriteString(text[pos:])
+				break
+			}
+			out.WriteString(text[pos:nextOpen])
+			depth, pos = 1, nextOpen+len(systemReminderOpen)
+			continue
+		}
+		if nextClose < 0 {
+			break // unclosed: the rest belongs to the reminder
+		}
+		if nextOpen >= 0 && nextOpen < nextClose {
+			depth, pos = depth+1, nextOpen+len(systemReminderOpen)
+			continue
+		}
+		depth, pos = depth-1, nextClose+len(systemReminderClose)
+		if depth == 0 {
+			out.WriteString("\n")
+		}
 	}
 	plain := strings.TrimSpace(out.String())
 	for _, notice := range claudeCodeToolResultNotices {

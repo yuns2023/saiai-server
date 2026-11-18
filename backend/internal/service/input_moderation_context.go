@@ -296,8 +296,13 @@ func ExtractAnthropicModerationInput(parsed *ParsedRequest) (string, []string) {
 			continue
 		}
 		role, _ := message["role"].(string)
-		// Framed mid-turn words are user text; keep them out of instructions.
-		text := moderationTextContent(withoutMidTurnWords(message["content"]))
+		// Framed mid-turn words (system or user messages) are user text; keep
+		// them out of instructions. Developer content is kept as sent.
+		content := message["content"]
+		if role == "system" || role == "user" {
+			content = withoutMidTurnWords(content)
+		}
+		text := moderationTextContent(content)
 		if role == "system" || role == "developer" || (role == "user" && projectInstructionText(text) && (i < len(parsed.Messages)-1 || !IsRealUserMessage(parsed))) {
 			parts = appendUniqueModerationText(parts, text)
 		}

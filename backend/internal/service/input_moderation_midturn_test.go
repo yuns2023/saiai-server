@@ -91,6 +91,25 @@ func TestPlainUserTextNextToToolResult(t *testing.T) {
 	require.Equal(t, "a\nb", plainUserText("a<system-reminder>x</system-reminder>b"))
 	require.Equal(t, "before", plainUserText("before\n<system-reminder>\nunclosed"))
 	require.Equal(t, "", plainUserText("[Request interrupted by user for tool use]"))
+	require.Equal(t, "continue", plainUserText("<system-reminder>outer<system-reminder>inner</system-reminder>outer tail</system-reminder>continue"))
+	require.Equal(t, "", plainUserText("<system-reminder>outer<system-reminder>inner</system-reminder>outer tail"))
+}
+
+func TestPlainUserTextLinearOnManyTags(t *testing.T) {
+	text := strings.Repeat(systemReminderOpen, 50000) + strings.Repeat(systemReminderClose, 50000) + "tail"
+	start := time.Now()
+	require.Equal(t, "tail", plainUserText(text))
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+}
+
+func TestFullScopeKeepsDeveloperTextStartingWithFramePrefix(t *testing.T) {
+	developer := claudeCodeMidTurnPrefix + " is a protocol example"
+	parsed := &ParsedRequest{Messages: []any{
+		map[string]any{"role": "developer", "content": developer},
+		map[string]any{"role": "user", "content": "hi"},
+	}}
+	_, instructions := ExtractAnthropicModerationInput(parsed)
+	require.Contains(t, instructions, developer)
 }
 
 // Older clients put the frame next to the tool_result in a user message that
