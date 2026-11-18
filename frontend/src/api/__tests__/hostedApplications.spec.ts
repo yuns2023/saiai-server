@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const http = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: http }))
 
-import { approvePayload, approveProblems, hostedApplicationsAPI, type ApproveForm } from '@/api/admin/hostedApplications'
+import { approvePayload, approveProblems, hostedApplicationsAPI, validHostedFeeRate, type ApproveForm } from '@/api/admin/hostedApplications'
 
 function form(over: Partial<ApproveForm> = {}): ApproveForm {
   return {
@@ -33,12 +33,22 @@ describe('approveProblems', () => {
 
   it('checks every number against its range', () => {
     expect(approveProblems(form({ concurrency: 0 }), false)).toEqual(['concurrency'])
+    expect(approveProblems(form({ concurrency: 101 }), false)).toEqual(['concurrency'])
+    expect(approveProblems(form({ concurrency: 100, priority: 0 }), false)).toEqual([])
+    expect(approveProblems(form({ priority: 10001 }), false)).toEqual(['priority'])
     expect(approveProblems(form({ priority: '' }), false)).toEqual(['priority'])
     expect(approveProblems(form({ carpool_device_limit: 33 }), false)).toEqual(['carpool_device_limit'])
     expect(approveProblems(form({ carpool_interval_hours: 721 }), false)).toEqual(['carpool_interval_hours'])
     expect(approveProblems(form({ carpool_interval_hours: 1.5 }), false)).toEqual(['carpool_interval_hours'])
     expect(approveProblems(form({ carpool_admissions_per_cycle: 6, carpool_device_limit: 5 }), false)).toEqual(['carpool_admissions_per_cycle'])
     expect(approveProblems(form({ carpool_admissions_per_cycle: 0 }), false)).toEqual([])
+  })
+})
+
+describe('validHostedFeeRate', () => {
+  it('accepts 0..10 with at most 4 decimals', () => {
+    for (const v of [0, 0.1, 0.1234, 10]) expect(validHostedFeeRate(v), String(v)).toBe(true)
+    for (const v of [-0.01, 10.0001, 0.12345, Number.NaN, '0.1', '']) expect(validHostedFeeRate(v), String(v)).toBe(false)
   })
 })
 

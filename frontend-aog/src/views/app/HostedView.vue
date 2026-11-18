@@ -70,6 +70,15 @@ function statusLabel(s: string): string {
   return te(`hosted.status_${s}`) ? t(`hosted.status_${s}`) : s
 }
 
+/**
+ * While I paused it or asked for take-down, my own label says it: a plain
+ * "可用" / "已暂停" next to it would be redundant or (before the refresh) wrong.
+ * Other statuses (needs attention, rate limited…) still show.
+ */
+function ownerStateHidesStatus(a: OwnedAccount): boolean {
+  return a.current && (a.owner_paused === true || a.withdraw_requested === true) && (a.status === 'available' || a.status === 'paused')
+}
+
 function statusTag(s: string): string {
   if (s === 'available') return 'tag-ok'
   if (s === 'rate_limited' || s === 'temporarily_unavailable') return 'tag-warn'
@@ -135,7 +144,11 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
   const session = hosted.session()
   try {
     const state = await hostedApi.setOwnerState(a.account_id, action)
-    if (hosted.applyOwnerState(state, session)) app.notify('ok', t(`hosted.owner_${action}_done`))
+    if (hosted.applyOwnerState(state, session)) {
+      app.notify('ok', t(`hosted.owner_${action}_done`))
+      // Status and badges then come from the server, not from this guess.
+      void loadAccounts()
+    }
   } catch (e) {
     if (hosted.session() !== session) return
     const key = onboardErrorKey(e)
@@ -156,6 +169,7 @@ async function confirmWithdraw(): Promise<void> {
 const onboardEnabled = computed(() => hosted.onboard?.enabled === true)
 const applications = ref<HostedApplication[]>([])
 const appsFailed = ref(false)
+const pendingCount = computed(() => applications.value.filter((a) => a.status === 'pending').length)
 
 /** Only the latest list answer is used; a local change bumps it too so an older read cannot undo it. */
 let appsSeq = 0
@@ -167,6 +181,7 @@ async function loadApplications(): Promise<void> {
     if (seq !== appsSeq) return
     applications.value = list
     appsFailed.value = false
+    hosted.hasApplications = list.length > 0
   } catch (e) {
     if (seq !== appsSeq) return
     // A server without self-onboarding has no such list.
@@ -360,7 +375,7 @@ onUnmounted(() => {
                   <span class="block min-w-0">
                     <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span :id="`hosted-name-${a.account_id}`" class="min-w-0 truncate font-medium">{{ a.display_name }}</span>
-                      <span v-if="a.status" class="tag" :class="statusTag(a.status)" data-testid="hosted-status">{{ statusLabel(a.status) }}</span>
+                      <span v-if="a.status && !ownerStateHidesStatus(a)" class="tag" :class="statusTag(a.status)" data-testid="hosted-status">{{ statusLabel(a.status) }}</span>
                       <span v-if="a.current && a.owner_paused" class="tag tag-warn" data-testid="hosted-owner-paused">{{ t('hosted.ownerPaused') }}</span>
                       <span v-if="a.current && a.withdraw_requested" class="tag tag-off" data-testid="hosted-withdraw-requested">{{ t('hosted.withdrawRequested') }}</span>
                     </span>
@@ -574,7 +589,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <HostedOnboard v-if="onboardEnabled && hosted.onboard" :config="hosted.onboard" @submitted="onSubmitted" />
+    <HostedOnboard v-if="onboardEnabled && hosted.onboard" :config="hosted.onboard" :pending-count="pendingCount" @submitted="onSubmitted" />
 
     <ConfirmDialog
       :open="!!withdrawTarget"

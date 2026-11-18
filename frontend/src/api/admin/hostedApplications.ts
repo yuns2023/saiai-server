@@ -46,7 +46,7 @@ export interface ApproveHostedApplicationRequest {
 }
 
 export interface ApproveHostedApplicationResult {
-  application: HostedApplication
+  application: AdminHostedApplication
   account_id: number
   group_id: number
 }
@@ -67,8 +67,8 @@ export const hostedApplicationsAPI = {
     const { data } = await apiClient.post<ApproveHostedApplicationResult>(`/admin/hosted-applications/${id}/approve`, body)
     return data
   },
-  async reject(id: number, reason: string): Promise<HostedApplication> {
-    const { data } = await apiClient.post<HostedApplication>(`/admin/hosted-applications/${id}/reject`, { reason })
+  async reject(id: number, reason: string): Promise<AdminHostedApplication> {
+    const { data } = await apiClient.post<AdminHostedApplication>(`/admin/hosted-applications/${id}/reject`, { reason })
     return data
   }
 }
@@ -84,14 +84,26 @@ export interface ApproveForm {
   carpool_interval_hours: number | ''
 }
 
-/** Limits mirrored from the account model and its carpool keys; the backend checks again. */
+/**
+ * Bounds of the approve request and of the settings defaults, as the backend
+ * enforces them (service/setting_hosted_self_onboard.go); admissions per cycle
+ * is also at most the device limit.
+ */
 export const APPROVE_LIMITS = {
-  concurrency: { min: 1, max: Number.MAX_SAFE_INTEGER },
-  priority: { min: 1, max: Number.MAX_SAFE_INTEGER },
+  concurrency: { min: 1, max: 100 },
+  priority: { min: 0, max: 10000 },
   carpool_device_limit: { min: 1, max: 32 },
   carpool_admissions_per_cycle: { min: 0, max: 32 },
   carpool_interval_hours: { min: 1, max: 720 }
 } as const
+
+export const HOSTED_FEE_RATE_MAX = 10
+
+/** 0..10 with at most 4 decimals (groups.rate_multiplier is decimal(10,4)). */
+export function validHostedFeeRate(v: unknown): v is number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > HOSTED_FEE_RATE_MAX) return false
+  return Math.abs(v * 10000 - Math.round(v * 10000)) <= 1e-7
+}
 
 export type ApproveField = keyof typeof APPROVE_LIMITS | 'proxy'
 

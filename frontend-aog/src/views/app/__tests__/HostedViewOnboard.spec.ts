@@ -175,17 +175,25 @@ describe('HostedView self-onboarding', () => {
     expect(row().text()).toContain('暂停后不再接新请求，进行中的请求会正常完成')
 
     hosted.setOwnerState.mockResolvedValueOnce({ id: 12, owner_paused: true, withdraw_requested: false })
+    // The server's view after the pause, fetched again by the page.
+    hosted.listOwnedAccounts.mockResolvedValue([account({ status: 'paused', owner_paused: true, withdraw_requested: false })])
+    const listCalls = hosted.listOwnedAccounts.mock.calls.length
     await row().get('[data-testid=hosted-pause]').trigger('click')
     await flushPromises()
     expect(hosted.setOwnerState).toHaveBeenLastCalledWith(12, 'pause')
+    expect(hosted.listOwnedAccounts.mock.calls.length).toBe(listCalls + 1)
     expect(row().get('[data-testid=hosted-owner-paused]').text()).toBe('你已暂停')
+    // One clear label: no "已暂停" / "可用" next to it.
+    expect(row().find('[data-testid=hosted-status]').exists()).toBe(false)
     expect(row().find('[data-testid=hosted-pause]').exists()).toBe(false)
 
     hosted.setOwnerState.mockResolvedValueOnce({ id: 12, owner_paused: false, withdraw_requested: false })
+    hosted.listOwnedAccounts.mockResolvedValue([account({ owner_paused: false, withdraw_requested: false })])
     await row().get('[data-testid=hosted-resume]').trigger('click')
     await flushPromises()
     expect(hosted.setOwnerState).toHaveBeenLastCalledWith(12, 'resume')
     expect(row().find('[data-testid=hosted-owner-paused]').exists()).toBe(false)
+    expect(row().get('[data-testid=hosted-status]').text()).toBe('可用')
 
     await row().get('[data-testid=hosted-withdraw]').trigger('click')
     await flushPromises()
@@ -193,6 +201,7 @@ describe('HostedView self-onboarding', () => {
     const dialog = document.querySelector('dialog[open]') as HTMLDialogElement
     expect(dialog.textContent).toContain('不能撤销')
     hosted.setOwnerState.mockResolvedValueOnce({ id: 12, owner_paused: false, withdraw_requested: true })
+    hosted.listOwnedAccounts.mockResolvedValue([account({ status: 'paused', owner_paused: false, withdraw_requested: true })])
     const confirm = [...dialog.querySelectorAll('button')].find((b) => b.textContent?.includes('确认申请下架')) as HTMLButtonElement
     confirm.click()
     await flushPromises()
@@ -202,6 +211,29 @@ describe('HostedView self-onboarding', () => {
     expect(row().find('[data-testid=hosted-pause]').exists()).toBe(false)
     expect(row().find('[data-testid=hosted-withdraw]').exists()).toBe(false)
     expect(row().text()).toContain('等待管理员移除')
+  })
+
+  it('keeps a real problem status next to the owner label', async () => {
+    const w = await mountView({ accounts: [account({ status: 'needs_attention', owner_paused: true, withdraw_requested: false })] })
+    expect(w.get('[data-testid=hosted-status]').text()).toBe('需处理')
+    expect(w.get('[data-testid=hosted-owner-paused]').text()).toBe('你已暂停')
+  })
+
+  it('at max_pending the form says so; a cancel re-enables generating a link', async () => {
+    const pending = [1, 2, 3].map((id) => application({ id, status: 'pending', created_at: `2026-11-18T0${id}:00:00Z` }))
+    const w = await mountView({ apps: pending })
+    expect(w.find('[data-testid=onboard-pending-full]').exists()).toBe(true)
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(true)
+
+    hosted.cancelApplication.mockResolvedValue(application({ id: 1, status: 'cancelled', created_at: '2026-11-18T01:00:00Z' }))
+    hosted.listApplications.mockReturnValue(new Promise(() => undefined))
+    await w.get('[data-testid=app-cancel-1]').trigger('click')
+    await flushPromises()
+    const dialog = document.querySelector('dialog[open]') as HTMLDialogElement
+    ;([...dialog.querySelectorAll('button')].find((b) => b.textContent?.includes('确认取消申请')) as HTMLButtonElement).click()
+    await flushPromises()
+    expect(w.find('[data-testid=onboard-pending-full]').exists()).toBe(false)
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('shows no owner controls for servers without the owner flags or for past accounts', async () => {

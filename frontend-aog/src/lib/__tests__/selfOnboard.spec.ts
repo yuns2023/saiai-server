@@ -87,12 +87,16 @@ describe('checkDisplayName', () => {
     expect(checkDisplayName('号'.repeat(64))).toBe('')
     expect(checkDisplayName('号'.repeat(65))).toBe('nameTooLong')
     expect(checkDisplayName('a\tb')).toBe('nameInvalid')
+    // Zero-width space / joiner, bidi override and BOM are invisible format characters.
+    for (const ch of ['\u200b', '\u200d', '\u202e', '\ufeff']) expect(checkDisplayName(`a${ch}b`), ch).toBe('nameInvalid')
   })
 })
 
 describe('normalizeAuthCode', () => {
   it('accepts code#state and trims it', () => {
     expect(normalizeAuthCode('  abc123#st4te \n')).toBe('abc123#st4te')
+    const long = 'c'.repeat(3500) + '#' + 's'.repeat(512)
+    expect(normalizeAuthCode(long)).toBe(long)
   })
 
   it('turns a pasted callback URL into code#state', () => {
@@ -100,7 +104,7 @@ describe('normalizeAuthCode', () => {
   })
 
   it('rejects anything else', () => {
-    for (const raw of ['', 'abc', '#xyz', 'abc#', 'a b#c', 'a#b#c', 'https://example.com/?code=abc']) {
+    for (const raw of ['', 'abc', '#xyz', 'abc#', 'a b#c', 'a#b#c', 'https://example.com/?code=abc', 'ab\u00e9#xyz', 'abc#' + 's'.repeat(513), 'c'.repeat(4000) + '#' + 's'.repeat(100)]) {
       expect(normalizeAuthCode(raw), raw).toBe('')
     }
   })
@@ -136,10 +140,10 @@ describe('error codes', () => {
   })
 
   it('keeps the link only for errors raised before the link is used', () => {
-    for (const code of ['SELF_ONBOARD_PROXY_REQUIRED', 'SELF_ONBOARD_PROXY_INVALID', 'SELF_ONBOARD_PENDING_LIMIT', 'SELF_ONBOARD_RATE_LIMITED', 'SELF_ONBOARD_INVALID_INPUT']) {
+    for (const code of ['SELF_ONBOARD_PROXY_REQUIRED', 'SELF_ONBOARD_PROXY_INVALID', 'SELF_ONBOARD_PROXY_UNAVAILABLE', 'SELF_ONBOARD_RATE_LIMITED', 'SELF_ONBOARD_INVALID_INPUT']) {
       expect(submitNeedsNewLink({ reason: code }), code).toBe(false)
     }
-    for (const code of ['SELF_ONBOARD_SESSION_INVALID', 'SELF_ONBOARD_EXCHANGE_FAILED', 'SELF_ONBOARD_PROXY_UNAVAILABLE', 'SELF_ONBOARD_ALREADY_HOSTED', 'SELF_ONBOARD_UNAVAILABLE']) {
+    for (const code of ['SELF_ONBOARD_SESSION_INVALID', 'SELF_ONBOARD_EXCHANGE_FAILED', 'SELF_ONBOARD_PENDING_LIMIT', 'SELF_ONBOARD_ALREADY_HOSTED', 'SELF_ONBOARD_UNAVAILABLE']) {
       expect(submitNeedsNewLink({ reason: code }), code).toBe(true)
     }
     expect(submitNeedsNewLink({ status: 0 })).toBe(true)

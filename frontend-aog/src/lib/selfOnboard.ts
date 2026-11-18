@@ -7,6 +7,8 @@ import type { ProxyProtocol, SelfOnboardProxy } from '@/api/hosted'
 
 export const PROXY_PROTOCOLS: readonly ProxyProtocol[] = ['socks5h', 'socks5', 'http', 'https']
 export const MAX_DISPLAY_NAME = 64
+export const MAX_AUTH_CODE_BYTES = 4096
+export const MAX_AUTH_STATE_BYTES = 512
 /** Proxy username / password: at most this many characters and MAX_PROXY_FIELD_BYTES bytes each. */
 export const MAX_PROXY_CRED_CHARS = 100
 export const MAX_PROXY_FIELD_BYTES = 255
@@ -31,7 +33,9 @@ export function emptyProxy(): ProxyForm {
 }
 
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+/** Control and invisible format characters (zero-width space/joiners, bidi marks, BOM), as the server rejects in names. */
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}\u2028\u2029]/u
 
 export function hasControlChars(s: string): boolean {
   return CONTROL.test(s)
@@ -99,7 +103,7 @@ export function checkDisplayName(name: string): string {
   const n = name.trim()
   if (!n) return 'nameRequired'
   if ([...n].length > MAX_DISPLAY_NAME) return 'nameTooLong'
-  if (hasControlChars(n)) return 'nameInvalid'
+  if (CONTROL_OR_FORMAT.test(n)) return 'nameInvalid'
   return ''
 }
 
@@ -122,7 +126,9 @@ export function normalizeAuthCode(raw: string): string {
     }
     return ''
   }
-  return /^[^\s#]+#[^\s#]+$/.test(s) ? s : ''
+  // Printable ASCII only (the server's token alphabet), at most 4096 bytes, state at most 512.
+  const m = /^([\x21-\x22\x24-\x7e]+)#([\x21-\x22\x24-\x7e]+)$/.exec(s)
+  return m && s.length <= MAX_AUTH_CODE_BYTES && m[2].length <= MAX_AUTH_STATE_BYTES ? s : ''
 }
 
 export const ONBOARD_ERROR_CODES = [
@@ -151,10 +157,11 @@ export type OnboardErrorCode = (typeof ONBOARD_ERROR_CODES)[number]
 const LINK_STILL_VALID: ReadonlySet<string> = new Set([
   'SELF_ONBOARD_PROXY_REQUIRED',
   'SELF_ONBOARD_PROXY_INVALID',
-  'SELF_ONBOARD_PENDING_LIMIT',
+  'SELF_ONBOARD_PROXY_UNAVAILABLE',
   'SELF_ONBOARD_RATE_LIMITED',
   'SELF_ONBOARD_INVALID_INPUT'
 ])
+// SELF_ONBOARD_PENDING_LIMIT is checked again after the code exchange, so the link may be used up: it needs a new one.
 
 /** The stable error code of a rejected API call (`reason` in the envelope), if any. */
 export function onboardErrorCode(err: unknown): OnboardErrorCode | null {

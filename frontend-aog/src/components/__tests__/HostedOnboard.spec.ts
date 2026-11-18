@@ -29,10 +29,10 @@ function config(over: Partial<SelfOnboardConfig> = {}): SelfOnboardConfig {
   return { enabled: true, exchange_proxy_configured: true, max_pending: 3, ...over }
 }
 
-async function mountForm(cfg = config()) {
+async function mountForm(cfg = config(), pendingCount = 0) {
   setActivePinia(createPinia())
   i18n.global.locale.value = 'zh'
-  const w = mount(HostedOnboard, { props: { config: cfg }, global: { plugins: [i18n] } })
+  const w = mount(HostedOnboard, { props: { config: cfg, pendingCount }, global: { plugins: [i18n] } })
   await flushPromises()
   return w
 }
@@ -220,7 +220,7 @@ describe('HostedOnboard', () => {
     await w.get('[data-testid=onboard-name]').setValue('n')
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(w.get('[data-testid=onboard-error]').text()).toContain('授权码无效或已过期')
+    expect(w.get('[data-testid=onboard-error]').text()).toContain('授权失败，请重新生成链接')
     expect(w.get('[data-testid=onboard-correlation]').text()).toContain('9f2c4e1ab03d7781')
     expect(w.find('[data-testid=onboard-link]').exists()).toBe(false)
     expect(code(w).value).toBe('')
@@ -242,6 +242,48 @@ describe('HostedOnboard', () => {
     expect(code(w).value).toBe('')
   })
 
+  it('on PROXY_UNAVAILABLE keeps the link and the proxy password (raised before the link is used)', async () => {
+    const w = await mountForm()
+    await generate(w)
+    hosted.submitApplication.mockRejectedValue({ status: 400, reason: 'SELF_ONBOARD_PROXY_UNAVAILABLE' })
+    await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
+    await w.get('[data-testid=onboard-name]').setValue('n')
+    await w.get('[data-testid=onboard-proxy-host]').setValue('proxy.example.com')
+    await w.get('[data-testid=onboard-proxy-port]').setValue('1080')
+    await w.get('[data-testid=onboard-proxy-username]').setValue('u')
+    await w.get('[data-testid=onboard-proxy-password]').setValue('secret')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(w.find('[data-testid=onboard-link]').exists()).toBe(true)
+    expect((w.get('[data-testid=onboard-proxy-password]').element as HTMLInputElement).value).toBe('secret')
+    expect(w.get('[data-testid=onboard-error]').text()).not.toContain('请重新生成授权链接')
+    expect(code(w).value).toBe('')
+  })
+
+  it('on PENDING_LIMIT treats the link as used up', async () => {
+    const w = await mountForm()
+    await generate(w)
+    hosted.submitApplication.mockRejectedValue({ status: 409, reason: 'SELF_ONBOARD_PENDING_LIMIT' })
+    await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
+    await w.get('[data-testid=onboard-name]').setValue('n')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(w.find('[data-testid=onboard-link]').exists()).toBe(false)
+    expect(w.get('[data-testid=onboard-error]').text()).toContain('请重新生成授权链接')
+    expect(code(w).value).toBe('')
+  })
+
+  it('at max_pending says so and cannot generate a link', async () => {
+    const w = await mountForm(config({ max_pending: 3 }), 3)
+    expect(w.get('[data-testid=onboard-pending-full]').text()).toContain('你已有 3 个待审核的申请')
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(true)
+    await w.get('[data-testid=onboard-generate]').trigger('click')
+    expect(hosted.createAuthUrl).not.toHaveBeenCalled()
+    await w.setProps({ pendingCount: 2 })
+    expect(w.find('[data-testid=onboard-pending-full]').exists()).toBe(false)
+    expect((w.get('[data-testid=onboard-generate]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('shows the pending limit with the configured number and ALREADY_HOSTED in plain words', async () => {
     const w = await mountForm(config({ max_pending: 3 }))
     await generate(w)
@@ -253,6 +295,8 @@ describe('HostedOnboard', () => {
     expect(w.get('[data-testid=onboard-error]').text()).toContain('你已有 3 个待审核的申请')
 
     hosted.submitApplication.mockRejectedValueOnce({ status: 409, reason: 'SELF_ONBOARD_ALREADY_HOSTED' })
+    // The pending-limit failure used up the link: generate a new one first.
+    await generate(w)
     await w.get('[data-testid=onboard-code]').setValue('abc#xyz')
     await w.get('form').trigger('submit')
     await flushPromises()

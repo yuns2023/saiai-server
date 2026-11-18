@@ -206,6 +206,51 @@ describe('Hosting applications (admin)', () => {
     expect((row(w, 1).get('[data-testid=approve]').element as HTMLButtonElement).disabled).toBe(false)
   })
 
+  it('a failed proxy list is an error with a retry (also via the refresh button), not "no proxies"', async () => {
+    getAll.mockRejectedValueOnce({ status: 500 })
+    const w = await mountView()
+    await row(w, 2).get('[data-testid=approve]').trigger('click')
+    expect(w.find('[data-testid=proxies-failed]').exists()).toBe(true)
+    expect(w.text()).not.toContain('admin.hostedApplications.noProxies')
+    await w.get('[data-testid=proxies-failed] button').trigger('click')
+    await flushPromises()
+    expect(getAll).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-testid=proxies-failed]').exists()).toBe(false)
+  })
+
+  it('the refresh button also retries a failed proxy read', async () => {
+    getAll.mockRejectedValueOnce({ status: 500 })
+    const w = await mountView()
+    await w.get('[data-testid=refresh]').trigger('click')
+    await flushPromises()
+    expect(getAll).toHaveBeenCalledTimes(2)
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses the backend bounds: priority 0 is fine, concurrency 101 is not', async () => {
+    approve.mockResolvedValue({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
+    const w = await mountView()
+    await row(w, 1).get('[data-testid=approve]').trigger('click')
+    await w.get('[data-testid=field-concurrency]').setValue('101')
+    await w.get('[data-testid=approve-dialog]').trigger('submit')
+    await flushPromises()
+    expect(approve).not.toHaveBeenCalled()
+    await w.get('[data-testid=field-concurrency]').setValue('100')
+    await w.get('[data-testid=field-priority]').setValue('0')
+    await w.get('[data-testid=approve-dialog]').trigger('submit')
+    await flushPromises()
+    expect(approve.mock.calls[0][1]).toMatchObject({ concurrency: 100, priority: 0 })
+  })
+
+  it('takes the page size from the server', async () => {
+    list.mockResolvedValueOnce({ items: [structuredClone(withProxy)], total: 45, page: 1, page_size: 10, pages: 5 })
+    const w = await mountView()
+    expect(list.mock.calls[0]).toEqual([1, 20, { status: 'pending' }])
+    await w.get('[data-testid=status-filter]').setValue('')
+    await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(1, 10, { status: '' })
+  })
+
   it('reloads with the chosen status filter', async () => {
     const w = await mountView()
     await w.get('[data-testid=status-filter]').setValue('')

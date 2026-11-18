@@ -24,11 +24,13 @@ import {
   type ProxyField
 } from '@/lib/selfOnboard'
 
-const props = defineProps<{ config: SelfOnboardConfig }>()
+/** pendingCount: my applications still under review; at max_pending no new link can be generated. */
+const props = defineProps<{ config: SelfOnboardConfig; pendingCount: number }>()
 const emit = defineEmits<{ submitted: [app: HostedApplication] }>()
 const { t } = useI18n()
 
 const proxyRequired = computed(() => !props.config.exchange_proxy_configured)
+const pendingFull = computed(() => props.config.max_pending > 0 && props.pendingCount >= props.config.max_pending)
 
 /* ---------- Step 1: authorisation link ---------- */
 const link = ref<SelfOnboardAuthUrl | null>(null)
@@ -65,7 +67,7 @@ function dropLink(): void {
 }
 
 async function generate(): Promise<void> {
-  if (linking.value || submitting.value) return
+  if (linking.value || submitting.value || pendingFull.value) return
   linking.value = true
   error.value = ''
   correlationId.value = ''
@@ -177,8 +179,11 @@ onUnmounted(() => {
           <h3 class="text-sm font-semibold"><span class="num text-ink-3">1</span> · {{ t('onboard.step1') }}</h3>
           <div class="min-w-0">
             <p class="text-sm text-ink-2">{{ t('onboard.step1Lead') }}</p>
+            <p v-if="pendingFull" class="mt-2 text-sm text-warn" role="status" data-testid="onboard-pending-full">
+              {{ t('onboard.pendingFull', { n: config.max_pending }) }}
+            </p>
             <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <button type="button" class="btn" :class="link ? 'btn-line' : 'btn-primary'" :disabled="linking || submitting" data-testid="onboard-generate" @click="generate">
+              <button type="button" class="btn" :class="link ? 'btn-line' : 'btn-primary'" :disabled="linking || submitting || pendingFull" data-testid="onboard-generate" @click="generate">
                 {{ linking ? t('onboard.generating') : link ? t('onboard.regenerate') : t('onboard.generate') }}
               </button>
               <template v-if="link && linkLive">

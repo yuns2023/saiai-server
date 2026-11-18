@@ -191,6 +191,11 @@
               {{ t('common.loading') }}
             </div>
 
+            <p v-else-if="!overloadCooldownLoaded" class="flex items-center gap-2 text-sm text-red-600 dark:text-red-400" data-testid="overload-cooldown-load-failed">
+              {{ t('admin.settings.notLoadedNoSave') }}
+              <button type="button" class="btn btn-secondary btn-sm" @click="loadOverloadCooldownSettings">{{ t('admin.settings.reload') }}</button>
+            </p>
+
             <template v-else>
               <div class="flex items-center justify-between">
                 <div>
@@ -229,7 +234,8 @@
                 <button
                   type="button"
                   @click="saveOverloadCooldownSettings"
-                  :disabled="overloadCooldownSaving"
+                  :disabled="overloadCooldownSaving || !overloadCooldownLoaded"
+                  data-testid="overload-cooldown-save"
                   class="btn btn-primary btn-sm"
                 >
                   <svg
@@ -914,13 +920,17 @@
                   :options="hostedExchangeProxyOptions"
                   data-testid="hosted-self-onboard-exchange-proxy"
                 />
+                <p v-if="hostedProxiesFailed" class="mt-1.5 flex items-center gap-2 text-xs text-red-600 dark:text-red-400" data-testid="hosted-proxies-failed">
+                  {{ t('admin.settings.hostedSelfOnboard.proxiesLoadFailed') }}
+                  <button type="button" class="btn btn-secondary btn-sm" @click="loadHostedProxies">{{ t('admin.settings.reload') }}</button>
+                </p>
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.hostedSelfOnboard.exchangeProxyHint') }}</p>
               </div>
               <div>
                 <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('admin.settings.hostedSelfOnboard.feeRate') }}
                 </label>
-                <input v-model.number="form.hosted_self_fee_rate" type="number" min="0" step="0.01" class="input" data-testid="hosted-self-fee-rate" />
+                <input v-model.number="form.hosted_self_fee_rate" type="number" min="0" :max="HOSTED_FEE_RATE_MAX" step="0.0001" class="input" data-testid="hosted-self-fee-rate" />
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.hostedSelfOnboard.feeRateHint') }}</p>
               </div>
             </div>
@@ -1709,7 +1719,11 @@
 
         <!-- Save Button -->
         <div v-show="activeTab !== 'backup'" class="flex justify-end">
-          <button type="submit" :disabled="saving" class="btn btn-primary">
+          <p v-if="!loading && !settingsLoaded" class="mr-3 flex items-center gap-2 text-sm text-red-600 dark:text-red-400" data-testid="settings-load-failed">
+            {{ t('admin.settings.notLoadedNoSave') }}
+            <button type="button" class="btn btn-secondary btn-sm" @click="loadSettings">{{ t('admin.settings.reload') }}</button>
+          </p>
+          <button type="submit" :disabled="saving || loading || !settingsLoaded" class="btn btn-primary" data-testid="settings-save">
             <svg v-if="saving" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
               <circle
                 class="opacity-25"
@@ -1743,6 +1757,7 @@ import type {
   DefaultSubscriptionSetting
 } from '@/api/admin/settings'
 import type { AdminGroup, Proxy } from '@/types'
+import { APPROVE_LIMITS, HOSTED_FEE_RATE_MAX, validHostedFeeRate } from '@/api/admin/hostedApplications'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
@@ -1782,6 +1797,8 @@ const { copyToClipboard } = useClipboard()
 
 const loading = ref(true)
 const saving = ref(false)
+/** True only after a full GET succeeded; saving is impossible before that. */
+const settingsLoaded = ref(false)
 const testingSmtp = ref(false)
 const sendingTestEmail = ref(false)
 const testEmailAddress = ref('')
@@ -1799,6 +1816,7 @@ const subscriptionGroups = ref<AdminGroup[]>([])
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true)
 const overloadCooldownSaving = ref(false)
+const overloadCooldownLoaded = ref(false)
 const overloadCooldownForm = reactive({
   enabled: true,
   cooldown_minutes: 10
@@ -1935,6 +1953,8 @@ const form = reactive<SettingsForm>({
 
 /* ---------- Hosted self-onboarding ---------- */
 const hostedProxies = ref<Proxy[]>([])
+/** The proxy list could not be read (not the same as "there are no proxies"). */
+const hostedProxiesFailed = ref(false)
 
 const hostedExchangeProxyOptions = computed(() => {
   const options = [{ value: 0, label: t('admin.settings.hostedSelfOnboard.exchangeProxyNone') }]
@@ -1944,7 +1964,12 @@ const hostedExchangeProxyOptions = computed(() => {
   // A stored proxy that is no longer listed (deleted or inactive) still shows, by ID.
   const current = form.hosted_self_onboard_exchange_proxy_id
   if (current > 0 && !hostedProxies.value.some((p) => p.id === current)) {
-    options.push({ value: current, label: t('admin.settings.hostedSelfOnboard.exchangeProxyMissing', { id: current }) })
+    options.push({
+      value: current,
+      label: hostedProxiesFailed.value
+        ? t('admin.settings.hostedSelfOnboard.exchangeProxyById', { id: current })
+        : t('admin.settings.hostedSelfOnboard.exchangeProxyMissing', { id: current })
+    })
   }
   return options
 })
@@ -1956,12 +1981,12 @@ type HostedDefaultKey =
   | 'hosted_self_onboard_default_admissions_per_cycle'
   | 'hosted_self_onboard_default_interval_hours'
 
-const hostedSelfOnboardDefaultFields = computed<Array<{ key: HostedDefaultKey; label: string; min: number; max?: number }>>(() => [
-  { key: 'hosted_self_onboard_default_concurrency', label: t('admin.hostedApplications.fields.concurrency'), min: 1 },
-  { key: 'hosted_self_onboard_default_priority', label: t('admin.hostedApplications.fields.priority'), min: 1 },
-  { key: 'hosted_self_onboard_default_device_limit', label: t('admin.hostedApplications.fields.deviceLimit'), min: 1, max: 32 },
-  { key: 'hosted_self_onboard_default_admissions_per_cycle', label: t('admin.hostedApplications.fields.admissionsPerCycle'), min: 0, max: 32 },
-  { key: 'hosted_self_onboard_default_interval_hours', label: t('admin.hostedApplications.fields.intervalHours'), min: 1, max: 720 }
+const hostedSelfOnboardDefaultFields = computed<Array<{ key: HostedDefaultKey; label: string; min: number; max: number }>>(() => [
+  { key: 'hosted_self_onboard_default_concurrency', label: t('admin.hostedApplications.fields.concurrency'), ...APPROVE_LIMITS.concurrency },
+  { key: 'hosted_self_onboard_default_priority', label: t('admin.hostedApplications.fields.priority'), ...APPROVE_LIMITS.priority },
+  { key: 'hosted_self_onboard_default_device_limit', label: t('admin.hostedApplications.fields.deviceLimit'), ...APPROVE_LIMITS.carpool_device_limit },
+  { key: 'hosted_self_onboard_default_admissions_per_cycle', label: t('admin.hostedApplications.fields.admissionsPerCycle'), ...APPROVE_LIMITS.carpool_admissions_per_cycle },
+  { key: 'hosted_self_onboard_default_interval_hours', label: t('admin.hostedApplications.fields.intervalHours'), ...APPROVE_LIMITS.carpool_interval_hours }
 ])
 
 const HOSTED_NUMBER_KEYS = [
@@ -1984,9 +2009,10 @@ rememberHostedNumbers()
 async function loadHostedProxies() {
   try {
     hostedProxies.value = (await adminAPI.proxies.getAll()) ?? []
+    hostedProxiesFailed.value = false
   } catch (error) {
     console.error('Failed to load proxies:', error)
-    hostedProxies.value = []
+    hostedProxiesFailed.value = true
   }
 }
 
@@ -2133,6 +2159,7 @@ function removeAPIEndpoint(index: number) {
 
 async function loadSettings() {
   loading.value = true
+  settingsLoaded.value = false
   try {
     const settings = await adminAPI.settings.getSettings()
     Object.assign(form, settings)
@@ -2150,6 +2177,7 @@ async function loadSettings() {
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     rememberHostedNumbers()
+    settingsLoaded.value = true
     form.smtp_password = ''
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''
@@ -2225,42 +2253,51 @@ function validateUrlSettings(): boolean {
   return false
 }
 
-/**
- * While the switch is on: fee rate ≥ 0 and whole-number approval defaults
- * within the ranges the approve dialog enforces. While it is off, stored
- * values are not checked, so they never block saving unrelated settings.
- */
-function validateHostedSelfOnboard(): boolean {
-  if (!form.hosted_self_onboard_enabled) {
-    // Off: an emptied number field (v-model.number gives '') falls back to the last value read from the server.
-    for (const key of HOSTED_NUMBER_KEYS) {
-      const v = form[key] as unknown
-      if (typeof v !== 'number' || !Number.isFinite(v)) form[key] = hostedLastRead[key]
-    }
-    return true
+/** The first hosted field the backend would reject (an i18n message), or '' when all are valid. */
+function hostedSelfOnboardProblem(): string {
+  const proxyId = form.hosted_self_onboard_exchange_proxy_id as unknown
+  if (typeof proxyId !== 'number' || !Number.isInteger(proxyId) || proxyId < 0) {
+    return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: t('admin.settings.hostedSelfOnboard.exchangeProxy') })
   }
-  const fee = form.hosted_self_fee_rate as unknown
-  if (typeof fee !== 'number' || !Number.isFinite(fee) || fee < 0) {
-    appStore.showError(t('admin.settings.hostedSelfOnboard.invalidFeeRate'))
-    return false
+  if (!validHostedFeeRate(form.hosted_self_fee_rate)) {
+    return t('admin.settings.hostedSelfOnboard.invalidFeeRate', { max: HOSTED_FEE_RATE_MAX })
   }
   for (const field of hostedSelfOnboardDefaultFields.value) {
     const v = form[field.key] as unknown
-    if (typeof v !== 'number' || !Number.isInteger(v) || v < field.min || (field.max !== undefined && v > field.max)) {
-      appStore.showError(t('admin.settings.hostedSelfOnboard.invalidDefault', { field: field.label }))
-      return false
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < field.min || v > field.max) {
+      return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: field.label })
     }
   }
   if (form.hosted_self_onboard_default_admissions_per_cycle > form.hosted_self_onboard_default_device_limit) {
-    appStore.showError(
-      t('admin.settings.hostedSelfOnboard.invalidDefault', { field: t('admin.hostedApplications.fields.admissionsPerCycle') })
-    )
+    return t('admin.settings.hostedSelfOnboard.invalidDefault', { field: t('admin.hostedApplications.fields.admissionsPerCycle') })
+  }
+  return ''
+}
+
+/**
+ * The hosted block is part of the full-object save, and the backend rejects
+ * any out-of-range value it receives. While the switch is on, a problem
+ * blocks the save with a message. While it is off, the block never blocks
+ * saving other settings: invalid values go back to what the server last
+ * returned (which it accepts) instead of being sent.
+ */
+function validateHostedSelfOnboard(): boolean {
+  const problem = hostedSelfOnboardProblem()
+  if (!problem) return true
+  if (form.hosted_self_onboard_enabled) {
+    appStore.showError(problem)
     return false
   }
+  for (const key of HOSTED_NUMBER_KEYS) form[key] = hostedLastRead[key]
   return true
 }
 
 async function saveSettings() {
+  // A full-object save from a form that never loaded would write defaults over every stored setting.
+  if (!settingsLoaded.value || loading.value) {
+    appStore.showError(t('admin.settings.notLoadedNoSave'))
+    return
+  }
   if (!validateUrlSettings()) return
   if (!validateHostedSelfOnboard()) return
 
@@ -2513,7 +2550,9 @@ async function loadOverloadCooldownSettings() {
   try {
     const settings = await adminAPI.settings.getOverloadCooldownSettings()
     Object.assign(overloadCooldownForm, settings)
+    overloadCooldownLoaded.value = true
   } catch (error: any) {
+    overloadCooldownLoaded.value = false
     console.error('Failed to load overload cooldown settings:', error)
   } finally {
     overloadCooldownLoading.value = false
@@ -2521,6 +2560,11 @@ async function loadOverloadCooldownSettings() {
 }
 
 async function saveOverloadCooldownSettings() {
+  // Never write the built-in defaults over a value that could not be read.
+  if (!overloadCooldownLoaded.value) {
+    appStore.showError(t('admin.settings.notLoadedNoSave'))
+    return
+  }
   overloadCooldownSaving.value = true
   try {
     const updated = await adminAPI.settings.updateOverloadCooldownSettings({

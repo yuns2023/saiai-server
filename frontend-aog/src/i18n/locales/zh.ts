@@ -425,6 +425,7 @@ export default {
     submit: '提交审核',
     submitting: '提交中…',
     submitted: '已提交，等待管理员审核。',
+    pendingFull: '你已有 {n} 个待审核的申请，达到上限。等管理员处理或取消其中一个后，才能再生成授权链接。',
     correlation: '如需联系管理员，请提供编号：',
     newLinkNeeded: '请重新生成授权链接、再登录一次后提交；名称和代理地址已保留，代理密码需要重新填写。',
     check: {
@@ -447,7 +448,7 @@ export default {
       SELF_ONBOARD_PROXY_INVALID: '代理地址无效：只接受公网地址，请检查协议、主机和端口。',
       SELF_ONBOARD_PROXY_UNAVAILABLE: '代理不可用，请检查代理是否能正常连接。',
       SELF_ONBOARD_SESSION_INVALID: '授权链接已失效或已用过。',
-      SELF_ONBOARD_EXCHANGE_FAILED: '授权码无效或已过期。',
+      SELF_ONBOARD_EXCHANGE_FAILED: '授权失败，请重新生成链接。',
       SELF_ONBOARD_IDENTITY_MISSING: '无法确认这个 Claude 号的身份，请联系管理员。',
       SELF_ONBOARD_ALREADY_HOSTED: '该 Claude 号已在托管中或审核中，请联系管理员。',
       SELF_ONBOARD_PENDING_LIMIT: '你已有 {n} 个待审核的申请，请等审核结果出来后再提交。',

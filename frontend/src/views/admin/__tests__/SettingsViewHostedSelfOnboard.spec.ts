@@ -8,7 +8,8 @@ const settingsApi = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
   getAdminApiKey: vi.fn(),
-  getOverloadCooldownSettings: vi.fn()
+  getOverloadCooldownSettings: vi.fn(),
+  updateOverloadCooldownSettings: vi.fn()
 }))
 const proxiesApi = vi.hoisted(() => ({ getAll: vi.fn() }))
 const appStore = vi.hoisted(() => ({ showError: vi.fn(), showSuccess: vi.fn(), fetchPublicSettings: vi.fn() }))
@@ -141,15 +142,90 @@ describe('admin settings: hosted self-onboarding', () => {
     expect(settingsApi.updateSettings).not.toHaveBeenCalled()
   })
 
-  it('never blocks saving other settings while the switch is off, even with stored zeros', async () => {
-    const zeros = { hosted_self_onboard_enabled: false, hosted_self_onboard_default_concurrency: 0, hosted_self_onboard_default_interval_hours: 0 }
-    settingsApi.getSettings.mockResolvedValue(stored(zeros))
-    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(zeros), ...payload }))
+  it('switch off: out-of-range edits never block saving and are not sent; the server values go back instead', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored({ hosted_self_onboard_enabled: false }))
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))
     const w = await mountView()
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_concurrency]').setValue('0')
+    await w.get('[data-testid=hosted-default-hosted_self_onboard_default_interval_hours]').setValue('0')
+    await w.get('[data-testid=hosted-self-fee-rate]').setValue('0.12345')
     await w.find('form').trigger('submit')
     await flushPromises()
     expect(settingsApi.updateSettings).toHaveBeenCalledTimes(1)
-    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject(zeros)
+    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject({ ...hosted, hosted_self_onboard_enabled: false })
+  })
+
+  it('switch on: uses the backend bounds (concurrency 1–100, priority 0–10000, fee 0–10 with 4 decimals)', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored())
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))
+    const w = await mountView()
+    const field = (k: string) => w.get(`[data-testid=hosted-default-hosted_self_onboard_default_${k}]`)
+    const save = async () => {
+      await w.find('form').trigger('submit')
+      await flushPromises()
+    }
+    await field('concurrency').setValue('101')
+    await save()
+    await field('concurrency').setValue('100')
+    await field('priority').setValue('10001')
+    await save()
+    await field('priority').setValue('0')
+    await w.get('[data-testid=hosted-self-fee-rate]').setValue('10.5')
+    await save()
+    await w.get('[data-testid=hosted-self-fee-rate]').setValue('0.12345')
+    await save()
+    expect(settingsApi.updateSettings).not.toHaveBeenCalled()
+    await w.get('[data-testid=hosted-self-fee-rate]').setValue('0.1234')
+    await save()
+    expect(settingsApi.updateSettings).toHaveBeenCalledTimes(1)
+    expect(settingsApi.updateSettings.mock.calls[0][0]).toMatchObject({
+      hosted_self_onboard_default_concurrency: 100,
+      hosted_self_onboard_default_priority: 0,
+      hosted_self_fee_rate: 0.1234
+    })
+    expect(w.get('[data-testid=hosted-self-fee-rate]').attributes('step')).toBe('0.0001')
+  })
+
+  it('a failed settings read blocks saving: no PUT at all', async () => {
+    settingsApi.getSettings.mockRejectedValue({ status: 500, message: 'boom' })
+    const w = await mountView()
+    expect(w.find('[data-testid=settings-load-failed]').exists()).toBe(true)
+    expect((w.get('[data-testid=settings-save]').element as HTMLButtonElement).disabled).toBe(true)
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings).not.toHaveBeenCalled()
+
+    // Reloading successfully enables saving again.
+    settingsApi.getSettings.mockResolvedValue(stored())
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored(), ...payload }))
+    await w.get('[data-testid=settings-load-failed] button').trigger('click')
+    await flushPromises()
+    expect((w.get('[data-testid=settings-save]').element as HTMLButtonElement).disabled).toBe(false)
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(settingsApi.updateSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed 529-cooldown read blocks its own save', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored())
+    settingsApi.getOverloadCooldownSettings.mockRejectedValue({ status: 500 })
+    const w = await mountView()
+    expect(w.find('[data-testid=overload-cooldown-load-failed]').exists()).toBe(true)
+    expect(w.find('[data-testid=overload-cooldown-save]').exists()).toBe(false)
+    expect(settingsApi.updateOverloadCooldownSettings).not.toHaveBeenCalled()
+  })
+
+  it('a failed proxy list read shows an error with a retry, not an empty list', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored())
+    proxiesApi.getAll.mockRejectedValueOnce({ status: 500 })
+    const w = await mountView()
+    const block = w.get('[data-testid=hosted-self-onboard-settings]')
+    expect(block.find('[data-testid=hosted-proxies-failed]').exists()).toBe(true)
+    expect(block.text()).toContain('admin.settings.hostedSelfOnboard.exchangeProxyById')
+    await block.get('[data-testid=hosted-proxies-failed] button').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid=hosted-proxies-failed]').exists()).toBe(false)
+    expect(w.get('[data-testid=hosted-self-onboard-settings]').text()).toContain('HK-1 · socks5h://hk.example.com:1080')
   })
 
   it('switch off: an emptied number goes back to the stored value instead of being sent as text', async () => {

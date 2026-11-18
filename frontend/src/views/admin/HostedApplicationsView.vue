@@ -5,7 +5,7 @@
         <div class="flex flex-wrap items-center gap-3">
           <p class="flex-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.hostedApplications.description') }}</p>
           <Select v-model="statusFilter" :options="statusOptions" class="w-36" data-testid="status-filter" @change="reload" />
-          <button class="btn btn-secondary" :disabled="loading" :title="t('common.refresh')" @click="load">
+          <button class="btn btn-secondary" :disabled="loading" :title="t('common.refresh')" data-testid="refresh" @click="refreshAll">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
         </div>
@@ -141,7 +141,15 @@
                 class="mt-2"
                 data-testid="proxy-select"
               />
-              <span v-if="approveForm.proxy_mode === 'existing' && !proxies.length" class="input-hint block">{{ t('admin.hostedApplications.noProxies') }}</span>
+              <span
+                v-if="approveForm.proxy_mode === 'existing' && proxiesFailed"
+                class="mt-1 flex items-center gap-2 text-xs text-red-600 dark:text-red-400"
+                data-testid="proxies-failed"
+              >
+                {{ t('admin.hostedApplications.proxiesLoadFailed') }}
+                <button type="button" class="btn btn-secondary btn-sm" @click.prevent="loadProxies">{{ t('admin.hostedApplications.retry') }}</button>
+              </span>
+              <span v-else-if="approveForm.proxy_mode === 'existing' && !proxies.length" class="input-hint block">{{ t('admin.hostedApplications.noProxies') }}</span>
             </span>
           </label>
           <label class="flex items-start gap-2 py-1" :class="!hasSubmittedProxy(approveTarget) && 'opacity-60'">
@@ -322,7 +330,9 @@ async function load() {
   try {
     const res = await adminAPI.hostedApplications.list(pagination.page, pagination.page_size, { status: statusFilter.value })
     if (seq !== loadSeq) return
-    const lastPage = Math.max(1, Math.ceil(res.total / pagination.page_size))
+    // The server may clamp page_size; its own paging numbers win.
+    if (res.page_size > 0) pagination.page_size = res.page_size
+    const lastPage = Math.max(1, res.pages > 0 ? res.pages : Math.ceil(res.total / pagination.page_size))
     if (res.items.length === 0 && pagination.page > lastPage) {
       pagination.page = lastPage
       return load()
@@ -377,12 +387,12 @@ const tried = ref(false)
 const proxyOptions = computed(() => proxies.value.map((p) => ({ value: p.id, label: `${p.name} · ${p.protocol}://${p.host}:${p.port}` })))
 
 type NumberKey = keyof typeof APPROVE_LIMITS
-const numberFields = computed<Array<{ key: NumberKey; label: string; min: number; max?: number }>>(() => [
-  { key: 'concurrency', label: t('admin.hostedApplications.fields.concurrency'), min: 1 },
-  { key: 'priority', label: t('admin.hostedApplications.fields.priority'), min: 1 },
-  { key: 'carpool_device_limit', label: t('admin.hostedApplications.fields.deviceLimit'), min: 1, max: 32 },
-  { key: 'carpool_admissions_per_cycle', label: t('admin.hostedApplications.fields.admissionsPerCycle'), min: 0, max: 32 },
-  { key: 'carpool_interval_hours', label: t('admin.hostedApplications.fields.intervalHours'), min: 1, max: 720 }
+const numberFields = computed<Array<{ key: NumberKey; label: string; min: number; max: number }>>(() => [
+  { key: 'concurrency', label: t('admin.hostedApplications.fields.concurrency'), ...APPROVE_LIMITS.concurrency },
+  { key: 'priority', label: t('admin.hostedApplications.fields.priority'), ...APPROVE_LIMITS.priority },
+  { key: 'carpool_device_limit', label: t('admin.hostedApplications.fields.deviceLimit'), ...APPROVE_LIMITS.carpool_device_limit },
+  { key: 'carpool_admissions_per_cycle', label: t('admin.hostedApplications.fields.admissionsPerCycle'), ...APPROVE_LIMITS.carpool_admissions_per_cycle },
+  { key: 'carpool_interval_hours', label: t('admin.hostedApplications.fields.intervalHours'), ...APPROVE_LIMITS.carpool_interval_hours }
 ])
 
 const problems = computed(() => (approveTarget.value ? approveProblems(approveForm, hasSubmittedProxy(approveTarget.value)) : []))
@@ -470,12 +480,27 @@ async function confirmReject() {
   await load()
 }
 
-async function loadApproveContext() {
+/** A failed read is not "no proxies": the dialog then shows an error with a retry. */
+const proxiesFailed = ref(false)
+
+async function loadProxies() {
   try {
     proxies.value = (await adminAPI.proxies.getAll()) ?? []
+    proxiesFailed.value = false
   } catch {
-    proxies.value = []
+    proxiesFailed.value = true
   }
+}
+
+/** Refresh button: the list, plus whatever the approve dialog still lacks. */
+function refreshAll() {
+  void load()
+  if (proxiesFailed.value) void loadProxies()
+  if (!contextReady.value) void loadApproveContext()
+}
+
+async function loadApproveContext() {
+  await loadProxies()
   try {
     const s = await adminAPI.settings.getSettings()
     switchState.value = s.hosted_self_onboard_enabled === true

@@ -427,6 +427,7 @@ const en: typeof zh = {
     submit: 'Submit for review',
     submitting: 'Submitting…',
     submitted: 'Submitted. Waiting for an administrator to review it.',
+    pendingFull: 'You already have {n} applications under review, the maximum. Generate a new link once an administrator has handled one or you cancel one.',
     correlation: 'If you contact an administrator, quote this reference:',
     newLinkNeeded: 'Generate a new link, sign in again and submit; the name and proxy address are kept, the proxy password needs to be entered again.',
     check: {
@@ -449,7 +450,7 @@ const en: typeof zh = {
       SELF_ONBOARD_PROXY_INVALID: 'The proxy address is not valid: only public addresses are accepted. Check protocol, host and port.',
       SELF_ONBOARD_PROXY_UNAVAILABLE: 'The proxy is not usable. Check that it accepts connections.',
       SELF_ONBOARD_SESSION_INVALID: 'The authorisation link has expired or was already used.',
-      SELF_ONBOARD_EXCHANGE_FAILED: 'The code is invalid or has expired.',
+      SELF_ONBOARD_EXCHANGE_FAILED: 'Authorisation failed. Please generate a new link.',
       SELF_ONBOARD_IDENTITY_MISSING: 'The identity of this Claude account could not be confirmed. Please contact an administrator.',
       SELF_ONBOARD_ALREADY_HOSTED: 'This Claude account is already hosted or under review. Please contact an administrator.',
       SELF_ONBOARD_PENDING_LIMIT: 'You already have {n} applications under review. Please wait for a decision before submitting another.',

@@ -28,8 +28,13 @@ export const useHostedStore = defineStore('hosted', () => {
   const onboard = ref<SelfOnboardConfig | null>(null)
   /** An owner action (pause / resume / withdraw) in flight, kept across page remounts so two never overlap. */
   const ownerBusy = ref<number | null>(null)
-  /** The /hosted entry: an owner, or anyone while self-onboarding is open. */
-  const showEntry = computed(() => hasAny.value || onboard.value?.enabled === true)
+  /** I have at least one self-onboarding application (any status); null = unknown. */
+  const hasApplications = ref<boolean | null>(null)
+  /**
+   * The /hosted entry: owners, anyone while self-onboarding is open, and anyone
+   * with an application (switch off: they can still see and cancel it).
+   */
+  const showEntry = computed(() => hasAny.value || onboard.value?.enabled === true || hasApplications.value === true)
 
   /** Bumped by reset(); a list fetched for a previous account is discarded. */
   let generation = 0
@@ -106,6 +111,13 @@ export const useHostedStore = defineStore('hosted', () => {
           onboard.value = cfg
           configSuccessAt = Date.now()
           configFailureAt = null
+          // Best effort: whether there is anything to show on /hosted besides the form.
+          Promise.resolve()
+            .then(() => hostedApi.listApplications())
+            .then((list) => {
+              if (issuedIn === generation) hasApplications.value = list.length > 0
+            })
+            .catch(() => undefined)
         }
         return cfg
       })
@@ -158,9 +170,10 @@ export const useHostedStore = defineStore('hosted', () => {
     configSuccessAt = null
     configFailureAt = null
     onboard.value = null
+    hasApplications.value = null
     ownerOverrides.clear()
     ownerBusy.value = null
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, showEntry, ownerBusy, load, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, load, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })
