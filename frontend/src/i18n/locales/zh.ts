@@ -2346,7 +2346,7 @@ export default {
           scope: "审核范围",
           scopeUserInput: "仅用户输入（默认）",
           scopeFull: "用户输入 + 项目指令",
-          scopeHint: "默认只审用户最新输入，不审 system 提示词、CLAUDE.md/AGENTS.md 等项目指令；写在这些指令里的内容不会被检测。选「用户输入 + 项目指令」会显著增加送审量。",
+          scopeHint: "默认只审用户最新输入，不审 system 提示词和可识别的项目指令（CLAUDE.md/AGENTS.md 等）；写在这些地方的内容不会被检测。选「用户输入 + 项目指令」会显著增加送审量。",
           enforcementHint: "只有同时开启分组自动处理、勾选参与处罚并命中阈值时，才会计入处罚；处罚选择为空表示不处罚。",
           loadFailed: "无法加载分类定义，原策略保持不变。",
         },

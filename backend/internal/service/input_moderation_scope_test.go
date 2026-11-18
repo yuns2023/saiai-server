@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,4 +70,44 @@ func TestInputModerationProcessKeepsInstructionsForFullScope(t *testing.T) {
 
 	require.NoError(t, svc.process(InputModerationTask{RequestID: "r1", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question", Instructions: []string{"stable rules"}}))
 	require.ElementsMatch(t, []string{"stable rules\n\nquestion", "stable rules"}, client.texts)
+}
+
+// Narrowing the scope while a full-scope inference runs must not let
+// instruction-derived scores produce evidence or penalties.
+func TestInputModerationScopeChangeDuringInferenceSkips(t *testing.T) {
+	full := &Group{ID: 3, InputModerationEnabled: true, InputModerationAutoDisableUser: true, InputModerationMinConfidence: 90,
+		InputModerationPolicy: &InputModerationPolicy{RulesVersion: JevExpandedRulesVersion, AuditCategories: []string{"PII"}, EnforcementCategories: []string{"PII"}, InputScope: InputModerationScopeFull}}
+	narrowed := *full
+	narrowedPolicy := *full.InputModerationPolicy
+	narrowedPolicy.InputScope = InputModerationScopeUserInput
+	narrowed.InputModerationPolicy = &narrowedPolicy
+	repo := &moderationResultRepoStub{}
+	svc := newInputModerationServiceForTest(&policyModerationStub{scores: map[string]float64{"PII": .99}}, repo, &inputModerationGroupRepoStub{groups: []*Group{full, &narrowed}}, nil, nil)
+	defer svc.Stop()
+	require.NoError(t, svc.process(InputModerationTask{RequestID: "r", UserID: 1, APIKeyID: 2, GroupID: 3, Text: "question", Instructions: []string{"rules"}}))
+	require.Equal(t, "policy_changed", repo.results[0].Reason)
+	require.Empty(t, repo.events)
+
+	// "" and user_input are the same effective scope.
+	empty := narrowedPolicy
+	empty.InputScope = ""
+	require.True(t, sameModerationDetection(&narrowedPolicy, &empty))
+	require.Equal(t, InputModerationScopeUserInput, moderationDecisionSnapshot(&Group{InputModerationPolicy: &empty}).Policy.InputScope)
+}
+
+func TestAdminGroupUpdateKeepsStoredScopeWhenOmitted(t *testing.T) {
+	stored := &InputModerationPolicy{RulesVersion: JevExpandedRulesVersion, AuditCategories: []string{"PII"}, EnforcementCategories: []string{}, InputScope: InputModerationScopeFull}
+	current := &Group{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, InputModerationPolicy: stored}
+	repo := &groupRepoStubForAdmin{getByID: current}
+	svc := &adminServiceImpl{groupRepo: repo}
+
+	_, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{InputModerationPolicy: &InputModerationPolicy{RulesVersion: JevExpandedRulesVersion, AuditCategories: []string{"PII"}, EnforcementCategories: []string{"PII"}}})
+	require.NoError(t, err)
+	require.Equal(t, InputModerationScopeFull, repo.updated.InputModerationPolicy.InputScope, "an older client omitting input_scope keeps full")
+	require.Equal(t, []string{"PII"}, repo.updated.InputModerationPolicy.EnforcementCategories)
+
+	current.InputModerationPolicy = repo.updated.InputModerationPolicy
+	_, err = svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{InputModerationPolicy: &InputModerationPolicy{RulesVersion: JevExpandedRulesVersion, AuditCategories: []string{"PII"}, EnforcementCategories: []string{}, InputScope: InputModerationScopeUserInput}})
+	require.NoError(t, err)
+	require.Equal(t, InputModerationScopeUserInput, repo.updated.InputModerationPolicy.InputScope, "explicit user_input restores the default")
 }

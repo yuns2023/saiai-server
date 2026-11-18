@@ -16,8 +16,12 @@ Group moderation remains opt-in. Each group policy has an input scope
 The scope is applied when a request is queued and again when the worker
 processes the job with the current group policy, so jobs queued before a switch
 to `user_input` no longer send their instructions. Switching to `full` applies
-to requests queued afterwards. No migration is involved: the field lives in the
-existing policy JSON.
+to requests queued afterwards. WebSocket later turns use the group re-read at
+that turn's admission. A scope change while a detector call is in flight records
+`skipped`/`policy_changed`. A group update whose policy omits `input_scope`
+keeps the stored scope; send `user_input` explicitly to restore the default.
+Decision snapshots record the effective scope. No migration is involved: the
+field lives in the existing policy JSON.
 
 Usage history exposes `moderation_result` independently of risk events:
 

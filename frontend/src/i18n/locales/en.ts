@@ -2261,7 +2261,7 @@ export default {
           scope: "Input scope",
           scopeUserInput: "User input only (default)",
           scopeFull: "User input + project instructions",
-          scopeHint: "By default only the newest user input is checked; system prompts and CLAUDE.md/AGENTS.md project instructions are not, so content placed there is not detected. Including instructions substantially increases detector volume.",
+          scopeHint: "By default only the newest user input is checked; system prompts and recognized project instructions (CLAUDE.md/AGENTS.md etc.) are not, so content placed there is not detected. Including instructions substantially increases detector volume.",
           enforcementHint: "Enforcement requires group automatic action, a selected enforcement category and a threshold hit. Empty enforcement selection means no penalties.",
           loadFailed: "Could not load categories. Existing policy is preserved.",
         },

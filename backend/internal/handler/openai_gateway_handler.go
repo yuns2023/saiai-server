@@ -2250,7 +2250,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 			}
 			requestID, _ := ctx.Value(ctxkey.RequestID).(string)
-			h.submitOpenAIInputModeration(apiKey, requestID, policyPayload, service.InputModerationSourceOpenAIResponsesWS, turn)
+			h.submitOpenAIInputModeration(openAIWSModerationKey(apiKey, sessionGroup.Load()), requestID, policyPayload, service.InputModerationSourceOpenAIResponsesWS, turn)
 			return nil
 		},
 		BeforeTurn: func(turn int) error {
@@ -2506,6 +2506,17 @@ func (h *OpenAIGatewayHandler) checkOpenAIWSSessionPayload(
 		return nil, err
 	}
 	return fresh, nil
+}
+
+// openAIWSModerationKey applies the group re-read at this turn's admission
+// (same group ID, current moderation switch and scope) to the connect-time key.
+func openAIWSModerationKey(connectKey *service.APIKey, current *service.Group) *service.APIKey {
+	if connectKey == nil || current == nil || connectKey.Group == nil || current.ID != connectKey.Group.ID {
+		return connectKey
+	}
+	key := *connectKey
+	key.Group = current
+	return &key
 }
 
 // admitOpenAIWSLaterTurn is the admission of a new client turn (turn > 1) on
