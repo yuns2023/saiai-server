@@ -432,35 +432,6 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestWithoutMarketMembershipFiltersStaleBuckets(t *testing.T) {
-	tier, other := int64(5), int64(6)
-	listedOnly := Account{ID: 1, MarketGroupIDs: []int64{tier}}
-	listedWithAdmin := Account{ID: 2, MarketGroupIDs: []int64{tier}, AccountGroups: []AccountGroup{{GroupID: other}}, GroupIDs: []int64{other}}
-	plain := Account{ID: 3}
-	ids := func(accounts []Account) []int64 {
-		var out []int64
-		for _, a := range accounts {
-			out = append(out, a.ID)
-		}
-		return out
-	}
-	all := []Account{listedOnly, listedWithAdmin, plain}
-	require.Equal(t, []int64{3}, ids(withoutMarketMembership(all, nil)), "listed accounts are never ungrouped")
-	require.Equal(t, []int64{3}, ids(withoutMarketMembership(all, &tier)), "the tier never dispatches market rows")
-	require.Equal(t, []int64{2, 3}, ids(withoutMarketMembership(all, &other)), "a stale bucket of another group needs a current admin binding")
-	require.Len(t, all, 3, "input untouched")
-	plainOnly := []Account{plain, {ID: 4}}
-	out := withoutMarketMembership(plainOnly, nil)
-	require.Same(t, &plainOnly[0], &out[0], "no copy when nothing is dropped")
-
-	require.False(t, marketMembershipChanged(&plain, &Account{ID: 3, GroupIDs: []int64{9}}), "non-market accounts unaffected")
-	require.True(t, marketMembershipChanged(&plain, &listedOnly))
-	require.True(t, marketMembershipChanged(&listedWithAdmin, &Account{ID: 2, MarketGroupIDs: []int64{tier}}))
-	require.False(t, marketMembershipChanged(&listedWithAdmin, &listedWithAdmin))
-	twoAdmin := Account{ID: 5, MarketGroupIDs: []int64{tier}, GroupIDs: []int64{7, 8}}
-	require.False(t, marketMembershipChanged(&twoAdmin, &Account{ID: 5, MarketGroupIDs: []int64{tier}, GroupIDs: []int64{8, 7}}), "order does not matter")
-}
-
 func TestResolveGatewayGroupNeverEntersMarketTier(t *testing.T) {
 	groups, _ := newMarketTierRepos()
 	tier := int64(1)

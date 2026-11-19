@@ -11,6 +11,27 @@ import (
 type MarketListingService struct {
 	repo        MarketListingRepository
 	settingRepo SettingRepository
+	// listings is told about a listing before its transaction starts, so
+	// this process treats the account as listed even before the registry
+	// poll (or a stale cached copy) catches up.
+	listings MarketListingObserver
+}
+
+// MarketListingObserver is implemented by MarketRuntime.
+type MarketListingObserver interface {
+	// BeginListing returns a token that finalizes exactly this listing.
+	BeginListing(accountID int64) uint64
+	// AbortListing: this listing's transaction rolled back before its commit.
+	AbortListing(accountID int64, token uint64)
+	// EndListing: this listing's transaction ended (committed or unknown).
+	EndListing(accountID int64, token uint64)
+}
+
+// SetListingObserver wires the dispatch registry (P3a part 2).
+func (s *MarketListingService) SetListingObserver(o MarketListingObserver) {
+	if s != nil {
+		s.listings = o
+	}
 }
 
 func NewMarketListingService(repo MarketListingRepository, settingRepo SettingRepository) *MarketListingService {
@@ -202,11 +223,37 @@ func (s *MarketListingService) OwnerGet(ctx context.Context, ownerUserID, accoun
 // OwnerSet lists the account into one allowed tier (listed=true; requires
 // market_enabled) or stops sharing (listed=false; always allowed).
 func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accountID, groupID int64, listed bool) (*OwnerMarketView, error) {
+	var beforeWrite, rolledBack func()
+	if listed && s.listings != nil {
+		// Marked locally only once every check passed (inside the locked
+		// transaction, right before the writes); cleared at once on a
+		// rollback; otherwise kept until a registry poll that started after
+		// the transaction ended.
+		var (
+			token            uint64
+			marked, finished bool
+		)
+		beforeWrite = func() { token, marked = s.listings.BeginListing(accountID), true }
+		rolledBack = func() {
+			if marked && !finished {
+				finished = true
+				s.listings.AbortListing(accountID, token)
+			}
+		}
+		defer func() {
+			if marked && !finished {
+				finished = true
+				s.listings.EndListing(accountID, token)
+			}
+		}()
+	}
 	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
-		OwnerUserID: ownerUserID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		Listed:      listed,
+		BeforeListWrite:   beforeWrite,
+		ListingRolledBack: rolledBack,
+		OwnerUserID:       ownerUserID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Listed:            listed,
 		Validate: func(account *Account, protection MarketProtectionParams) error {
 			if reason := marketListBlockedReason(account); reason != "" {
 				return NewMarketAccountNotEligibleError(reason)

@@ -230,6 +230,10 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 	if err != nil {
 		return nil, err
 	}
+	marketListings, err := r.loadMarketListingSnapshots(ctx, marketGroupIDsByAccount)
+	if err != nil {
+		return nil, err
+	}
 
 	outByID := make(map[int64]*service.Account, len(entAccounts))
 	for _, entAcc := range entAccounts {
@@ -255,6 +259,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 			out.AccountGroups = ags
 		}
 		out.MarketGroupIDs = marketGroupIDsByAccount[entAcc.ID]
+		out.MarketListing = marketListings[entAcc.ID]
 		outByID[entAcc.ID] = out
 	}
 
@@ -1864,8 +1869,13 @@ type accountGroupQueryOptions struct {
 }
 
 func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID int64, opts accountGroupQueryOptions) ([]service.Account, error) {
-	q := r.client.AccountGroup.Query().
-		Where(dbaccountgroup.GroupIDEQ(groupID), dispatchableAccountGroupPredicate())
+	q := r.client.AccountGroup.Query().Where(dbaccountgroup.GroupIDEQ(groupID))
+	if !opts.schedulable {
+		// Admin listings (ListByGroup): admin rows only.
+		q = q.Where(dispatchableAccountGroupPredicate())
+	}
+	// Scheduling reads return market members too (they exist only in market
+	// tiers); the gateway's market classification decides per request.
 
 	// 通过 account_groups 中间表查询账号，并按需叠加状态/平台/调度能力过滤。
 	preds := make([]dbpredicate.Account, 0, 6)
@@ -1956,6 +1966,10 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
+	marketListings, err := r.loadMarketListingSnapshots(ctx, marketGroupIDsByAccount)
+	if err != nil {
+		return nil, err
+	}
 
 	outAccounts := make([]service.Account, 0, len(accounts))
 	for _, acc := range accounts {
@@ -1980,6 +1994,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 			out.AccountGroups = ags
 		}
 		out.MarketGroupIDs = marketGroupIDsByAccount[acc.ID]
+		out.MarketListing = marketListings[acc.ID]
 		outAccounts = append(outAccounts, *out)
 	}
 
@@ -2037,6 +2052,41 @@ func (r *accountRepository) loadProxies(ctx context.Context, proxyIDs []int64) (
 		proxyMap[p.ID] = proxyEntityToService(p)
 	}
 	return proxyMap, nil
+}
+
+// loadMarketListingSnapshots loads the listed-row snapshot of the accounts
+// that have a market membership (no query when none has one).
+func (r *accountRepository) loadMarketListingSnapshots(ctx context.Context, marketGroupIDsByAccount map[int64][]int64) (map[int64]*service.AccountMarketListing, error) {
+	out := make(map[int64]*service.AccountMarketListing)
+	if len(marketGroupIDsByAccount) == 0 || r.sql == nil {
+		return out, nil
+	}
+	ids := make([]int64, 0, len(marketGroupIDsByAccount))
+	for id := range marketGroupIDsByAccount {
+		ids = append(ids, id)
+	}
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT account_id, owner_user_id, selected_group_id, version, reserved_concurrency, reserved_devices,
+			reserved_admissions, cap_5h_pct, cap_7d_pct, sample_max_age_minutes
+		FROM account_market_listings
+		WHERE account_id = ANY($1) AND status = 'listed' AND selected_group_id IS NOT NULL`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			accountID int64
+			l         service.AccountMarketListing
+		)
+		if err := rows.Scan(&accountID, &l.OwnerUserID, &l.GroupID, &l.Version,
+			&l.Protection.ReservedConcurrency, &l.Protection.ReservedDevices, &l.Protection.ReservedAdmissions,
+			&l.Protection.Cap5hPct, &l.Protection.Cap7dPct, &l.Protection.SampleMaxAgeMinutes); err != nil {
+			return nil, err
+		}
+		out[accountID] = &l
+	}
+	return out, rows.Err()
 }
 
 // loadAccountGroupsWithMarket splits memberships: dispatchable (admin) rows

@@ -414,12 +414,26 @@ func (s *OpsService) executePinnedRetry(ctx context.Context, reqType opsRetryReq
 	}
 	// Pilot: a market-listed account is never used by a pinned retry (it
 	// would bypass the market admission).
-	if len(account.MarketGroupIDs) > 0 {
+	if len(account.MarketGroupIDs) > 0 || s.gatewayService.MarketAccountListed(account) {
 		return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account is listed on the sharing market"}
 	}
 	if errorLog.GroupID != nil && *errorLog.GroupID > 0 {
 		if !containsInt64(account.GroupIDs, *errorLog.GroupID) {
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account is not in the same group as the original request"}
+		}
+		// Market tier, known from the account's own (database) admin
+		// memberships, no extra lookup; ordinary groups are untouched.
+		if group := accountAdminGroup(account, *errorLog.GroupID); group != nil && group.MarketTier {
+			if reason := opsRetryTierRefusal(reqType, errorLog); reason != "" {
+				return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: reason}
+			}
+			if account.OwnerUserID != nil {
+				return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account has an owner and the group is a sharing-market tier"}
+			}
+			// The platform account still gets the authoritative check
+			// before the first upstream send (owner set / membership
+			// revoked after the read above).
+			ctx, _ = WithMarketAttempt(ctx, &MarketSelection{Class: MarketClassPlatform, AccountID: account.ID, GroupID: group.ID, Concurrency: account.Concurrency})
 		}
 	}
 
@@ -481,10 +495,29 @@ func (s *OpsService) executeClientRetry(ctx context.Context, reqType opsRetryReq
 			switches++
 			continue
 		}
+		// Pilot: a retry never uses a market-listed account (no market
+		// admission on this path), even when it was reached through an
+		// admin binding of another group.
+		if s.gatewayService.MarketAccountListed(account) {
+			selection.ReleaseFunc()
+			excluded[account.ID] = struct{}{}
+			switches++
+			continue
+		}
 
 		attemptCtx := ctx
 		if switches > 0 {
 			attemptCtx = WithAccountSwitchCount(attemptCtx, switches, false)
+		}
+		if selection.Market != nil {
+			// A market tier (the selection says so, no extra lookup): only
+			// Anthropic /v1/messages, and platform accounts still get the
+			// authoritative check.
+			if reason := opsRetryTierRefusal(reqType, errorLog); reason != "" {
+				selection.ReleaseFunc()
+				return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: reason}
+			}
+			attemptCtx, _ = WithMarketAttempt(attemptCtx, selection.Market)
 		}
 		exec := func() *opsRetryExecution {
 			defer selection.ReleaseFunc()
@@ -511,6 +544,30 @@ func (s *OpsService) executeClientRetry(ctx context.Context, reqType opsRetryReq
 		excluded[account.ID] = struct{}{}
 		switches++
 	}
+}
+
+// accountAdminGroup returns the account's admin membership group with id.
+func accountAdminGroup(account *Account, groupID int64) *Group {
+	for _, g := range account.Groups {
+		if g != nil && g.ID == groupID {
+			return g
+		}
+	}
+	for _, ag := range account.AccountGroups {
+		if ag.GroupID == groupID && ag.Group != nil {
+			return ag.Group
+		}
+	}
+	return nil
+}
+
+// opsRetryTierRefusal: market tiers only retry Anthropic /v1/messages.
+func opsRetryTierRefusal(reqType opsRetryRequestType, errorLog *OpsErrorLogDetail) string {
+	path := strings.TrimRight(strings.ToLower(strings.TrimSpace(errorLog.RequestPath)), "/")
+	if reqType != opsRetryTypeMessages || !strings.HasSuffix(path, "/v1/messages") {
+		return "sharing-market tiers only retry Anthropic /v1/messages"
+	}
+	return ""
 }
 
 func (s *OpsService) selectAccountForRetry(ctx context.Context, reqType opsRetryRequestType, groupID *int64, model string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {

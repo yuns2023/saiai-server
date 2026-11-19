@@ -15,7 +15,6 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -647,6 +646,9 @@ type AccountWaitPlan struct {
 	MaxConcurrency int
 	Timeout        time.Duration
 	MaxWaiting     int
+	// Market is the admission class the wait must re-acquire under (a
+	// buyer waits for a buyer lease); nil for non-market candidates.
+	Market *MarketSelection
 }
 
 type AccountSelectionResult struct {
@@ -655,6 +657,9 @@ type AccountSelectionResult struct {
 	ReleaseFunc     func()
 	WaitPlan        *AccountWaitPlan // nil means no wait allowed
 	StickyOwnership string           // Redis generation reserved by this selection
+	// Market is the candidate's market admission expectation (nil when
+	// neither the group nor the account is on the market).
+	Market *MarketSelection
 }
 
 // ClaudeUsage 表示Claude API返回的usage信息
@@ -856,6 +861,8 @@ type GatewayService struct {
 	debugClaudeMimic                     atomic.Bool
 	stickySelectionMu                    sync.Mutex
 	stickySelectionLocks                 map[string]*stickySelectionLock
+	// market is the P3a market dispatch runtime (nil = no market).
+	market *MarketRuntime
 }
 
 // NewGatewayService creates a new GatewayService
@@ -1093,6 +1100,12 @@ func (s *GatewayService) GenerateStickySessionHashForRequest(ctx context.Context
 	mode, err := s.ResolveClaudeOAuthGroupMode(ctx, groupID, platform)
 	if err != nil || mode == "" {
 		return fallback, mode, err
+	}
+	if mode == ClaudeOAuthModePinned {
+		if g := s.groupForMarket(ctx, groupID); g != nil && g.MarketTier {
+			// Pinned scheduling is not supported in market tiers.
+			mode = ClaudeOAuthModeCarpool
+		}
 	}
 	parsedUserID := ParseMetadataUserID(strings.TrimSpace(parsed.MetadataUserID))
 	if parsedUserID == nil || parsedUserID.SessionID == "" {
@@ -1880,6 +1893,18 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		matchedBillingCCHSeed = realClaudeCodeDiag.CCHSeed
 		matchedBillingCCHMode = claudebilling.CCHInputMode(realClaudeCodeDiag.CCHMode)
 	}
+	if marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) {
+		// A listed account is used only by a market attempt (Messages final
+		// admission); count_tokens and other paths never send through it,
+		// not even the auxiliary count_tokens shape below. It got listed
+		// after its selection: never a client error — Messages fails over
+		// (reselects), count_tokens answers "temporarily unavailable".
+		if forCountTokens {
+			s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
+			return body, nil, ErrMarketAdmissionRejected
+		}
+		return body, nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
+	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {
 		if forCountTokens && isClaudeOAuthCountTokensAuxRequest(c, parsed) {
 			logger.LegacyPrintf(
@@ -2063,7 +2088,31 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 			value, _ := c.Get("api_key")
 			deviceAPIKey, _ = value.(*APIKey)
 		}
-		if _, err := s.identityService.EnsureCarpoolDeviceAllowed(ctx, account, originalUserID, clientHeaders, deviceAPIKey); err != nil {
+		var deviceErr error
+		marketDevice := marketDeviceAdmissionFor(ctx, account)
+		if marketDevice != nil {
+			_, deviceErr = s.identityService.EnsureCarpoolDeviceAllowedMarket(ctx, account, originalUserID, clientHeaders, *marketDevice, deviceAPIKey)
+			// The buyer path never dispatches without a device admission:
+			// unidentified device or registry error = try another account.
+			if deviceErr != nil && marketDevice.Class == MarketDeviceClassBuyer && !errors.Is(deviceErr, ErrClaudeOAuthCarpoolDevicesFull) && !forCountTokens {
+				logger.LegacyPrintf("service.gateway", "Market buyer device admission failed for account %d: %v", account.ID, deviceErr)
+				return body, nil, marketAdmissionFailoverError(deviceErr)
+			}
+			if deviceErr == nil {
+				markMarketDeviceAdmitted(ctx, account)
+			}
+			// Owner path: a registry error (Redis down, WATCH retries
+			// exhausted, unidentified device) fails OPEN exactly like the
+			// plain carpool path below (log, dispatch without a recorded
+			// device). Deliberate: the owner's own use must not depend on
+			// Redis more than before listing. The attempt stays an owner
+			// attempt (never buyer, no admission row, no market settlement)
+			// and no device record is written, so no owner-class record can
+			// appear without a successful registration.
+		} else {
+			_, deviceErr = s.identityService.EnsureCarpoolDeviceAllowed(ctx, account, originalUserID, clientHeaders, deviceAPIKey)
+		}
+		if err := deviceErr; err != nil {
 			if errors.Is(err, ErrClaudeOAuthCarpoolDevicesFull) {
 				if forCountTokens {
 					return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, err)
@@ -2131,6 +2180,8 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 		// 无分组时只使用原生 anthropic 平台
 		platform = PlatformAnthropic
 	}
+	ctx = withMarketSelectionGroup(ctx, groupID)
+	ctx = withMarketRequestedModel(ctx, requestedModel)
 
 	// anthropic/gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
 	// 注意：强制平台模式不走混合调度
@@ -2144,7 +2195,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 }
 
 // SelectAccountWithLoadAwareness selects account with load-awareness and wait plan.
-func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string) (*AccountSelectionResult, error) {
+func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string) (selection *AccountSelectionResult, selectionErr error) {
 	ctx = withCarpoolAffinity(ctx, metadataUserID)
 	var unlock func()
 	ctx, unlock = s.coordinateStickySelection(ctx, groupID, sessionHash)
@@ -2169,6 +2220,14 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, err
 	}
 	ctx = s.withGroupContext(ctx, group)
+	// Market classification uses the group actually scheduled on.
+	ctx = withMarketSelectionGroup(ctx, groupID)
+	ctx = withMarketRequestedModel(ctx, requestedModel)
+	defer func() {
+		if selectionErr == nil && selection != nil {
+			selection, selectionErr = s.attachMarketSelection(ctx, selection)
+		}
+	}()
 
 	var stickyAccountID int64
 	if prefetch := prefetchedStickyAccountIDFromContext(ctx, groupID); prefetch > 0 {
@@ -2197,6 +2256,11 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 	claudeOAuthMode, err := s.ResolveClaudeOAuthGroupMode(ctx, groupID, platform)
 	if err != nil {
 		return nil, err
+	}
+	if group != nil && group.MarketTier {
+		// Pinned scheduling is not supported in market tiers (pinned-mode
+		// accounts are excluded per candidate; never bind carpool buyers).
+		claudeOAuthMode = ""
 	}
 
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
@@ -2251,7 +2315,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				return nil, err
 			}
 
-			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+			result, err := s.tryAcquireAccountSlot(ctx, account)
 			if err == nil && result.Acquired {
 				// 获取槽位后检查会话限制（使用 sessionHash 作为会话标识符）
 				if !s.checkAndRegisterSession(ctx, account, sessionKeyForAccount(account)) {
@@ -2432,7 +2496,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 							s.isAccountSchedulableForWindowCost(ctx, stickyAccount, true) &&
 
 							s.isAccountSchedulableForRPM(ctx, stickyAccount, true) { // 粘性会话窗口费用+RPM 检查
-							result, err := s.tryAcquireAccountSlot(ctx, stickyAccountID, stickyAccount.Concurrency)
+							result, err := s.tryAcquireAccountSlot(ctx, stickyAccount)
 							if err == nil && result.Acquired {
 								// 会话数量限制检查
 								if !s.checkAndRegisterSession(ctx, stickyAccount, sessionKeyForAccount(stickyAccount)) {
@@ -2488,6 +2552,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 				})
 			}
 			routingLoadMap, _ := s.concurrencyService.GetAccountsLoadBatch(ctx, routingLoads)
+			s.adjustMarketBuyerLoads(ctx, routingCandidates, routingLoadMap)
 
 			// 3. 按负载感知排序
 			var routingWithLoad []accountWithLoad
@@ -2536,7 +2601,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 						continue
 					}
 					item.account = fresh
-					result, err := s.tryAcquireAccountSlot(ctx, item.account.ID, item.account.Concurrency)
+					result, err := s.tryAcquireAccountSlot(ctx, item.account)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						if !s.checkAndRegisterSession(ctx, item.account, sessionKeyForAccount(item.account)) {
@@ -2601,7 +2666,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 						_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 					}
 				}
-				if !clearSticky && s.isAccountInGroup(account, groupID) &&
+				if !clearSticky && s.isAccountInGroupForSelection(ctx, account, groupID) &&
 					s.isAccountAllowedForPlatform(account, platform, useMixed) &&
 					(requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) &&
 					s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) &&
@@ -2609,7 +2674,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 					s.isAccountSchedulableForWindowCost(ctx, account, true) &&
 
 					s.isAccountSchedulableForRPM(ctx, account, true) { // 粘性会话窗口费用+RPM 检查
-					result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
+					result, err := s.tryAcquireAccountSlot(ctx, account)
 					if err == nil && result.Acquired {
 						// 会话数量限制检查
 						// Session count limit check
@@ -2704,6 +2769,9 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 	}
 
 	loadMap, err := s.concurrencyService.GetAccountsLoadBatch(ctx, accountLoads)
+	if err == nil {
+		s.adjustMarketBuyerLoads(ctx, candidates, loadMap)
+	}
 	if err != nil {
 		if claudeOAuthMode == ClaudeOAuthModePinned && metadataUserID != "" && groupID != nil && *groupID > 0 {
 			deviceBindings, accountBindings, loadErr := s.identityService.LoadPinnedBindings(ctx, *groupID, metadataUserID, candidates)
@@ -2779,7 +2847,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 			}
 			selected.account = fresh
 
-			result, err := s.tryAcquireAccountSlot(ctx, selected.account.ID, selected.account.Concurrency)
+			result, err := s.tryAcquireAccountSlot(ctx, selected.account)
 			if err == nil && result.Acquired {
 				// 会话数量限制检查
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionKeyForAccount(selected.account)) {
@@ -2911,7 +2979,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 		if acc == nil {
 			continue
 		}
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		result, err := s.tryAcquireAccountSlot(ctx, acc)
 		if err == nil && result.Acquired {
 			// 会话数量限制检查
 			if !s.checkAndRegisterSession(ctx, acc, sessionKeyForAccount(acc)) {
@@ -3106,70 +3174,13 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	// candidates there, whatever the source (snapshot, stale bucket, DB).
 	if s.isRunModeSimple() {
 		accounts = withoutSelfOnboarded(accounts)
-	} else {
-		// A snapshot bucket can lag a market listing (rebuilds are
-		// throttled); the cached account copy already carries it.
-		accounts = withoutMarketMembership(accounts, groupID)
 	}
+	// Market classification (P3a part 2): drops excluded candidates (a
+	// listed account outside its tier / its owner's hosted group, Simple
+	// mode, unsellable buyers, ...). Returns the input unchanged when
+	// neither the group nor any candidate is on the market.
+	accounts = s.marketFilterCandidates(ctx, accounts, groupID)
 	return accounts, useMixed, err
-}
-
-// withoutMarketMembership drops candidates that reach this group context
-// only through a market listing (P3a part 1: market memberships are never
-// dispatchable; a market-only account is not ungrouped). The market
-// selection part replaces this with the admission classification.
-func withoutMarketMembership(accounts []Account, groupID *int64) []Account {
-	var out []Account
-	for i := range accounts {
-		if !marketMembershipOnly(&accounts[i], groupID) {
-			if out != nil {
-				out = append(out, accounts[i])
-			}
-			continue
-		}
-		if out == nil {
-			// Allocate only when something is dropped (the common path
-			// returns the input unchanged).
-			out = make([]Account, 0, len(accounts)-1)
-			out = append(out, accounts[:i]...)
-		}
-	}
-	if out == nil {
-		return accounts
-	}
-	return out
-}
-
-// marketMembershipOnly: a listed account (MarketGroupIDs non-empty) is a
-// candidate only through a current admin binding of the requested group,
-// never in the ungrouped context. Accounts without market rows: false.
-func marketMembershipOnly(account *Account, groupID *int64) bool {
-	if account == nil || len(account.MarketGroupIDs) == 0 {
-		return false
-	}
-	if groupID == nil {
-		return true
-	}
-	return !slices.Contains(account.GroupIDs, *groupID)
-}
-
-// marketMembershipChanged: the fresh copy of a listed candidate no longer
-// has the memberships it was selected with (list → use window).
-func marketMembershipChanged(selected, fresh *Account) bool {
-	if selected == nil || fresh == nil || (len(selected.MarketGroupIDs) == 0 && len(fresh.MarketGroupIDs) == 0) {
-		return false
-	}
-	return !sameInt64Set(selected.MarketGroupIDs, fresh.MarketGroupIDs) || !sameInt64Set(selected.GroupIDs, fresh.GroupIDs)
-}
-
-func sameInt64Set(a, b []int64) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	x, y := slices.Clone(a), slices.Clone(b)
-	slices.Sort(x)
-	slices.Sort(y)
-	return slices.Equal(x, y)
 }
 
 func (s *GatewayService) isRunModeSimple() bool {
@@ -3415,13 +3426,6 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 		}
 	}
 	return false
-}
-
-func (s *GatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
-	if s.concurrencyService == nil {
-		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
-	}
-	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
 type usageLogWindowStatsBatchProvider interface {
@@ -3753,7 +3757,7 @@ func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Cont
 		}
 		fresh = current
 	}
-	if !s.isRunModeSimple() && marketMembershipChanged(account, fresh) {
+	if s.marketSelectionChanged(ctx, account, fresh) {
 		return nil
 	}
 	if !s.isAccountSchedulableForSelection(ctx, fresh) {
@@ -3940,7 +3944,7 @@ func (s *GatewayService) trySelectPinnedWithLoad(
 				continue
 			}
 			selected.account = fresh
-			result, err := s.tryAcquireAccountSlot(ctx, selectedID, selected.account.Concurrency)
+			result, err := s.tryAcquireAccountSlot(ctx, selected.account)
 			if err == nil && result.Acquired {
 				if !s.checkAndRegisterSession(ctx, selected.account, s.oauthAccountSessionKey(ctx, selected.account, metadataUserID, "")) {
 					result.ReleaseFunc()
@@ -4053,7 +4057,7 @@ func (s *GatewayService) trySelectPinnedByLegacyOrder(
 		if waitCandidate == nil {
 			waitCandidate = acc
 		}
-		result, err := s.tryAcquireAccountSlot(ctx, acc.ID, acc.Concurrency)
+		result, err := s.tryAcquireAccountSlot(ctx, acc)
 		if err == nil && result.Acquired {
 			if !s.checkAndRegisterSession(ctx, acc, s.oauthAccountSessionKey(ctx, acc, metadataUserID, "")) {
 				result.ReleaseFunc()
@@ -4154,7 +4158,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 								_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 							}
 						}
-						if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+						if !clearSticky && s.isAccountInGroupForSelection(ctx, account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if s.debugModelRoutingEnabled() {
 								logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
 							}
@@ -4246,7 +4250,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
 					}
-					if !clearSticky && s.isAccountInGroup(account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+					if !clearSticky && s.isAccountInGroupForSelection(ctx, account, groupID) && account.Platform == platform && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						s.refreshStickySessionTTLForAccount(ctx, groupID, sessionHash, account)
 						return account, nil
 					}
@@ -4345,7 +4349,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 								_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 							}
 						}
-						if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+						if !clearSticky && s.isAccountInGroupForSelection(ctx, account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 							if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
 								if s.debugModelRoutingEnabled() {
 									logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] legacy mixed routed sticky hit: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), accountID)
@@ -4439,7 +4443,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 							_ = s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
 						}
 					}
-					if !clearSticky && s.isAccountInGroup(account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
+					if !clearSticky && s.isAccountInGroupForSelection(ctx, account, groupID) && (requestedModel == "" || s.isModelSupportedByAccountWithContext(ctx, account, requestedModel)) && s.isAccountSchedulableForModelSelection(ctx, account, requestedModel) && s.isAccountSchedulableForQuota(account) && s.isAccountSchedulableForWindowCost(ctx, account, true) && s.isAccountSchedulableForRPM(ctx, account, true) {
 						if account.Platform == nativePlatform || (account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled()) {
 							s.refreshStickySessionTTLForAccount(ctx, groupID, sessionHash, account)
 							return account, nil
@@ -5551,6 +5555,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	// Market dispatch boundary (P3a part 2): a listed account or a market
+	// selection must match this attempt; the authoritative admission runs
+	// below, after the device admission and before the first upstream send.
+	marketAttempt, marketErr := s.marketGate(ctx, account)
+	if marketErr != nil {
+		return nil, marketAdmissionError(ctx, marketErr)
+	}
+	if marketAttempt != nil && (account.IsAnthropicAPIKeyPassthroughEnabled() || account.IsBedrock()) {
+		if err := s.finalizeMarketAdmission(ctx, account, marketAttempt, parsed.Model); err != nil {
+			return nil, marketAdmissionError(ctx, err)
+		}
+	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
 		passthroughBody := parsed.Body
@@ -5654,6 +5670,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", unavailableModelPricingMessage(originalModel))
 		return nil, fmt.Errorf("billing pricing not found for resolved model %s (requested %s)", reqModel, originalModel)
 	}
+	if marketAttempt != nil {
+		if err := s.finalizeMarketAdmission(ctx, account, marketAttempt, reqModel); err != nil {
+			return nil, marketAdmissionError(ctx, err)
+		}
+	}
 
 	// 获取凭证
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -5677,6 +5698,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var resp *http.Response
 	retryStart := time.Now()
 	sameAccountHTTPReplayUsed := false
+	// The response that led to a same-account replay. If the account gets
+	// listed before the replay, the listing guard keeps that original
+	// response's outcome (only the cache-safe 502 is explicitly a client
+	// retry; a 5xx keeps its normal handling, which may fail over).
+	var replayResp *http.Response
+	var replayBody []byte
+	replayCacheSafe := false
 	for attempt := 1; attempt <= maxRetryLoopAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
@@ -5684,6 +5712,25 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
+		}
+		if err := marketDispatchCancelled(ctx); err != nil {
+			return nil, err
+		}
+		if s.marketListedWithoutAdmission(ctx, account) {
+			// Listed while this non-market attempt waited (e.g. in device
+			// registration): never send through it.
+			if replayResp != nil {
+				// A same-account replay round: end with the response that
+				// asked for it, exactly as if no replay were allowed.
+				if replayCacheSafe {
+					return s.writeClientRetryableClaudeCodeUpstreamError(c, account, replayResp, replayBody)
+				}
+				resp = replayResp
+				resp.Body = io.NopCloser(bytes.NewReader(replayBody))
+				break
+			}
+			// First send: reselect.
+			return nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
 		}
 
 		// 发送请求
@@ -5920,6 +5967,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						Message:            upstreamMsg,
 					})
 					logger.LegacyPrintf("service.gateway", "Account %d: cache-safe Claude Code transient 502, retrying same account once", account.ID)
+					replayResp, replayBody, replayCacheSafe = resp, respBody, true
 					if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
 						return nil, err
 					}
@@ -5955,6 +6003,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}(),
 				})
 				logger.LegacyPrintf("service.gateway", "Account %d: upstream HTTP %d, retrying same account once", account.ID, resp.StatusCode)
+				replayResp, replayBody, replayCacheSafe = resp, respBody, false
 				if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
 					return nil, err
 				}
@@ -6006,6 +6055,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				})
 				logger.LegacyPrintf("service.gateway", "Account %d: upstream error %d, retry %d/%d after %v (elapsed=%v/%v)",
 					account.ID, resp.StatusCode, attempt, maxRetryAttempts, delay, elapsed, maxRetryElapsed)
+				replayResp, replayBody, replayCacheSafe = resp, respBody, false
 				if err := sleepWithContext(ctx, delay); err != nil {
 					return nil, err
 				}
@@ -6283,6 +6333,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
 		if err != nil {
+			return nil, err
+		}
+		if err := marketDispatchCancelled(ctx); err != nil {
 			return nil, err
 		}
 
@@ -9453,6 +9506,17 @@ type RecordUsageInput struct {
 	APIKeyService      APIKeyQuotaUpdater    // 可选：用于更新API Key配额
 	ClientAttestation  *int16                // SAIAI 客户端校验状态（请求级）；最终分组策略为 off 时不落库
 	ClientEntrypoint   *ClientEntrypointFlag // 观察模式下不合规但已放行的 Claude 入口（请求级）；合规为 nil
+	// MarketPath / Market: the served attempt was admitted on the market
+	// buyer path; Market is its admission proof (captured before the async
+	// enqueue from that attempt only). Both zero for every other sale.
+	MarketPath  bool
+	Market      *MarketSettlementProof
+	MarketPrice *MarketPriceSnapshot
+	// BillingRequestID is, for a market command (MarketPath) only, the
+	// billing identity of the usage log and the billing command, captured
+	// before the async enqueue (ResolveUsageBillingRequestID on the original
+	// request). Ignored otherwise (main's identity), even when set.
+	BillingRequestID string
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9489,6 +9553,11 @@ type postUsageBillingParams struct {
 	// PriceMissing marks a cost built by the missing-price branch (zero cost
 	// because the model has no price), for the settlement zero_reason.
 	PriceMissing bool
+	// MarketPath / Market: frozen admission of the served market attempt
+	// (RecordUsageInput), handed to the settlement unchanged.
+	MarketPath  bool
+	Market      *MarketSettlementProof
+	MarketPrice *MarketPriceSnapshot
 }
 
 // postUsageBilling 统一处理使用量记录后的扣费逻辑：
@@ -9658,6 +9727,8 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.SmartSwitchPaygCost = cmd.BalanceCost
 	}
 	cmd.Settlement = buildUsageSettlementInput(cmd, usageLog, p)
+	// Market buyer sale: frozen from the served attempt (BE3 settles it).
+	cmd.MarketPath = p.MarketPath
 	cmd.Normalize()
 	return cmd
 }
@@ -9693,6 +9764,14 @@ func buildUsageSettlementInput(cmd *UsageBillingCommand, usageLog *UsageLog, p *
 		in.ChargeSource = SettlementChargeSourceBalance
 	}
 	in.FreeGroup = group.HostedChargeFree()
+	if p.Market != nil {
+		proof := *p.Market
+		in.Market = &proof
+	}
+	if p.MarketPrice != nil {
+		price := *p.MarketPrice
+		in.MarketPrice = &price
+	}
 	if usageLog != nil {
 		if usageLog.RateMultiplier == 0 {
 			in.FreeGroup = true
@@ -9936,6 +10015,11 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	accountRateMultiplier := account.BillingRateMultiplier()
 	meteredCost := applyHostedUsage(apiKey.Group, cost, &accountRateMultiplier)
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	// Only a market command (MarketPath) uses the identity frozen before the
+	// enqueue; every other sale keeps main's identity even if it is set.
+	if id := strings.TrimSpace(input.BillingRequestID); id != "" && input.MarketPath {
+		requestID = id
+	}
 	usageLog := &UsageLog{
 		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
@@ -10022,6 +10106,9 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 			MeteredCost:           meteredCost,
 			APIKeyService:         input.APIKeyService,
 			PriceMissing:          priceMissing,
+			MarketPath:            input.MarketPath,
+			Market:                input.Market,
+			MarketPrice:           input.MarketPrice,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()
@@ -10054,6 +10141,10 @@ type RecordUsageLongContextInput struct {
 	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
 	ClientAttestation     *int16             // SAIAI 客户端校验状态（请求级）
+	// MarketPath / BillingRequestID: same semantics as RecordUsageInput
+	// (the frozen id applies only to a market command; never set today).
+	MarketPath       bool
+	BillingRequestID string
 }
 
 // RecordUsageWithLongContext 记录使用量并扣费，支持长上下文双倍计费（用于 Gemini）
@@ -10141,6 +10232,11 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	}
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	// Same rule as RecordUsage: only a market command uses the frozen id;
+	// this entry never carries one (market traffic is Messages only).
+	if id := strings.TrimSpace(input.BillingRequestID); id != "" && input.MarketPath {
+		requestID = id
+	}
 	usageLog := &UsageLog{
 		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
@@ -10340,6 +10436,12 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 发送请求
+	if s.marketListedWithoutAdmission(ctx, account) {
+		// Listed after its selection (count_tokens never uses a listed
+		// account): one "temporarily unavailable", nothing sent.
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
+		return ErrMarketAdmissionRejected
+	}
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, resolveTransportAccountID(account, oauthIdentity), account.Concurrency, account.IsTLSFingerprintEnabled())
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")

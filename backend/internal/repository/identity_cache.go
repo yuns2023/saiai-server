@@ -291,6 +291,11 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 				_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 					if budget != nil {
 						budget.Used++
+						if budget.MarketClassified {
+							// Listed earlier this cycle: an unclassified
+							// admission counts against the buyers.
+							budget.BuyerUsed++
+						}
 						encoded, err := json.Marshal(budget)
 						if err != nil {
 							return err
@@ -998,9 +1003,9 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 			}
 			// First-cycle reservation must not refund admissions made between
 			// saving the configuration and the worker's first pass.
-			used := 0
+			used, buyerUsed := 0, 0
 			if due == policy.InitialDue {
-				used = budget.Used
+				used, buyerUsed = budget.Used, budget.BuyerUsed
 			}
 			remaining := max(0, free-used)
 			count := 0
@@ -1027,6 +1032,11 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 				}
 				budget.LastDue = due
 				budget.Used = used
+				budget.BuyerUsed = buyerUsed
+				// A fresh cycle (used = 0) is unclassified again: admissions
+				// made by the plain path before the next market admission are
+				// then migrated as buyer ones. A kept first cycle keeps its flag.
+				budget.MarketClassified = budget.MarketClassified && used > 0
 				budget.Quota = policy.Admissions
 				encoded, err := json.Marshal(budget)
 				if err != nil {
@@ -1059,6 +1069,13 @@ type carpoolAdmissionBudget struct {
 	LastDue    string `json:"last_due"`
 	Quota      int    `json:"quota"`
 	Used       int    `json:"used"`
+	// BuyerUsed counts this cycle's admissions on the market buyer path
+	// (also included in Used). Reset with Used on cycle rollover.
+	BuyerUsed int `json:"buyer_used,omitempty"`
+	// MarketClassified: BuyerUsed is authoritative for this cycle. Absent
+	// (a budget written before the market path counted classes), every
+	// admission of the cycle is conservatively treated as a buyer one.
+	MarketClassified bool `json:"market_classified,omitempty"`
 }
 
 func readCarpoolAdmissionBudget(ctx context.Context, reader redis.Cmdable, key string, policy service.CarpoolAdmissionPolicy) (*carpoolAdmissionBudget, error) {

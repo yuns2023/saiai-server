@@ -19,10 +19,9 @@ import (
 // source='market'. Every lifecycle write runs in one transaction with the
 // account row locked and writes the scheduler outbox in that transaction.
 //
-// In this part market memberships are NEVER dispatchable: every scheduling
-// read of account_groups goes through the repository predicate
-// dispatchableAccountGroupSources (admin rows only). The selection part (BE2)
-// replaces that predicate with the three-way admission classification.
+// Market memberships are dispatchable only through the three-way admission
+// classification of service/market_dispatch.go (buyer path of the listed
+// tier, owner path of the owner's hosted group, otherwise excluded).
 
 const (
 	AccountGroupSourceAdmin  = "admin"
@@ -182,6 +181,12 @@ type MarketOwnerSetParams struct {
 	// Validate runs on the locked account with the stored protection before
 	// listing (not on unlist).
 	Validate func(account *Account, protection MarketProtectionParams) error
+	// BeforeListWrite runs once every check passed, right before the listing
+	// writes; ListingRolledBack runs when the transaction is then rolled
+	// back without reaching its commit (the dispatch registry marks / clears
+	// the account locally).
+	BeforeListWrite   func()
+	ListingRolledBack func()
 }
 
 // MarketListingRepository: every write is one transaction that locks the

@@ -15,11 +15,10 @@ import (
 	"github.com/lib/pq"
 )
 
-// dispatchableAccountGroupPredicate is THE scheduling filter on
-// account_groups: in P3a part 1 only admin bindings are dispatchable, market
-// memberships never are. Every scheduling read of account_groups uses it (or
-// isDispatchableAccountGroupSource on loaded rows); the market selection part
-// replaces both with the three-way admission classification.
+// dispatchableAccountGroupPredicate selects admin bindings. Admin views and
+// Account.GroupIDs use it (isDispatchableAccountGroupSource on loaded rows);
+// scheduling reads by group also return market rows and leave the decision
+// to the gateway's market classification (service/market_dispatch.go).
 func dispatchableAccountGroupPredicate() dbpredicate.AccountGroup {
 	return dbaccountgroup.SourceEQ(service.AccountGroupSourceAdmin)
 }
@@ -130,22 +129,53 @@ func (r *marketListingRepository) GetListing(ctx context.Context, accountID int6
 const marketAccountColumns = `id, platform, type, extra, concurrency, status, schedulable,
 	owner_user_id, owner_paused_at, owner_withdraw_requested_at, self_onboarded, proxy_id,
 	(SELECT p.status FROM proxies p WHERE p.id = accounts.proxy_id AND p.deleted_at IS NULL),
-	(SELECT p.host FROM proxies p WHERE p.id = accounts.proxy_id AND p.deleted_at IS NULL)`
+	(SELECT p.host FROM proxies p WHERE p.id = accounts.proxy_id AND p.deleted_at IS NULL),
+	temp_unschedulable_until, rate_limit_reset_at, overload_until, expires_at, auto_pause_on_expired,
+	jsonb_build_object('expires_at', credentials->'expires_at'),
+	ARRAY(SELECT u.user_id FROM claude_oauth_account_users u WHERE u.account_id = accounts.id),
+	ARRAY(SELECT k.api_key_id FROM claude_oauth_account_api_keys k JOIN api_keys ak ON ak.id = k.api_key_id
+		WHERE k.account_id = accounts.id AND ak.deleted_at IS NULL)`
 
 func scanMarketAccount(ctx context.Context, q sqlQueryer, query string, args ...any) (*service.Account, error) {
 	var (
-		a         service.Account
-		extra     []byte
-		owner     sql.NullInt64
-		paused    sql.NullTime
-		withdrawn sql.NullTime
-		proxyID   sql.NullInt64
-		proxyStat sql.NullString
-		proxyHost sql.NullString
+		a                                       service.Account
+		extra                                   []byte
+		owner                                   sql.NullInt64
+		paused                                  sql.NullTime
+		withdrawn                               sql.NullTime
+		proxyID                                 sql.NullInt64
+		proxyStat                               sql.NullString
+		proxyHost                               sql.NullString
+		tempUntil, rateReset, overload, expires sql.NullTime
+		autoPause                               sql.NullBool
+		creds                                   []byte
+		users, keys                             pq.Int64Array
 	)
 	if err := scanSingleRow(ctx, q, query, args, &a.ID, &a.Platform, &a.Type, &extra, &a.Concurrency,
-		&a.Status, &a.Schedulable, &owner, &paused, &withdrawn, &a.SelfOnboarded, &proxyID, &proxyStat, &proxyHost); err != nil {
+		&a.Status, &a.Schedulable, &owner, &paused, &withdrawn, &a.SelfOnboarded, &proxyID, &proxyStat, &proxyHost,
+		&tempUntil, &rateReset, &overload, &expires, &autoPause, &creds, &users, &keys); err != nil {
 		return nil, err
+	}
+	// Scheduling facts (Account.IsSchedulable) and the carpool allowlists
+	// (accountAllowsUser) for the market admission re-checks.
+	for _, f := range []struct {
+		src sql.NullTime
+		dst **time.Time
+	}{{tempUntil, &a.TempUnschedulableUntil}, {rateReset, &a.RateLimitResetAt}, {overload, &a.OverloadUntil}, {expires, &a.ExpiresAt}} {
+		if f.src.Valid {
+			v := f.src.Time
+			*f.dst = &v
+		}
+	}
+	a.AutoPauseOnExpired = autoPause.Bool
+	if len(creds) > 0 {
+		if err := json.Unmarshal(creds, &a.Credentials); err != nil {
+			return nil, err
+		}
+	}
+	a.CarpoolUserIDs = []int64(users)
+	for _, id := range keys {
+		a.CarpoolAPIKeys = append(a.CarpoolAPIKeys, service.CarpoolAPIKeyRef{ID: id})
 	}
 	// Live proxy (same facts as the scheduling proxy predicate).
 	if proxyID.Valid {
@@ -750,6 +780,29 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 	if adminRow {
 		return nil, service.ErrMarketAdminMembershipConflict
 	}
+	if p.BeforeListWrite != nil {
+		p.BeforeListWrite()
+		reachedCommit := false
+		defer func() {
+			if !reachedCommit && p.ListingRolledBack != nil {
+				p.ListingRolledBack()
+			}
+		}()
+		listCommit := func() (*service.MarketListing, error) {
+			// Any failure before the commit is an explicit rollback; from
+			// the commit on, the outcome may be unknown: keep the mark.
+			return r.commitListingMarked(ctx, tx, p.AccountID, func() { reachedCommit = true })
+		}
+		return r.ownerListWrite(ctx, tx, p, current, listCommit)
+	}
+	return r.ownerListWrite(ctx, tx, p, current, func() (*service.MarketListing, error) {
+		return r.commitListing(ctx, tx, p.AccountID)
+	})
+}
+
+// ownerListWrite performs the listing writes of OwnerSet (all checks done).
+func (r *marketListingRepository) ownerListWrite(ctx context.Context, tx *sql.Tx, p service.MarketOwnerSetParams, current *service.MarketListing,
+	commit func() (*service.MarketListing, error)) (*service.MarketListing, error) {
 	if _, err := ensureMarketOwnerVersionTx(ctx, tx, p.AccountID, p.OwnerUserID); err != nil {
 		return nil, err
 	}
@@ -796,13 +849,22 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 	if err := enqueueMarketMembershipOutboxTx(ctx, tx, p.AccountID, changed); err != nil {
 		return nil, err
 	}
-	return r.commitListing(ctx, tx, p.AccountID)
+	return commit()
 }
 
 func (r *marketListingRepository) commitListing(ctx context.Context, tx *sql.Tx, accountID int64) (*service.MarketListing, error) {
+	return r.commitListingMarked(ctx, tx, accountID, nil)
+}
+
+// commitListingMarked reads the final listing and commits; beforeCommit
+// (optional) runs after that read, right before Commit.
+func (r *marketListingRepository) commitListingMarked(ctx context.Context, tx *sql.Tx, accountID int64, beforeCommit func()) (*service.MarketListing, error) {
 	out, err := queryMarketListing(ctx, tx, "SELECT "+marketListingColumns+" FROM account_market_listings WHERE account_id = $1", accountID)
 	if err != nil {
 		return nil, err
+	}
+	if beforeCommit != nil {
+		beforeCommit()
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -941,6 +1003,12 @@ func (r *marketListingRepository) admitMarketOnce(ctx context.Context, in *servi
 		[]any{in.AccountID, in.GroupID}, &state.AdminMember, &state.MarketMember, &state.DBNow); err != nil {
 		return nil, err
 	}
+	var enabled sql.NullString
+	if err := scanSingleRow(ctx, tx, "SELECT value FROM settings WHERE key = $1",
+		[]any{service.SettingKeyMarketEnabled}, &enabled); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	state.MarketEnabled = enabled.Valid && enabled.String == "true"
 	if err := check(state, in); err != nil {
 		return nil, err
 	}

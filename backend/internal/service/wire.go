@@ -299,11 +299,55 @@ func ProvideRateLimitService(
 	timeoutCounterCache TimeoutCounterCache,
 	settingService *SettingService,
 	tokenCacheInvalidator TokenCacheInvalidator,
+	market *MarketRuntime,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	svc.SetTimeoutCounterCache(timeoutCounterCache)
 	svc.SetSettingService(settingService)
 	svc.SetTokenCacheInvalidator(tokenCacheInvalidator)
+	svc.SetMarketRuntime(market)
+	return svc
+}
+
+// ProvideMarketListingService wires the listing lifecycle to the dispatch
+// registry (a listing is known locally before it commits).
+func ProvideMarketListingService(repo MarketListingRepository, settingRepo SettingRepository, market *MarketRuntime) *MarketListingService {
+	svc := NewMarketListingService(repo, settingRepo)
+	svc.SetListingObserver(market)
+	return svc
+}
+
+// ProvideGatewayService creates GatewayService with the market dispatch
+// runtime (P3a part 2).
+func ProvideGatewayService(
+	accountRepo AccountRepository,
+	groupRepo GroupRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	identityService *IdentityService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	claudeTokenProvider *ClaudeTokenProvider,
+	sessionLimitCache SessionLimitCache,
+	rpmCache RPMCache,
+	digestStore *DigestSessionStore,
+	settingService *SettingService,
+	market *MarketRuntime,
+) *GatewayService {
+	svc := NewGatewayService(accountRepo, groupRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
+		cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService, billingCacheService, identityService,
+		httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestStore, settingService)
+	svc.SetMarketRuntime(market)
 	return svc
 }
 
@@ -611,7 +655,8 @@ var ProviderSet = wire.NewSet(
 	NewBillingCacheService,
 	NewAnnouncementService,
 	ProvideAdminService,
-	NewGatewayService,
+	ProvideGatewayService,
+	ProvideMarketRuntime,
 	NewInputModerationService,
 	NewClaudeDeviceService,
 	NewClientDeviceService,
@@ -636,7 +681,7 @@ var ProviderSet = wire.NewSet(
 	NewHostedAccountService,
 	NewHostedOwnerService,
 	ProvideHostedSelfOnboardService,
-	NewMarketListingService,
+	ProvideMarketListingService,
 	ProvideHostedApplicationExpiryWorker,
 	NewSettlementReconcileService,
 	ProvideAccountTestService,

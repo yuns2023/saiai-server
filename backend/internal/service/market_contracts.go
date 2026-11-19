@@ -72,6 +72,8 @@ type MarketAdmissionState struct {
 	MarketMember bool
 	// DBNow is clock_timestamp() after the locks.
 	DBNow time.Time
+	// MarketEnabled is the market_enabled setting in the same snapshot.
+	MarketEnabled bool
 }
 
 // MarketAdmissionRepository is the admission store.

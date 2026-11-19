@@ -38,7 +38,7 @@ func stickyOwnershipSelection(ctx context.Context) bool {
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash, model string, excluded map[int64]struct{}, metadata string) (*AccountSelectionResult, error) {
 	cache, ok := s.cache.(stickyOwnershipCache)
 	if !ok || sessionHash == "" || !IsClaudeCodeClient(ctx) {
-		return s.selectAccountWithLoadAwareness(ctx, groupID, sessionHash, model, excluded, metadata)
+		return s.selectAccountWithMarketRetry(ctx, groupID, sessionHash, model, excluded, metadata)
 	}
 	// Resolve restriction routing before accessing the ownership key.
 	group, resolvedGroupID, err := s.checkClaudeCodeRestriction(ctx, groupID)
@@ -46,7 +46,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, err
 	}
 	if group != nil && group.Platform != PlatformAnthropic {
-		return s.selectAccountWithLoadAwareness(ctx, resolvedGroupID, sessionHash, model, excluded, metadata)
+		return s.selectAccountWithMarketRetry(ctx, resolvedGroupID, sessionHash, model, excluded, metadata)
 	}
 	groupID = resolvedGroupID
 	ctx = s.withGroupContext(ctx, group)
@@ -65,7 +65,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		// Ignore the handler's earlier prefetch: another request may have migrated.
 		selectionCtx := WithPrefetchedStickySession(ctx, ownerID, derefGroupID(groupID), false)
 		selectionCtx = context.WithValue(selectionCtx, stickyOwnershipSelectionKey{}, true)
-		result, err := s.selectAccountWithLoadAwareness(selectionCtx, groupID, sessionHash, model, excluded, metadata)
+		result, err := s.selectAccountWithMarketRetry(selectionCtx, groupID, sessionHash, model, excluded, metadata)
 		if err != nil {
 			return nil, err
 		}

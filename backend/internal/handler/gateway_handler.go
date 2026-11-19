@@ -825,11 +825,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 
-				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotForWaitPlan(
 					c,
-					account.ID,
-					selection.WaitPlan.MaxConcurrency,
-					selection.WaitPlan.Timeout,
+					selection.WaitPlan,
 					reqStream,
 					&streamStarted,
 				)
@@ -993,6 +991,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 		for {
 			// 选择支持该模型的账号
+			// Market dispatch: this path runs the final admission, so market
+			// buyer candidates may be selected for the Key as billed now.
+			c.Request = c.Request.WithContext(service.WithMarketDispatch(c.Request.Context(), currentAPIKey))
 			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID)
 			if err != nil {
 				if len(fs.FailedAccountIDs) == 0 && errors.Is(err, service.ErrNoAvailableAccounts) && advanceSmartSwitch(c, &currentAPIKey, &currentSubscription, smartSwitchExcluded, h.billingCacheService) {
@@ -1139,11 +1140,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 
-				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
+				accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotForWaitPlan(
 					c,
-					account.ID,
-					selection.WaitPlan.MaxConcurrency,
-					selection.WaitPlan.Timeout,
+					selection.WaitPlan,
 					reqStream,
 					&streamStarted,
 				)
@@ -1242,6 +1241,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			writerSizeBeforeForward := c.Writer.Size()
 			h.prepareSuccessfulRequestBodyCapture(c, currentAPIKey)
 			sessionSerialPermit.MarkForwarded()
+			// One market attempt per candidate: only the served attempt's
+			// admission proof reaches RecordUsage.
+			requestCtx, marketAttempt := service.WithMarketAttempt(requestCtx, selection.Market)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, body, hasBoundSession)
 			} else {
@@ -1391,9 +1393,21 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			clientAttestation := middleware2.GetClientAttestation(c)
 			clientEntrypoint := entrypointPolicy.clientEntrypointFlag()
+			marketPath, marketProof := marketAttempt.SettlementFields()
+			marketPrice := marketAttempt.PriceSnapshot()
+			var marketBillingRequestID string
+			if marketPath {
+				// Frozen now, from the original request (the worker's context
+				// has no client request id).
+				marketBillingRequestID = service.ResolveUsageBillingRequestID(c.Request.Context(), "")
+			}
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+					MarketPath:         marketPath,
+					Market:             marketProof,
+					MarketPrice:        marketPrice,
+					BillingRequestID:   marketBillingRequestID,
 					ClientAttestation:  clientAttestation,
 					ClientEntrypoint:   clientEntrypoint,
 					ModerationRef:      moderationRef,
@@ -2467,10 +2481,23 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	sessionBoundAccountID, stickyBindingSource, _ := h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), apiKey.GroupID, sessionHash)
+	var sessionBoundAccountID int64
+	var stickyBindingSource string
 
 	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
+	var account *service.Account
+	if apiKey.Group != nil && apiKey.Group.MarketTier {
+		// Market tier: platform accounts only, never the Messages sticky
+		// binding, never another tier.
+		account, err = h.gatewayService.SelectMarketTierCountTokensAccount(c.Request.Context(), apiKey.GroupID, parsedReq.Model)
+		if errors.Is(err, service.ErrMarketCountTokensUnsupported) {
+			h.errorResponse(c, http.StatusNotFound, "not_found_error", "count_tokens endpoint is not supported for this group")
+			return
+		}
+	} else {
+		sessionBoundAccountID, stickyBindingSource, _ = h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), apiKey.GroupID, sessionHash)
+		account, err = h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
+	}
 	if err != nil {
 		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")

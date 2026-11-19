@@ -174,9 +174,8 @@ func (h *GatewayHandler) releaseSelectedSlotForSessionWait(selection *service.Ac
 		if maxWaiting <= 0 {
 			maxWaiting = 100
 		}
-		selection.WaitPlan = &service.AccountWaitPlan{
-			AccountID: selection.Account.ID, MaxConcurrency: selection.Account.Concurrency,
-			Timeout: timeout, MaxWaiting: maxWaiting,
-		}
+		// Inherit the market admission class (a buyer re-acquires a buyer
+		// lease, never an owner/platform one).
+		selection.WaitPlan = service.NewFallbackWaitPlan(selection, timeout, maxWaiting)
 	}
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -100,6 +102,8 @@ type AcquireResult struct {
 	// APIKeyFull is set when Acquired is false because the API key, not the
 	// user, has no free slot.
 	APIKeyFull bool
+	// LeaseID is the request id of a market buyer lease (empty otherwise).
+	LeaseID string
 }
 
 // SlotAcquireOutcome is the result of a combined user + API key acquire.
@@ -417,4 +421,114 @@ func (s *ConcurrencyService) GetAccountConcurrencyBatch(ctx context.Context, acc
 		return result, nil
 	}
 	return s.cache.GetAccountConcurrencyBatch(ctx, accountIDs)
+}
+
+// AcquireAccountBuyerSlot takes a market buyer lease: atomically one member
+// in the account's total set and in its buyer set, iff total < totalMax and
+// buyers < buyerMax. Unlike AcquireAccountSlot a non-positive limit is never
+// "unlimited": it is refused. The lease is renewed in both sets while held
+// (a stream may outlive the slot TTL) and released from both sets.
+func (s *ConcurrencyService) AcquireAccountBuyerSlot(ctx context.Context, accountID int64, totalMax, buyerMax int) (*AcquireResult, error) {
+	if s == nil || totalMax < 1 || buyerMax < 1 || buyerMax > totalMax {
+		return &AcquireResult{}, nil
+	}
+	cache, ok := s.cache.(MarketSlotCache)
+	if !ok {
+		return &AcquireResult{}, nil
+	}
+	requestID := generateRequestID()
+	acquired, err := cache.AcquireAccountBuyerSlot(ctx, accountID, totalMax, buyerMax, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return &AcquireResult{}, nil
+	}
+	stop := make(chan struct{})
+	var once sync.Once
+	go renewBuyerLease(cache, accountID, requestID, stop)
+	return &AcquireResult{
+		Acquired: true,
+		LeaseID:  requestID,
+		ReleaseFunc: func() {
+			once.Do(func() {
+				close(stop)
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := cache.ReleaseAccountBuyerSlot(bgCtx, accountID, requestID); err != nil {
+					logger.LegacyPrintf("service.concurrency", "Warning: failed to release buyer slot for %d (req=%s): %v", accountID, requestID, err)
+				}
+			})
+		},
+	}, nil
+}
+
+// buyerLeaseRenewInterval returns a third of the slot TTL (at least 1s).
+func buyerLeaseRenewInterval(cache MarketSlotCache) time.Duration {
+	ttl := time.Duration(cache.SlotTTLSeconds()) * time.Second
+	if ttl <= 0 {
+		ttl = time.Duration(defaultBuyerLeaseTTLSeconds) * time.Second
+	}
+	if interval := ttl / 3; interval > time.Second {
+		return interval
+	}
+	return time.Second
+}
+
+const defaultBuyerLeaseTTLSeconds = 15 * 60
+
+// maxBuyerLeaseRenewal bounds renewal: a lease whose release was somehow
+// lost still expires (TTL after the last renewal) instead of living forever.
+const maxBuyerLeaseRenewal = 6 * time.Hour
+
+func renewBuyerLease(cache MarketSlotCache, accountID int64, requestID string, stop <-chan struct{}) {
+	ticker := time.NewTicker(buyerLeaseRenewInterval(cache))
+	defer ticker.Stop()
+	deadline := time.NewTimer(maxBuyerLeaseRenewal)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-deadline.C:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			present, err := cache.RenewAccountBuyerSlot(ctx, accountID, requestID)
+			cancel()
+			if err != nil {
+				logger.LegacyPrintf("service.concurrency", "Warning: failed to renew buyer slot for %d (req=%s): %v", accountID, requestID, err)
+				continue
+			}
+			if !present {
+				return
+			}
+		}
+	}
+}
+
+// RenewBuyerLease atomically refreshes a buyer lease iff it is still a
+// live member of both slot sets (one Redis call); false = lost. An empty
+// lease id is never held.
+func (s *ConcurrencyService) RenewBuyerLease(ctx context.Context, accountID int64, leaseID string) (bool, error) {
+	if s == nil || leaseID == "" {
+		return false, nil
+	}
+	cache, ok := s.cache.(MarketSlotCache)
+	if !ok {
+		return false, errors.New("buyer slot cache unavailable")
+	}
+	return cache.RenewAccountBuyerSlot(ctx, accountID, leaseID)
+}
+
+// GetAccountBuyerConcurrencyBatch returns live buyer leases per account.
+func (s *ConcurrencyService) GetAccountBuyerConcurrencyBatch(ctx context.Context, accountIDs []int64) (map[int64]int, error) {
+	if s == nil {
+		return nil, errors.New("concurrency service unavailable")
+	}
+	cache, ok := s.cache.(MarketSlotCache)
+	if !ok {
+		return nil, errors.New("buyer slot cache unavailable")
+	}
+	return cache.GetAccountBuyerConcurrencyBatch(ctx, accountIDs)
 }

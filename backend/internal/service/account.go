@@ -78,14 +78,16 @@ type Account struct {
 	SessionWindowStatus string
 
 	Proxy *Proxy
-	// AccountGroups / GroupIDs / Groups are the dispatchable (admin)
-	// memberships. MarketGroupIDs are the owner's market listings
-	// (account_groups.source = 'market'), never dispatchable in P3a part 1;
-	// an account with one is not "ungrouped" either.
+	// AccountGroups / GroupIDs / Groups are the admin memberships.
+	// MarketGroupIDs are the owner's market listings (account_groups.source
+	// = 'market'): dispatchable only on the market buyer path of that tier
+	// (see market_dispatch.go); an account with one is not "ungrouped".
+	// MarketListing is the listing snapshot of a listed account.
 	AccountGroups  []AccountGroup
 	GroupIDs       []int64
 	Groups         []*Group
-	MarketGroupIDs []int64 `json:"market_group_ids,omitempty"`
+	MarketGroupIDs []int64               `json:"market_group_ids,omitempty"`
+	MarketListing  *AccountMarketListing `json:"market_listing,omitempty"`
 
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string

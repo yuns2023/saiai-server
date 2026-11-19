@@ -144,6 +144,10 @@ type CarpoolDeviceRecord struct {
 	LastRuntime        string `json:"last_runtime,omitempty"`
 	LastRuntimeVersion string `json:"last_runtime_version,omitempty"`
 	LastSDKVersion     string `json:"last_sdk_version,omitempty"`
+	// Class is the market admission class the device was first admitted
+	// under on a listed account ("owner" | "buyer"). Empty = recorded before
+	// the market or on a non-market path; treated as "buyer".
+	Class string `json:"class,omitempty"`
 }
 
 type CarpoolOverflowRecord struct {
@@ -785,6 +789,36 @@ func (s *IdentityService) EnsureCarpoolDeviceAllowed(ctx context.Context, accoun
 		account.GetClaudeOAuthCarpoolDeviceLimit(),
 		time.Now().Unix(),
 	)
+}
+
+// EnsureCarpoolDeviceAllowedMarket is the device admission of a listed
+// account on the market owner/buyer path (class-aware, see
+// MarketCarpoolAdmissionCache). Unlike the plain path, an unidentified
+// device or a missing class-aware registry is an error, and an account with
+// unlimited devices is refused (market accounts must have a finite device
+// limit).
+func (s *IdentityService) EnsureCarpoolDeviceAllowedMarket(ctx context.Context, account *Account, originalMetadataUserID string, headers http.Header, adm MarketDeviceAdmission, apiKeys ...*APIKey) (*CarpoolDeviceRecord, error) {
+	if account == nil || account.IsClaudeOAuthCarpoolUnlimitedDevices() {
+		return nil, ErrClaudeOAuthCarpoolDevicesFull
+	}
+	originalDeviceID := oauthSlotSource(originalMetadataUserID)
+	if originalDeviceID == "" {
+		return nil, ErrMarketDeviceUnidentified
+	}
+	cache, ok := s.cache.(MarketCarpoolAdmissionCache)
+	if !ok {
+		return nil, errors.New("market device registry unavailable")
+	}
+	hints := ExtractClientHints(headers)
+	if len(apiKeys) > 0 {
+		hints.Owner = claudeDeviceOwnerFromAPIKey(apiKeys[0])
+	}
+	var policy *CarpoolAdmissionPolicy
+	if account.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		p := account.CarpoolAdmissionPolicy()
+		policy = &p
+	}
+	return cache.GetOrCreateCarpoolDeviceMarket(ctx, account.ID, originalDeviceID, hints, account.GetClaudeOAuthCarpoolDeviceLimit(), time.Now().Unix(), policy, adm)
 }
 
 func (s *IdentityService) EnsureSingleDeviceAdmissionAllowed(ctx context.Context, account *Account, originalMetadataUserID string, headers http.Header) error {

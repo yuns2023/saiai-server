@@ -672,7 +672,10 @@ func TestMarketListingAdminBindingPathsKeepMarketRows(t *testing.T) {
 	require.Equal(t, service.MarketListingStatusListed, marketListingState(t, f, acc).Status)
 }
 
-func TestMarketListedAccountNotSchedulable(t *testing.T) {
+// Scheduling reads by group return the market member too (the gateway's
+// market classification decides per request); admin views stay admin-only
+// and a listed account is never ungrouped.
+func TestMarketListedAccountSchedulingReads(t *testing.T) {
 	ctx := context.Background()
 	f := newMarketFixture(t)
 	owner := f.user(t)
@@ -695,13 +698,26 @@ func TestMarketListedAccountNotSchedulable(t *testing.T) {
 	}
 	byGroup, err := f.accounts.ListSchedulableByGroupID(ctx, tier)
 	require.NoError(t, err)
-	require.Equal(t, []int64{selfRun}, ids(byGroup), "market membership is not dispatchable in P3a part 1")
+	require.ElementsMatch(t, []int64{listed, selfRun}, ids(byGroup), "scheduling reads include the market member")
 	byGroupPlatform, err := f.accounts.ListSchedulableByGroupIDAndPlatform(ctx, tier, service.PlatformAnthropic)
 	require.NoError(t, err)
-	require.Equal(t, []int64{selfRun}, ids(byGroupPlatform))
+	require.ElementsMatch(t, []int64{listed, selfRun}, ids(byGroupPlatform))
 	byGroupPlatforms, err := f.accounts.ListSchedulableByGroupIDAndPlatforms(ctx, tier, []string{service.PlatformAnthropic})
 	require.NoError(t, err)
-	require.Equal(t, []int64{selfRun}, ids(byGroupPlatforms))
+	require.ElementsMatch(t, []int64{listed, selfRun}, ids(byGroupPlatforms))
+	for _, a := range byGroupPlatforms {
+		switch a.ID {
+		case listed:
+			require.Empty(t, a.GroupIDs, "the market row is not an admin membership")
+			require.Equal(t, []int64{tier}, a.MarketGroupIDs)
+			require.NotNil(t, a.MarketListing)
+			require.Equal(t, tier, a.MarketListing.GroupID)
+			require.Equal(t, owner, a.MarketListing.OwnerUserID)
+			require.Equal(t, marketTestDefaults(), a.MarketListing.Protection)
+		case selfRun:
+			require.Nil(t, a.MarketListing)
+		}
+	}
 	byGroupAll, err := f.accounts.ListByGroup(ctx, tier)
 	require.NoError(t, err)
 	require.Equal(t, []int64{selfRun}, ids(byGroupAll))
@@ -716,6 +732,7 @@ func TestMarketListedAccountNotSchedulable(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, loaded.AccountGroups)
 	require.Equal(t, []int64{tier}, loaded.MarketGroupIDs)
+	require.NotNil(t, loaded.MarketListing)
 	// Admin views of a group list and count every member (admin bindings
 	// and market listings); only scheduling reads filter.
 	page, _, err := f.accounts.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, "", "", "", "", tier)
