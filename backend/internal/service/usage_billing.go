@@ -44,6 +44,13 @@ type UsageBillingCommand struct {
 	// Settlement feeds the shadow settlement event. It is not part of the
 	// request fingerprint.
 	Settlement *UsageSettlementInput
+
+	// MarketPath is frozen from the successful attempt when it was admitted
+	// on the market (buyer) path, on the command itself so it survives a
+	// missing Settlement: MarketPath with Settlement == nil or
+	// Settlement.Market == nil is an integrity error (whole charge rolls
+	// back). Not part of the request fingerprint (BE3 consumes it).
+	MarketPath bool
 }
 
 func (c *UsageBillingCommand) Normalize() {

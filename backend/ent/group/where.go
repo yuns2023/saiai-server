@@ -95,6 +95,11 @@ func HostedUsageEnabled(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldHostedUsageEnabled, v))
 }
 
+// MarketTier applies equality check predicate on the "market_tier" field. It's identical to MarketTierEQ.
+func MarketTier(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMarketTier, v))
+}
+
 // ShowAccountQuota applies equality check predicate on the "show_account_quota" field. It's identical to ShowAccountQuotaEQ.
 func ShowAccountQuota(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldShowAccountQuota, v))
@@ -633,6 +638,16 @@ func HostedUsageEnabledEQ(v bool) predicate.Group {
 // HostedUsageEnabledNEQ applies the NEQ predicate on the "hosted_usage_enabled" field.
 func HostedUsageEnabledNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldHostedUsageEnabled, v))
+}
+
+// MarketTierEQ applies the EQ predicate on the "market_tier" field.
+func MarketTierEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMarketTier, v))
+}
+
+// MarketTierNEQ applies the NEQ predicate on the "market_tier" field.
+func MarketTierNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldMarketTier, v))
 }
 
 // ShowAccountQuotaEQ applies the EQ predicate on the "show_account_quota" field.

@@ -48,6 +48,9 @@ func (Group) Fields() []ent.Field {
 		field.Bool("is_exclusive").
 			Default(false),
 		field.Bool("hosted_usage_enabled").Default(false),
+		// market_tier: admin-designated sharing tier (migration 134 CHECK:
+		// standard, not hosted, rate > 0, anthropic).
+		field.Bool("market_tier").Default(false),
 		field.Bool("show_account_quota").
 			Default(false).
 			Comment("允许专属分组用户查看账号额度快照"),

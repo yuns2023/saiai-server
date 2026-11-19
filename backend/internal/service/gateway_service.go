@@ -15,6 +15,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3033,12 +3034,16 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 		if currentID != *groupID && group.UsesHostedUsage() {
 			return nil, nil, ErrClaudeCodeOnly
 		}
+		// Same for market tiers: a fallback hop may not enter one.
+		if currentID != *groupID && group.MarketTier {
+			return nil, nil, ErrClaudeCodeOnly
+		}
 
 		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
 			return group, &currentID, nil
 		}
 
-		if group.FallbackGroupID == nil || smartSwitchContext(ctx) || group.UsesHostedUsage() {
+		if group.FallbackGroupID == nil || smartSwitchContext(ctx) || group.UsesHostedUsage() || group.MarketTier {
 			return nil, nil, ErrClaudeCodeOnly
 		}
 		currentID = *group.FallbackGroupID
@@ -3101,8 +3106,70 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	// candidates there, whatever the source (snapshot, stale bucket, DB).
 	if s.isRunModeSimple() {
 		accounts = withoutSelfOnboarded(accounts)
+	} else {
+		// A snapshot bucket can lag a market listing (rebuilds are
+		// throttled); the cached account copy already carries it.
+		accounts = withoutMarketMembership(accounts, groupID)
 	}
 	return accounts, useMixed, err
+}
+
+// withoutMarketMembership drops candidates that reach this group context
+// only through a market listing (P3a part 1: market memberships are never
+// dispatchable; a market-only account is not ungrouped). The market
+// selection part replaces this with the admission classification.
+func withoutMarketMembership(accounts []Account, groupID *int64) []Account {
+	var out []Account
+	for i := range accounts {
+		if !marketMembershipOnly(&accounts[i], groupID) {
+			if out != nil {
+				out = append(out, accounts[i])
+			}
+			continue
+		}
+		if out == nil {
+			// Allocate only when something is dropped (the common path
+			// returns the input unchanged).
+			out = make([]Account, 0, len(accounts)-1)
+			out = append(out, accounts[:i]...)
+		}
+	}
+	if out == nil {
+		return accounts
+	}
+	return out
+}
+
+// marketMembershipOnly: a listed account (MarketGroupIDs non-empty) is a
+// candidate only through a current admin binding of the requested group,
+// never in the ungrouped context. Accounts without market rows: false.
+func marketMembershipOnly(account *Account, groupID *int64) bool {
+	if account == nil || len(account.MarketGroupIDs) == 0 {
+		return false
+	}
+	if groupID == nil {
+		return true
+	}
+	return !slices.Contains(account.GroupIDs, *groupID)
+}
+
+// marketMembershipChanged: the fresh copy of a listed candidate no longer
+// has the memberships it was selected with (list → use window).
+func marketMembershipChanged(selected, fresh *Account) bool {
+	if selected == nil || fresh == nil || (len(selected.MarketGroupIDs) == 0 && len(fresh.MarketGroupIDs) == 0) {
+		return false
+	}
+	return !sameInt64Set(selected.MarketGroupIDs, fresh.MarketGroupIDs) || !sameInt64Set(selected.GroupIDs, fresh.GroupIDs)
+}
+
+func sameInt64Set(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	x, y := slices.Clone(a), slices.Clone(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(x, y)
 }
 
 func (s *GatewayService) isRunModeSimple() bool {
@@ -3340,7 +3407,7 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 	if groupID == nil {
 		// 无分组的 API Key 只能使用未分组的账号；自助托管号只经号主专属组调度
 		// （专属组被删除后不会落入未分组池）。
-		return len(account.AccountGroups) == 0 && !account.SelfOnboarded
+		return len(account.AccountGroups) == 0 && len(account.MarketGroupIDs) == 0 && !account.SelfOnboarded
 	}
 	for _, ag := range account.AccountGroups {
 		if ag.GroupID == *groupID {
@@ -3685,6 +3752,9 @@ func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Cont
 			return nil
 		}
 		fresh = current
+	}
+	if !s.isRunModeSimple() && marketMembershipChanged(account, fresh) {
+		return nil
 	}
 	if !s.isAccountSchedulableForSelection(ctx, fresh) {
 		return nil

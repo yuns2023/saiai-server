@@ -412,6 +412,11 @@ func (s *OpsService) executePinnedRetry(ctx context.Context, reqType opsRetryReq
 	if !account.IsSchedulable() {
 		return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "account is not schedulable"}
 	}
+	// Pilot: a market-listed account is never used by a pinned retry (it
+	// would bypass the market admission).
+	if len(account.MarketGroupIDs) > 0 {
+		return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account is listed on the sharing market"}
+	}
 	if errorLog.GroupID != nil && *errorLog.GroupID > 0 {
 		if !containsInt64(account.GroupIDs, *errorLog.GroupID) {
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account is not in the same group as the original request"}

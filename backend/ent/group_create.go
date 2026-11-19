@@ -134,6 +134,20 @@ func (_c *GroupCreate) SetNillableHostedUsageEnabled(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetMarketTier sets the "market_tier" field.
+func (_c *GroupCreate) SetMarketTier(v bool) *GroupCreate {
+	_c.mutation.SetMarketTier(v)
+	return _c
+}
+
+// SetNillableMarketTier sets the "market_tier" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableMarketTier(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetMarketTier(*v)
+	}
+	return _c
+}
+
 // SetShowAccountQuota sets the "show_account_quota" field.
 func (_c *GroupCreate) SetShowAccountQuota(v bool) *GroupCreate {
 	_c.mutation.SetShowAccountQuota(v)
@@ -922,6 +936,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultHostedUsageEnabled
 		_c.mutation.SetHostedUsageEnabled(v)
 	}
+	if _, ok := _c.mutation.MarketTier(); !ok {
+		v := group.DefaultMarketTier
+		_c.mutation.SetMarketTier(v)
+	}
 	if _, ok := _c.mutation.ShowAccountQuota(); !ok {
 		v := group.DefaultShowAccountQuota
 		_c.mutation.SetShowAccountQuota(v)
@@ -1077,6 +1095,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.HostedUsageEnabled(); !ok {
 		return &ValidationError{Name: "hosted_usage_enabled", err: errors.New(`ent: missing required field "Group.hosted_usage_enabled"`)}
+	}
+	if _, ok := _c.mutation.MarketTier(); !ok {
+		return &ValidationError{Name: "market_tier", err: errors.New(`ent: missing required field "Group.market_tier"`)}
 	}
 	if _, ok := _c.mutation.ShowAccountQuota(); !ok {
 		return &ValidationError{Name: "show_account_quota", err: errors.New(`ent: missing required field "Group.show_account_quota"`)}
@@ -1277,6 +1298,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.HostedUsageEnabled(); ok {
 		_spec.SetField(group.FieldHostedUsageEnabled, field.TypeBool, value)
 		_node.HostedUsageEnabled = value
+	}
+	if value, ok := _c.mutation.MarketTier(); ok {
+		_spec.SetField(group.FieldMarketTier, field.TypeBool, value)
+		_node.MarketTier = value
 	}
 	if value, ok := _c.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
@@ -1742,6 +1767,18 @@ func (u *GroupUpsert) SetHostedUsageEnabled(v bool) *GroupUpsert {
 // UpdateHostedUsageEnabled sets the "hosted_usage_enabled" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateHostedUsageEnabled() *GroupUpsert {
 	u.SetExcluded(group.FieldHostedUsageEnabled)
+	return u
+}
+
+// SetMarketTier sets the "market_tier" field.
+func (u *GroupUpsert) SetMarketTier(v bool) *GroupUpsert {
+	u.Set(group.FieldMarketTier, v)
+	return u
+}
+
+// UpdateMarketTier sets the "market_tier" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateMarketTier() *GroupUpsert {
+	u.SetExcluded(group.FieldMarketTier)
 	return u
 }
 
@@ -2734,6 +2771,20 @@ func (u *GroupUpsertOne) SetHostedUsageEnabled(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateHostedUsageEnabled() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateHostedUsageEnabled()
+	})
+}
+
+// SetMarketTier sets the "market_tier" field.
+func (u *GroupUpsertOne) SetMarketTier(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMarketTier(v)
+	})
+}
+
+// UpdateMarketTier sets the "market_tier" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateMarketTier() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMarketTier()
 	})
 }
 
@@ -4030,6 +4081,20 @@ func (u *GroupUpsertBulk) SetHostedUsageEnabled(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateHostedUsageEnabled() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateHostedUsageEnabled()
+	})
+}
+
+// SetMarketTier sets the "market_tier" field.
+func (u *GroupUpsertBulk) SetMarketTier(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMarketTier(v)
+	})
+}
+
+// UpdateMarketTier sets the "market_tier" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateMarketTier() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMarketTier()
 	})
 }
 

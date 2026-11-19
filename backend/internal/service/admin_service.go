@@ -140,6 +140,7 @@ type CreateGroupInput struct {
 	ModelRateMultipliers map[string]float64
 	ShowAccountQuota     bool
 	HostedUsageEnabled   bool
+	MarketTier           bool
 	IsExclusive          bool
 	RequiredLevelID      *int64
 	SubscriptionType     string   // standard/subscription
@@ -208,6 +209,7 @@ type UpdateGroupInput struct {
 	ModelRateMultipliers *map[string]float64
 	ShowAccountQuota     *bool
 	HostedUsageEnabled   *bool
+	MarketTier           *bool
 	IsExclusive          *bool
 	RequiredLevelID      *int64
 	Status               string
@@ -726,6 +728,10 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldIsTrusted := user.IsTrusted
 	oldPaygDiscount := user.PaygDiscountRate()
 
+	if err := s.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(input.GroupRates)); err != nil {
+		return nil, err
+	}
+
 	if err := validatePaygDiscountMultiplier(input.PaygDiscountMultiplier); err != nil {
 		return nil, err
 	}
@@ -816,9 +822,18 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		return nil, err
 	}
 	// 同步用户专属分组倍率
+	var rateErr error
 	if input.GroupRates != nil && s.userGroupRateRepo != nil {
 		if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
-			logger.LegacyPrintf("service.admin", "failed to sync user group rates: user_id=%d err=%v", user.ID, err)
+			// A market tier rejection (a concurrent promotion after the check
+			// above) is reported after the committed user change is finished
+			// (cache invalidation, concurrency record); other failures keep
+			// the old log-only path.
+			if errors.Is(err, ErrMarketTierRateOverride) {
+				rateErr = err
+			} else {
+				logger.LegacyPrintf("service.admin", "failed to sync user group rates: user_id=%d err=%v", user.ID, err)
+			}
 		}
 	}
 
@@ -832,6 +847,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		code, err := GenerateRedeemCode()
 		if err != nil {
 			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
+			if rateErr != nil {
+				return nil, rateErr
+			}
 			return user, nil
 		}
 		adjustmentRecord := &RedeemCode{
@@ -848,6 +866,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	if rateErr != nil {
+		return nil, rateErr
+	}
 	return user, nil
 }
 
@@ -1174,6 +1195,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ModelRateMultipliers:             modelRateMultipliers,
 		ShowAccountQuota:                 input.ShowAccountQuota && input.IsExclusive,
 		HostedUsageEnabled:               input.HostedUsageEnabled,
+		MarketTier:                       input.MarketTier,
 		IsExclusive:                      input.IsExclusive,
 		RequiredLevelID:                  input.RequiredLevelID,
 		Status:                           StatusActive,
@@ -1222,6 +1244,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ClaudeEntrypointAllowlist:        claudeEntrypointAllowlist,
 	}
 	if err := group.ValidateHostedUsage(); err != nil {
+		return nil, err
+	}
+	if err := group.ValidateMarketTier(); err != nil {
 		return nil, err
 	}
 	if err := s.groupRepo.Create(ctx, group); err != nil {
@@ -1352,6 +1377,11 @@ func (s *adminServiceImpl) validateFallbackGroup(ctx context.Context, currentGro
 		if fallbackGroup.UsesHostedUsage() {
 			return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted groups cannot be fallback groups")
 		}
+		// A fallback chain may not enter a market tier (the sale would be
+		// priced in the key's group but served from the tier).
+		if fallbackGroup.MarketTier {
+			return ErrMarketTierFallback
+		}
 
 		// 降级分组不能启用 claude_code_only，否则会造成死循环
 		if nextID == fallbackGroupID && fallbackGroup.ClaudeCodeOnly {
@@ -1392,6 +1422,9 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 	}
 	if fallbackGroup.UsesHostedUsage() {
 		return infraerrors.BadRequest("INVALID_HOSTED_USAGE", "Hosted groups cannot be fallback groups")
+	}
+	if fallbackGroup.MarketTier {
+		return ErrMarketTierFallback
 	}
 	if fallbackGroup.SubscriptionType == SubscriptionTypeSubscription {
 		return fmt.Errorf("fallback group cannot be subscription type")
@@ -1436,6 +1469,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.HostedUsageEnabled != nil {
 		group.HostedUsageEnabled = *input.HostedUsageEnabled
+	}
+	if input.MarketTier != nil {
+		group.MarketTier = *input.MarketTier
 	}
 	if input.ShowAccountQuota != nil {
 		group.ShowAccountQuota = *input.ShowAccountQuota
@@ -1657,9 +1693,24 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if err := group.ValidateHostedUsage(); err != nil {
 		return nil, err
 	}
+	if err := s.validateMarketTierGroup(ctx, group); err != nil {
+		return nil, err
+	}
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err
 	}
+	// The group row is committed: invalidate the Key auth snapshots even if
+	// the account copy below fails.
+	authInvalidated := false
+	defer func() {
+		if !authInvalidated && s.authCacheInvalidator != nil {
+			// Independent of the request context (it may be the reason the
+			// copy below failed).
+			invCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(invCtx, id)
+		}
+	}()
 
 	// 如果指定了复制账号的源分组，同步绑定（替换当前分组的账号）
 	if len(input.CopyAccountsFromGroupIDs) > 0 {
@@ -1711,6 +1762,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
 	}
+	authInvalidated = true
 	return group, nil
 }
 
@@ -1777,6 +1829,13 @@ func (s *adminServiceImpl) ClearGroupRateMultipliers(ctx context.Context, groupI
 func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, groupID int64, entries []GroupRateMultiplierInput) error {
 	if s.userGroupRateRepo == nil {
 		return nil
+	}
+	rates := make([]marketTierRateCheck, 0, len(entries))
+	for _, e := range entries {
+		rates = append(rates, marketTierRateCheck{groupID: groupID, rate: e.RateMultiplier})
+	}
+	if err := s.validateMarketTierRateOverrides(ctx, rates); err != nil {
+		return err
 	}
 	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)
 }
@@ -2947,6 +3006,9 @@ func (s *adminServiceImpl) checkImmutableHistoryRecord(ctx context.Context, code
 	}
 	if IsRedeemPurchaseRecordType(code.Type) {
 		return ErrRedeemPurchaseRecordImmutable
+	}
+	if IsMarketEarningRecordType(code.Type) {
+		return ErrMarketEarningRecordImmutable
 	}
 	purchased, err := s.redeemCodeRepo.IsPurchased(ctx, code.ID)
 	if err != nil {

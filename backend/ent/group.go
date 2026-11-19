@@ -36,6 +36,8 @@ type Group struct {
 	IsExclusive bool `json:"is_exclusive,omitempty"`
 	// HostedUsageEnabled holds the value of the "hosted_usage_enabled" field.
 	HostedUsageEnabled bool `json:"hosted_usage_enabled,omitempty"`
+	// MarketTier holds the value of the "market_tier" field.
+	MarketTier bool `json:"market_tier,omitempty"`
 	// 允许专属分组用户查看账号额度快照
 	ShowAccountQuota bool `json:"show_account_quota,omitempty"`
 	// 使用该分组所需的最低用户等级；为空时保留原公开/专属规则
@@ -255,7 +257,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case group.FieldModelRouting, group.FieldBlockedModelPatterns, group.FieldModelRateMultipliers, group.FieldSupportedModelScopes, group.FieldInputModerationCategories, group.FieldInputModerationPolicy, group.FieldClaudeEntrypointAllowlist:
 			values[i] = new([]byte)
-		case group.FieldIsExclusive, group.FieldHostedUsageEnabled, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser, group.FieldCodexCnTimezoneGuard:
+		case group.FieldIsExclusive, group.FieldHostedUsageEnabled, group.FieldMarketTier, group.FieldShowAccountQuota, group.FieldClaudeCodeOnly, group.FieldAllowClaudeContext1mBeta, group.FieldClaudeOauthRequestGateDisabled, group.FieldModelRoutingEnabled, group.FieldMcpXMLInject, group.FieldInputModerationEnabled, group.FieldInputModerationAutoDisableUser, group.FieldCodexCnTimezoneGuard:
 			values[i] = new(sql.NullBool)
 		case group.FieldRateMultiplier, group.FieldFiveHourLimitUsd, group.FieldDailyLimitUsd, group.FieldWeeklyLimitUsd, group.FieldMonthlyLimitUsd, group.FieldSubscriptionRevenueRate, group.FieldImagePrice1k, group.FieldImagePrice2k, group.FieldImagePrice4k, group.FieldSoraImagePrice360, group.FieldSoraImagePrice540, group.FieldSoraVideoPricePerRequest, group.FieldSoraVideoPricePerRequestHd:
 			values[i] = new(sql.NullFloat64)
@@ -335,6 +337,12 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field hosted_usage_enabled", values[i])
 			} else if value.Valid {
 				_m.HostedUsageEnabled = value.Bool
+			}
+		case group.FieldMarketTier:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field market_tier", values[i])
+			} else if value.Valid {
+				_m.MarketTier = value.Bool
 			}
 		case group.FieldShowAccountQuota:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -767,6 +775,9 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("hosted_usage_enabled=")
 	builder.WriteString(fmt.Sprintf("%v", _m.HostedUsageEnabled))
+	builder.WriteString(", ")
+	builder.WriteString("market_tier=")
+	builder.WriteString(fmt.Sprintf("%v", _m.MarketTier))
 	builder.WriteString(", ")
 	builder.WriteString("show_account_quota=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ShowAccountQuota))

@@ -149,7 +149,8 @@ func (s *HostedAccountService) groupHasOnlyViewer(ctx context.Context, groupID, 
 // hostedAccountUsedOnlyBy reports whether no other group, carpool user or
 // carpool key owner can route requests to the account.
 func hostedAccountUsedOnlyBy(account *Account, groupID, userID int64) bool {
-	if len(account.GroupIDs) == 0 {
+	// A market listing sells the account to other users.
+	if len(account.GroupIDs) == 0 || len(account.MarketGroupIDs) > 0 {
 		return false
 	}
 	for _, id := range account.GroupIDs {
