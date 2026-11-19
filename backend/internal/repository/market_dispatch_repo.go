@@ -55,8 +55,8 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 // one rerun on 40001); evaluate runs inside its check (pure, may run twice).
 //
 // Owner / platform paths: the same reads in a read-only REPEATABLE READ
-// transaction, plus the owner's hosted_owner_groups mapping and the group's
-// hosted/exclusive flags; nothing is written.
+// transaction, plus (owner class) the owner-group predicate
+// (marketOwnerGroupQuery); nothing is written.
 func (r *marketListingRepository) AdmitMarketCandidate(ctx context.Context, req *service.MarketAdmissionRequest, evaluate func(*service.MarketAuthoritativeFacts) string) (*service.MarketAdmissionVerdict, error) {
 	if req == nil || evaluate == nil {
 		return nil, errors.New("invalid market admission request")
@@ -136,6 +136,35 @@ func (r *marketListingRepository) marketEnabled(ctx context.Context, q sqlQuerye
 	return value.Valid && value.String == "true", nil
 }
 
+// marketOwnerGroupQuery ($1 group, $2 authenticated user) is the owner-path
+// group predicate, for P2c-mapped and admin-built groups alike:
+//   - the group is live, active, Anthropic, standard (not a subscription),
+//     hosted-usage, exclusive, not a market tier, with a finite non-negative
+//     fee rate (Group.UsesHostedUsage; numeric NaN compares above every
+//     number, so it is excluded explicitly; the column cannot hold infinity);
+//   - the user has an allowed row and no other user has one;
+//   - hosted_owner_groups does not map the group to another user;
+//   - every live member account (any source) is owned by the user (a
+//     platform account without an owner fails).
+//
+// The account's own admin membership, owner and owner status are checked
+// by EvaluateMarketAdmission on the facts of the same snapshot.
+const marketOwnerGroupQuery = `
+	SELECT EXISTS (
+		SELECT 1 FROM groups g
+		WHERE g.id = $1 AND g.deleted_at IS NULL AND g.status = 'active'
+			AND g.platform = 'anthropic' AND g.subscription_type = 'standard'
+			AND g.hosted_usage_enabled AND g.is_exclusive AND NOT g.market_tier
+			AND g.rate_multiplier >= 0 AND g.rate_multiplier <> 'NaN'::numeric
+			AND EXISTS (SELECT 1 FROM user_allowed_groups u WHERE u.group_id = g.id AND u.user_id = $2)
+			AND NOT EXISTS (SELECT 1 FROM user_allowed_groups u WHERE u.group_id = g.id AND u.user_id <> $2)
+			AND NOT EXISTS (SELECT 1 FROM hosted_owner_groups h WHERE h.group_id = g.id AND h.user_id <> $2)
+			AND NOT EXISTS (
+				SELECT 1 FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
+				WHERE ag.group_id = g.id AND a.deleted_at IS NULL AND a.owner_user_id IS DISTINCT FROM $2
+			)
+	)`
+
 // checkMarketCandidate is the read-only authoritative check (owner and
 // platform paths), one REPEATABLE READ snapshot.
 func (r *marketListingRepository) checkMarketCandidate(ctx context.Context, req *service.MarketAdmissionRequest, evaluate func(*service.MarketAuthoritativeFacts) string) (*service.MarketAdmissionVerdict, error) {
@@ -161,10 +190,7 @@ func (r *marketListingRepository) checkMarketCandidate(ctx context.Context, req 
 		f.OwnerPaused = account.OwnerPausedAt != nil
 		f.OwnerWithdrawRequested = account.OwnerWithdrawRequestedAt != nil
 	}
-	var (
-		membership, groupStatus, ownerStatus sql.NullString
-		hostedGroup                          sql.NullInt64
-	)
+	var membership, groupStatus, ownerStatus sql.NullString
 	err = scanSingleRow(ctx, tx, `
 		SELECT g.market_tier, g.status, g.platform, g.hosted_usage_enabled, g.is_exclusive
 		FROM groups g WHERE g.id = $1 AND g.deleted_at IS NULL`, []any{req.GroupID},
@@ -177,14 +203,18 @@ func (r *marketListingRepository) checkMarketCandidate(ctx context.Context, req 
 		f.GroupFound = true
 		f.GroupActive = groupStatus.String == service.StatusActive
 	}
-	if err := scanSingleRow(ctx, tx, `
-		SELECT (SELECT source FROM account_groups WHERE account_id = $1 AND group_id = $2),
-			(SELECT group_id FROM hosted_owner_groups WHERE user_id = $3)`,
-		[]any{req.AccountID, req.GroupID, req.AuthUserID}, &membership, &hostedGroup); err != nil {
+	if err := scanSingleRow(ctx, tx,
+		"SELECT (SELECT source FROM account_groups WHERE account_id = $1 AND group_id = $2)",
+		[]any{req.AccountID, req.GroupID}, &membership); err != nil {
 		return nil, err
 	}
 	f.MembershipSource = membership.String
-	f.HostedOwnerGroupID = hostedGroup.Int64
+	if req.Class == service.MarketClassOwner && req.AuthUserID > 0 {
+		if err := scanSingleRow(ctx, tx, marketOwnerGroupQuery,
+			[]any{req.GroupID, req.AuthUserID}, &f.OwnerGroupQualified); err != nil {
+			return nil, err
+		}
+	}
 	if f.Account != nil && f.Account.OwnerUserID != nil {
 		if err := scanSingleRow(ctx, tx, "SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL",
 			[]any{*f.Account.OwnerUserID}, &ownerStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {

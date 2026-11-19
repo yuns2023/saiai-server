@@ -219,12 +219,9 @@ func TestMarketAdmitPlatformAndOwnerPaths(t *testing.T) {
 	require.NoError(t, err)
 	ownerSel := &service.MarketSelection{Class: service.MarketClassOwner, AccountID: listed, GroupID: hosted, OwnerUserID: owner, Concurrency: 4}
 	ownerReq := &service.MarketAdmissionRequest{Class: service.MarketClassOwner, AccountID: listed, GroupID: hosted, AuthUserID: owner}
-	require.Equal(t, "not_owner", admit(t, f, ownerSel, ownerReq).Reason, "no hosted_owner_groups mapping yet")
-	_, err = integrationDB.ExecContext(ctx, "INSERT INTO hosted_owner_groups (user_id, group_id) VALUES ($1, $2)", owner, hosted)
+	require.Equal(t, "not_owner_group", admit(t, f, ownerSel, ownerReq).Reason, "the owner is not an allowed user of the group yet")
+	_, err = integrationDB.ExecContext(ctx, "INSERT INTO user_allowed_groups (user_id, group_id) VALUES ($1, $2)", owner, hosted)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM hosted_owner_groups WHERE user_id=$1", owner)
-	})
 	v = admit(t, f, ownerSel, ownerReq)
 	require.True(t, v.Admitted, v.Reason)
 	require.Nil(t, v.Admission)

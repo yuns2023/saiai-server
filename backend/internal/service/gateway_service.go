@@ -2090,6 +2090,23 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		}
 		var deviceErr error
 		marketDevice := marketDeviceAdmissionFor(ctx, account)
+		if marketDevice != nil && marketDevice.Class == MarketDeviceClassOwner {
+			// Owner path: the authoritative owner-group check runs before
+			// the device registration, so a candidate refused by this check
+			// registers no owner-class device, reclassifies nothing and
+			// consumes no cycle admission (a refusal by the pre-send check
+			// below cannot undo a registration already committed). Refused
+			// or unknown (DB error) = fail over (the lease is released, the
+			// candidate dropped), never a downgrade to the buyer or plain
+			// path.
+			if err := s.precheckMarketOwnerAdmission(ctx, account); err != nil {
+				if forCountTokens {
+					s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
+					return body, nil, ErrMarketAdmissionRejected
+				}
+				return body, nil, marketAdmissionError(ctx, err)
+			}
+		}
 		if marketDevice != nil {
 			_, deviceErr = s.identityService.EnsureCarpoolDeviceAllowedMarket(ctx, account, originalUserID, clientHeaders, *marketDevice, deviceAPIKey)
 			// The buyer path never dispatches without a device admission:

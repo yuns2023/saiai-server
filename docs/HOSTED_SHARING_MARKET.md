@@ -127,14 +127,28 @@ on (after `claude_code_only` / smart switch) and the authenticated key:
 | Class | When | Capacity | Admission row / earnings |
 |---|---|---|---|
 | **buyer** | the group is a tier and the account is listed in that tier | buyer share (below) | yes / owner earns |
-| **owner** | the account is listed, the group is the user's exclusive hosted group from `hosted_owner_groups`, the user is the current owner and the account is a member | total capacity, owner device class | no / none (owner pays the hosted fee) |
+| **owner** | the account is listed, the group is an **owner group** of the user (below), the user is the current owner, the account is an admin member, and the billed key is the user's key of that group | total capacity, owner device class | no / none (owner pays the hosted fee) |
 | **platform** | the group is a tier and the account is an admin member with no owner and not listed | the account's own capacity | no / platform keeps all |
 | **excluded** | any other combination involving a listed account: other groups, ungrouped, Simple mode, unresolvable group, pinned-mode accounts in a tier, any path without a final admission (count_tokens, Ops retries, other handlers) | never selected | — |
 
 An account that is neither on the market nor in a tier takes exactly the old
-code path. The owner path applies to admin-assigned owners only when they
-have the same `hosted_owner_groups` mapping; an owner buying through a tier
-key is a buyer (`self_purchase`), not the owner path.
+code path. An owner buying through a tier key is a buyer (`self_purchase`),
+not the owner path.
+
+**Owner group.** Checked in the database on the admission snapshot: the
+group is live, active, Anthropic, standard, hosted usage on, exclusive, not
+a tier, with a finite fee rate ≥ 0; the owner has a `user_allowed_groups`
+row and no other user has one; `hosted_owner_groups` does not map it to
+another user; every live member account (any source) is owned by the owner
+(an ownerless platform account fails). P2c groups (mapped by self-onboard
+approval) qualify, and so does an exclusive hosted group an admin builds for
+an admin-assigned (P1) owner: allow only the owner, put only that owner's
+accounts in it, and the owner's key of that group bootstraps the listed
+account (the owner's own use records the 5h/7d samples selling needs). An
+owner may have several such groups, each with its own fee rate. The check
+runs before the owner device registration (a refused candidate registers
+no device and uses no cycle admission) and again before the first send; a
+refusal or DB error fails over and is never downgraded to another path.
 
 **Final admission.** After the device check and pricing, before the first
 upstream send, a buyer attempt runs one REPEATABLE READ transaction that

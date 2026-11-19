@@ -204,10 +204,15 @@ type MarketAuthoritativeFacts struct {
 	OwnerUserStatus       string
 	LatestOwnerEventID    int64
 	LatestOwnerEventOwner *int64
-	// HostedOwnerGroupID: the authenticated user's hosted_owner_groups row.
-	HostedOwnerGroupID int64
-	MarketEnabled      bool
-	Listing            *MarketListing
+	// OwnerGroupQualified (owner class only): the scheduled group is an
+	// owner group of the authenticated user, evaluated in the same snapshot
+	// (live active Anthropic standard hosted exclusive non-tier group with a
+	// valid fee rate; the user is its only allowed user; not mapped to
+	// another user in hosted_owner_groups; every live member account is
+	// owned by the user). Admin-built groups qualify like P2c-mapped ones.
+	OwnerGroupQualified bool
+	MarketEnabled       bool
+	Listing             *MarketListing
 }
 
 type MarketAdmissionVerdict struct {
@@ -1365,8 +1370,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 			logMarketAdmission(ctx, sel, "device_not_admitted", nil)
 			return ErrMarketAdmissionRejected
 		}
-		if dispatch == nil || authUser <= 0 || dispatch.APIKey.UserID != authUser ||
-			dispatch.APIKey.GroupID == nil || *dispatch.APIKey.GroupID != sel.GroupID {
+		if !marketKeyBilledTo(dispatch, authUser, sel.GroupID) {
 			// The Key as billed must be the tier the candidate was admitted to.
 			logMarketAdmission(ctx, sel, "billing_group_mismatch", nil)
 			return ErrMarketAdmissionRejected
@@ -1399,6 +1403,11 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		req.AttemptID = uuid.NewString()
 		req.RequestRef = requestRef
 		req.APIKeyID = dispatch.APIKey.ID
+	}
+	if sel.Class == MarketClassOwner && !marketKeyBilledTo(dispatch, authUser, sel.GroupID) {
+		// The owner's own Key of the scheduled owner group pays the request.
+		logMarketAdmission(ctx, sel, "billing_group_mismatch", nil)
+		return ErrMarketAdmissionRejected
 	}
 
 	admitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
@@ -1473,6 +1482,28 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 	return nil
 }
 
+// marketKeyBilledTo: the Key that bills this request belongs to the
+// authenticated user and to the scheduled group.
+func marketKeyBilledTo(dispatch *MarketDispatch, authUser, groupID int64) bool {
+	return dispatch != nil && dispatch.APIKey != nil && authUser > 0 && dispatch.APIKey.UserID == authUser &&
+		dispatch.APIKey.GroupID != nil && *dispatch.APIKey.GroupID == groupID
+}
+
+// precheckMarketOwnerAdmission runs the owner final admission (the same
+// authoritative database check) BEFORE the owner device registration, so a
+// candidate refused by this precheck never registers an owner-class device,
+// reclassifies a device or consumes a cycle admission. A refusal or an
+// unknown result (database error) fails over like the final admission; the
+// attempt is never downgraded to a buyer or plain dispatch. The pre-send
+// final admission still runs afterwards.
+func (s *GatewayService) precheckMarketOwnerAdmission(ctx context.Context, account *Account) error {
+	attempt := marketAttemptFromContext(ctx)
+	if attempt == nil || attempt.Selection == nil || attempt.Selection.Class != MarketClassOwner {
+		return ErrMarketAdmissionRejected
+	}
+	return s.finalizeMarketAdmission(ctx, account, attempt, "")
+}
+
 func logMarketAdmission(ctx context.Context, sel *MarketSelection, reason string, err error) {
 	fields := []zap.Field{
 		zap.String("class", sel.Class),
@@ -1520,8 +1551,11 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 		if f.GroupMarketTier || !f.GroupHosted || !f.GroupExclusive || f.MembershipSource != AccountGroupSourceAdmin {
 			return "not_owner_group"
 		}
-		if acc.OwnerUserID == nil || req.AuthUserID <= 0 || *acc.OwnerUserID != req.AuthUserID || f.HostedOwnerGroupID != req.GroupID {
+		if acc.OwnerUserID == nil || req.AuthUserID <= 0 || *acc.OwnerUserID != req.AuthUserID {
 			return "not_owner"
+		}
+		if !f.OwnerGroupQualified {
+			return "not_owner_group"
 		}
 		if f.OwnerUserStatus != StatusActive {
 			return "owner_inactive"
