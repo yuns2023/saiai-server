@@ -170,6 +170,10 @@ func TestCarpoolEvictIdleHoursPolicy(t *testing.T) {
 		{name: "upper bound", value: float64(9999), set: true, want: 720},
 		{name: "huge value clamps without overflow", value: float64(1e300), set: true, want: 720},
 		{name: "blank string keeps default", value: "  ", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "binary prefix keeps default", value: "0b0", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "hex prefix keeps default", value: "0x10", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "inf string keeps default", value: "inf", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "decimal with exponent", value: " 1.2e1 ", set: true, want: 12},
 		{name: "boolean keeps default", value: false, set: true, want: DefaultCarpoolEvictIdleHours},
 		{name: "object keeps default", value: map[string]any{}, set: true, want: DefaultCarpoolEvictIdleHours},
 	}

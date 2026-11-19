@@ -3,7 +3,7 @@ import { DEFAULT_CARPOOL_EVICT_IDLE_HOURS, normalizeCarpoolEvictIdleHours } from
 
 describe('normalizeCarpoolEvictIdleHours', () => {
   it('defaults when absent or invalid', () => {
-    for (const v of [undefined, null, '', '  ', 'abc', Number.NaN, Number.POSITIVE_INFINITY, false, true, {}]) {
+    for (const v of [undefined, null, '', '  ', 'abc', '0b0', '0x10', 'Infinity', Number.NaN, Number.POSITIVE_INFINITY, false, true, {}]) {
       expect(normalizeCarpoolEvictIdleHours(v)).toBe(DEFAULT_CARPOOL_EVICT_IDLE_HOURS)
     }
   })
@@ -16,5 +16,6 @@ describe('normalizeCarpoolEvictIdleHours', () => {
     expect(normalizeCarpoolEvictIdleHours(-1)).toBe(0)
     expect(normalizeCarpoolEvictIdleHours(9999)).toBe(720)
     expect(normalizeCarpoolEvictIdleHours('12')).toBe(12)
+    expect(normalizeCarpoolEvictIdleHours(' 1.2e1 ')).toBe(12)
   })
 })

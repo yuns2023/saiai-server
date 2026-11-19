@@ -1656,7 +1656,7 @@
                   <span>
                     <span class="block text-sm font-medium text-gray-900 dark:text-white">定期开放新设备名额</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      名额大于 0 时，每周期限制新设备接纳数量，并在周期调整时按需移除最久未使用、且闲置超过设定时长的设备。0 表示不限制周期接纳数量，也不自动腾位。
+                      名额大于 0 时，每周期限制新设备接纳数量，并在周期调整时按需移除最久未使用、且闲置达到设定时长的设备。0 表示不限制周期接纳数量，也不自动腾位。
                     </span>
                   </span>
                 </label>

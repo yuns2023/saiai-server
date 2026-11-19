@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,10 @@ const CarpoolMaintenanceGenerationKey = "claude_oauth_carpool_maintenance_genera
 // explicit 0 removes the restriction (the pre-existing behavior).
 const CarpoolEvictIdleHoursKey = "claude_oauth_carpool_maintenance_evict_idle_hours"
 const DefaultCarpoolEvictIdleHours = 24
+
+// carpoolDecimalPattern is the decimal number syntax shared with the frontend
+// normalizeCarpoolEvictIdleHours.
+var carpoolDecimalPattern = regexp.MustCompile(`^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$`)
 
 type CarpoolAdmissionPolicy struct {
 	Generation string
@@ -73,8 +78,14 @@ func (a *Account) GetCarpoolEvictIdleHours() int {
 		}
 		f = parsed
 	case string:
-		// An unparseable or blank value must not silently lift the restriction.
-		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		// Only plain decimal strings count, matching the admin dialog; an
+		// unparseable, blank or prefixed (0x/0b/inf) value must not silently
+		// lift the restriction.
+		trimmed := strings.TrimSpace(v)
+		if !carpoolDecimalPattern.MatchString(trimmed) {
+			return DefaultCarpoolEvictIdleHours
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
 		if err != nil {
 			return DefaultCarpoolEvictIdleHours
 		}
