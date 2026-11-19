@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -989,13 +990,22 @@ func (r *marketListingRepository) admitMarketOnce(ctx context.Context, in *servi
 			return nil, err
 		}
 	}
-	if err := scanSingleRow(ctx, tx, "SELECT market_tier, status, platform FROM groups WHERE id = $1 AND deleted_at IS NULL",
-		[]any{in.GroupID}, &state.GroupMarketTier, &state.GroupStatus, &state.GroupPlatform); err != nil {
+	var modelRates []byte
+	if err := scanSingleRow(ctx, tx, `SELECT market_tier, status, platform, rate_multiplier, model_rate_multipliers
+		FROM groups WHERE id = $1 AND deleted_at IS NULL`, []any{in.GroupID},
+		&state.GroupMarketTier, &state.GroupStatus, &state.GroupPlatform, &state.GroupRateMultiplier, &modelRates); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 	} else {
 		state.GroupFound = true
+		// Decoded like the ent field (map[string]float64); a value ent
+		// could not load either fails the admission (no dispatch).
+		if len(modelRates) > 0 {
+			if err := json.Unmarshal(modelRates, &state.GroupModelRateMultipliers); err != nil {
+				return nil, fmt.Errorf("market admission: decode model_rate_multipliers of group %d: %w", in.GroupID, err)
+			}
+		}
 	}
 	if err := scanSingleRow(ctx, tx, `SELECT
 			COALESCE(bool_or(source = 'admin'), FALSE), COALESCE(bool_or(source = 'market'), FALSE), clock_timestamp()

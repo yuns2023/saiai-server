@@ -24,6 +24,9 @@ const (
 
 type schedulerCache struct {
 	rdb *redis.Client
+	// afterLastUsedRead is a test hook: runs between the read and the
+	// compare-and-set of UpdateLastUsed.
+	afterLastUsedRead func()
 }
 
 func NewSchedulerCache(rdb *redis.Client) service.SchedulerCache {
@@ -167,41 +170,94 @@ func (c *schedulerCache) DeleteAccount(ctx context.Context, accountID int64) err
 	return c.rdb.Del(ctx, key).Err()
 }
 
+// schedulerAccountCASScript replaces an account snapshot only when the key
+// still holds the exact JSON the caller read (KEYS[1], ARGV[1] = expected,
+// ARGV[2] = new). A missing key or any concurrent write = 0, nothing written.
+// The JSON is compared and stored as opaque strings (no cjson round trip, so
+// int64 ids and float fields keep their exact encoding).
+var schedulerAccountCASScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+	redis.call('SET', KEYS[1], ARGV[2])
+	return 1
+end
+return 0
+`)
+
+// schedulerLastUsedCASAttempts bounds the re-read loop of UpdateLastUsed.
+const schedulerLastUsedCASAttempts = 3
+
+// UpdateLastUsed sets LastUsedAt in the cached account snapshots. The cache
+// stores whole accounts, so this is a read-modify-write: each write is a
+// compare-and-set against the JSON just read, and a key that changed in
+// between (SetAccount with a newer listing / owner / status, a delete) is
+// re-read and retried instead of being overwritten with the stale copy. A
+// missing key is never recreated, and LastUsedAt never moves backwards (a
+// newer DB copy may already carry a later, more precise value). Last-used is
+// advisory: a key still contended after the bounded retries keeps its value.
 func (c *schedulerCache) UpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error {
 	if len(updates) == 0 {
 		return nil
 	}
 
-	keys := make([]string, 0, len(updates))
-	ids := make([]int64, 0, len(updates))
+	pending := make([]int64, 0, len(updates))
 	for id := range updates {
-		keys = append(keys, schedulerAccountKey(strconv.FormatInt(id, 10)))
-		ids = append(ids, id)
+		pending = append(pending, id)
 	}
 
-	values, err := c.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
-		return err
-	}
-
-	pipe := c.rdb.Pipeline()
-	for i, val := range values {
-		if val == nil {
-			continue
+	for attempt := 0; attempt < schedulerLastUsedCASAttempts && len(pending) > 0; attempt++ {
+		keys := make([]string, 0, len(pending))
+		for _, id := range pending {
+			keys = append(keys, schedulerAccountKey(strconv.FormatInt(id, 10)))
 		}
-		account, err := decodeCachedAccount(val)
+		values, err := c.rdb.MGet(ctx, keys...).Result()
 		if err != nil {
 			return err
 		}
-		account.LastUsedAt = ptrTime(updates[ids[i]])
-		updated, err := json.Marshal(account)
-		if err != nil {
+		if c.afterLastUsedRead != nil {
+			c.afterLastUsedRead()
+		}
+
+		pipe := c.rdb.Pipeline()
+		cmds := make([]*redis.Cmd, 0, len(values))
+		cmdIDs := make([]int64, 0, len(values))
+		for i, val := range values {
+			if val == nil {
+				continue
+			}
+			raw, ok := val.(string)
+			if !ok {
+				return fmt.Errorf("unexpected account cache type: %T", val)
+			}
+			account, err := decodeCachedAccount(raw)
+			if err != nil {
+				return err
+			}
+			want := updates[pending[i]]
+			if account.LastUsedAt != nil && !want.After(*account.LastUsedAt) {
+				continue
+			}
+			account.LastUsedAt = ptrTime(want)
+			updated, err := json.Marshal(account)
+			if err != nil {
+				return err
+			}
+			cmds = append(cmds, schedulerAccountCASScript.Eval(ctx, pipe, []string{keys[i]}, raw, updated))
+			cmdIDs = append(cmdIDs, pending[i])
+		}
+		if len(cmds) == 0 {
+			return nil
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
-		pipe.Set(ctx, keys[i], updated, 0)
+		pending = pending[:0]
+		for i, cmd := range cmds {
+			if n, _ := cmd.Int64(); n != 1 {
+				pending = append(pending, cmdIDs[i])
+			}
+		}
 	}
-	_, err = pipe.Exec(ctx)
-	return err
+	return nil
 }
 
 func (c *schedulerCache) TryLockBucket(ctx context.Context, bucket service.SchedulerBucket, ttl time.Duration) (bool, error) {

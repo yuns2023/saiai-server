@@ -67,6 +67,11 @@ type MarketAdmissionState struct {
 	GroupMarketTier bool
 	GroupStatus     string
 	GroupPlatform   string
+	// GroupRateMultiplier / GroupModelRateMultipliers: rate_multiplier and
+	// model_rate_multipliers of the group in the same snapshot (the final
+	// price positivity check).
+	GroupRateMultiplier       float64
+	GroupModelRateMultipliers map[string]float64
 	// Membership rows of (account, group).
 	AdminMember  bool
 	MarketMember bool
