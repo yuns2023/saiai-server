@@ -15,7 +15,9 @@ import (
 // v5: groups.claude_entrypoint_policy / claude_entrypoint_allowlist.
 // v6: api_keys.max_concurrency.
 // v7: groups.market_tier (market selection / fallback guards).
-const apiKeyAuthSnapshotSchemaVersion = 7
+// v8: groups.market_tier is now loaded by GetByKeyForAuth; v7 snapshots
+// were written with it always false (tier buyers got 503) and are rebuilt.
+const apiKeyAuthSnapshotSchemaVersion = 8
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
