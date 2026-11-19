@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -19,6 +20,11 @@ type bucketRecordingCache struct {
 	mu       sync.Mutex
 	accounts map[int64]*Account
 	rebuilt  []SchedulerBucket
+	// failOnce makes the next SetSnapshot of that bucket fail (nothing
+	// published).
+	failOnce *SchedulerBucket
+	// locks mimics the Redis rebuild lock (held until its TTL; expire()).
+	locks map[string]bool
 }
 
 func (c *bucketRecordingCache) GetAccount(_ context.Context, id int64) (*Account, error) {
@@ -46,13 +52,33 @@ func (c *bucketRecordingCache) DeleteAccount(_ context.Context, id int64) error 
 	return nil
 }
 
-func (c *bucketRecordingCache) TryLockBucket(context.Context, SchedulerBucket, time.Duration) (bool, error) {
+func (c *bucketRecordingCache) TryLockBucket(_ context.Context, b SchedulerBucket, _ time.Duration) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.locks == nil {
+		c.locks = map[string]bool{}
+	}
+	if c.locks[b.String()] {
+		return false, nil
+	}
+	c.locks[b.String()] = true
 	return true, nil
+}
+
+// expire drops every lock (their TTL ran out).
+func (c *bucketRecordingCache) expire() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.locks = nil
 }
 
 func (c *bucketRecordingCache) SetSnapshot(_ context.Context, b SchedulerBucket, _ []Account) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.failOnce != nil && *c.failOnce == b {
+		c.failOnce = nil
+		return errors.New("redis down")
+	}
 	c.rebuilt = append(c.rebuilt, b)
 	return nil
 }
@@ -195,4 +221,51 @@ func TestSchedulerAccountEventRebuildsMarketTierBuckets(t *testing.T) {
 			map[int64]*Account{accountID: listed(accountID, []int64{admin}, []int64{tier})}, nil, changed(nil))
 		require.Equal(t, []int64{0}, got)
 	})
+}
+
+// A second account event on a bucket still under the rebuild throttle (or
+// with a rebuild in flight) is not dropped: the bucket is rebuilt once the
+// lock is free (e.g. an account disabled and re-enabled within 30 s).
+func TestSchedulerThrottledBucketGetsTrailingRebuild(t *testing.T) {
+	ctx := context.Background()
+	accountID := int64(11)
+	acc := &Account{ID: accountID, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, GroupIDs: []int64{3}, MarketGroupIDs: []int64{7}}
+	cache := &bucketRecordingCache{accounts: map[int64]*Account{}}
+	svc := NewSchedulerSnapshotService(cache, nil, &snapshotEventAccountRepo{accounts: map[int64]*Account{accountID: acc}}, nil,
+		&config.Config{RunMode: config.RunModeStandard})
+	event := SchedulerOutboxEvent{EventType: SchedulerOutboxEventAccountChanged, AccountID: &accountID}
+	tier := SchedulerBucket{GroupID: 7, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}
+	count := func() int {
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		n := 0
+		for _, b := range cache.rebuilt {
+			if b == tier {
+				n++
+			}
+		}
+		return n
+	}
+
+	require.NoError(t, svc.handleOutboxEvent(ctx, event))
+	require.Equal(t, 1, count())
+	require.NoError(t, svc.handleOutboxEvent(ctx, event), "a throttled event does not stall the outbox")
+	require.Equal(t, 1, count())
+
+	svc.rebuildPendingBuckets() // still locked: stays pending
+	require.Equal(t, 1, count())
+	// The trailing rebuild fails to publish: the bucket stays pending and
+	// is retried without any new outbox event.
+	cache.expire()
+	cache.mu.Lock()
+	cache.failOnce = &tier
+	cache.mu.Unlock()
+	svc.rebuildPendingBuckets()
+	require.Equal(t, 1, count())
+	cache.expire()
+	svc.rebuildPendingBuckets()
+	require.Equal(t, 2, count(), "trailing rebuild once the lock is free")
+	cache.expire()
+	svc.rebuildPendingBuckets()
+	require.Equal(t, 2, count(), "nothing pending after the trailing rebuild")
 }

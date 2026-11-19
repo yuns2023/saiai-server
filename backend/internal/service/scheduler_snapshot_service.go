@@ -32,6 +32,10 @@ type SchedulerSnapshotService struct {
 	fallbackLimit *fallbackLimiter
 	lagMu         sync.Mutex
 	lagFailures   int
+	// pendingBuckets: rebuilds that met the bucket lock or failed to publish
+	// (see rebuildBucket).
+	pendingMu      sync.Mutex
+	pendingBuckets map[string]SchedulerBucket
 }
 
 func NewSchedulerSnapshotService(
@@ -196,6 +200,7 @@ func (s *SchedulerSnapshotService) runOutboxWorker(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			s.pollOutbox()
+			s.rebuildPendingBuckets()
 		case <-s.stopCh:
 			return
 		}
@@ -259,6 +264,41 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	}
 
 	s.checkOutboxLag(ctx, events[0], watermarkForCheck)
+}
+
+func (s *SchedulerSnapshotService) markBucketPending(bucket SchedulerBucket) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.pendingBuckets == nil {
+		s.pendingBuckets = make(map[string]SchedulerBucket)
+	}
+	s.pendingBuckets[bucket.String()] = bucket
+}
+
+func (s *SchedulerSnapshotService) clearBucketPending(bucket SchedulerBucket) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	delete(s.pendingBuckets, bucket.String())
+}
+
+// rebuildPendingBuckets retries the buckets whose rebuild met the lock or
+// failed to publish (one SETNX per pending bucket per poll; still busy =
+// stays pending). In-memory only: a restart runs the startup rebuild instead.
+func (s *SchedulerSnapshotService) rebuildPendingBuckets() {
+	s.pendingMu.Lock()
+	buckets := make([]SchedulerBucket, 0, len(s.pendingBuckets))
+	for _, bucket := range s.pendingBuckets {
+		buckets = append(buckets, bucket)
+	}
+	s.pendingMu.Unlock()
+	if len(buckets) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), outboxEventTimeout)
+	defer cancel()
+	if err := s.rebuildBuckets(ctx, buckets, "pending"); err != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] pending rebuild failed: %v", err)
+	}
 }
 
 func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event SchedulerOutboxEvent) error {
@@ -417,7 +457,8 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 // applied (nil when absent or unreadable: the event then rebuilds the
 // fresh copy's groups only, as before).
 func (s *SchedulerSnapshotService) previousCachedAccount(ctx context.Context, accountID int64) *Account {
-	if s.cache == nil {
+	if s.cache == nil || s.isRunModeSimple() {
+		// Simple mode rebuilds its single global bucket only.
 		return nil
 	}
 	account, err := s.cache.GetAccount(ctx, accountID)
@@ -542,8 +583,16 @@ func (s *SchedulerSnapshotService) rebuildBucket(ctx context.Context, bucket Sch
 		return err
 	}
 	if !ok {
+		// The lock (30 s, never released early) throttles rebuilds. The
+		// rebuild holding it may have read the database before the change
+		// that asked for this one, so the bucket is remembered and rebuilt
+		// once the lock is free (trailing rebuild) instead of being
+		// dropped: a re-enabled account must not stay missing from it.
+		s.markBucketPending(bucket)
 		return nil
 	}
+	// Any pending request is satisfied: this rebuild reads the database now.
+	s.clearBucketPending(bucket)
 
 	rebuildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -551,10 +600,14 @@ func (s *SchedulerSnapshotService) rebuildBucket(ctx context.Context, bucket Sch
 	accounts, err := s.loadAccountsFromDB(rebuildCtx, bucket, bucket.Mode == SchedulerModeMixed)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild failed: bucket=%s reason=%s err=%v", bucket.String(), reason, err)
+		// Not published: keep it pending (the request may have been the
+		// trailing rebuild of an event whose watermark already advanced).
+		s.markBucketPending(bucket)
 		return err
 	}
 	if err := s.cache.SetSnapshot(rebuildCtx, bucket, accounts); err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild cache failed: bucket=%s reason=%s err=%v", bucket.String(), reason, err)
+		s.markBucketPending(bucket)
 		return err
 	}
 	slog.Debug("[Scheduler] rebuild ok", "bucket", bucket.String(), "reason", reason, "size", len(accounts))
