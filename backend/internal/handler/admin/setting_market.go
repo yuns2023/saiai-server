@@ -20,6 +20,13 @@ type marketSettingsRequest struct {
 	MarketDefaultSampleMaxAgeMinutes *int     `json:"market_default_sample_max_age_minutes"`
 }
 
+func (r *marketSettingsRequest) present() bool {
+	return r.MarketEnabled != nil || r.MarketPlatformCutRate != nil || r.MarketEarningFreezeDays != nil ||
+		r.MarketMinConvertUSD != nil || r.MarketDefaultReservedConcurrency != nil || r.MarketDefaultReservedDevices != nil ||
+		r.MarketDefaultReservedAdmissions != nil || r.MarketDefaultCap5hPct != nil || r.MarketDefaultCap7dPct != nil ||
+		r.MarketDefaultSampleMaxAgeMinutes != nil
+}
+
 // resolveMarketSettings merges the request into the stored values and
 // validates them. An explicit 0 is kept wherever 0 is in range (cut rate,
 // freeze days, reservations). A non-empty string is the 400 message.

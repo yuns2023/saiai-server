@@ -3033,12 +3033,16 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 		if currentID != *groupID && group.UsesHostedUsage() {
 			return nil, nil, ErrClaudeCodeOnly
 		}
+		// Same for market tiers: a fallback hop may not enter one.
+		if currentID != *groupID && group.MarketTier {
+			return nil, nil, ErrClaudeCodeOnly
+		}
 
 		if !group.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
 			return group, &currentID, nil
 		}
 
-		if group.FallbackGroupID == nil || smartSwitchContext(ctx) || group.UsesHostedUsage() {
+		if group.FallbackGroupID == nil || smartSwitchContext(ctx) || group.UsesHostedUsage() || group.MarketTier {
 			return nil, nil, ErrClaudeCodeOnly
 		}
 		currentID = *group.FallbackGroupID

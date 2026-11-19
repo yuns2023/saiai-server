@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/google/uuid"
@@ -62,12 +63,18 @@ func newMarketFixture(t *testing.T) *marketFixture {
 		accountIDs := pq.Array(f.accountIDs)
 		groupIDs := pq.Array(f.groupIDs)
 		users := pq.Array(f.users)
+		// History tables reject DELETE (insert-only triggers); test cleanup
+		// bypasses triggers as the superuser.
+		if tx, err := integrationDB.BeginTx(bg, nil); err == nil {
+			_, _ = tx.ExecContext(bg, "SET LOCAL session_replication_role = replica")
+			_, _ = tx.ExecContext(bg, "DELETE FROM market_admissions WHERE account_id = ANY($1)", accountIDs)
+			_, _ = tx.ExecContext(bg, "DELETE FROM account_market_listing_events WHERE account_id = ANY($1)", accountIDs)
+			_ = tx.Commit()
+		}
 		for _, stmt := range []struct {
 			q    string
 			args []any
 		}{
-			{"DELETE FROM market_admissions WHERE account_id = ANY($1)", []any{accountIDs}},
-			{"DELETE FROM account_market_listing_events WHERE account_id = ANY($1)", []any{accountIDs}},
 			{"DELETE FROM account_market_listings WHERE account_id = ANY($1)", []any{accountIDs}},
 			{"DELETE FROM account_owner_events WHERE account_id = ANY($1)", []any{accountIDs}},
 			{"DELETE FROM scheduler_outbox WHERE account_id = ANY($1) OR group_id = ANY($2)", []any{accountIDs, groupIDs}},
@@ -363,6 +370,9 @@ func TestMarketLedgerConstraints(t *testing.T) {
 	require.Error(t, step("accrue without event", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount, available_at) VALUES (9, 'accrue', 1, NOW())`))
 	require.Error(t, step("unknown kind", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount) VALUES (9, 'bonus', 1)`))
 	require.Error(t, step("update", `UPDATE owner_earning_entries SET note = 'x' WHERE id = $1`, accrueID), "entries are insert-only")
+	require.Error(t, step("delete", `DELETE FROM owner_earning_entries WHERE kind = 'convert' AND owner_user_id = 10`), "entries are insert-only")
+	require.Error(t, step("NaN accrue", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount, settlement_event_id, available_at)
+		VALUES (11, 'accrue', 'NaN', $1, NOW())`, eventID))
 	require.NoError(t, step("wallet", `INSERT INTO owner_earning_wallets (user_id) VALUES (9)`))
 	requirePQCode(t, step("wallet twice", `INSERT INTO owner_earning_wallets (user_id) VALUES (9)`), "23505", "one wallet per user")
 }
@@ -388,6 +398,11 @@ func TestMarketAdmissionStore(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE market_admissions SET owner_user_id = 1 WHERE id = $1", got.ID)
 	require.Error(t, err, "admissions are immutable")
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM market_admissions WHERE id = $1", got.ID)
+	require.Error(t, err, "admissions are never deleted")
+	byAttempt, err := f.market.GetMarketAdmissionByAttempt(ctx, in.AttemptID)
+	require.NoError(t, err)
+	require.Equal(t, got.ID, byAttempt.ID)
 }
 
 // ---- listing lifecycle ----
@@ -420,7 +435,13 @@ func TestMarketListingBaselineOwnerEventAndList(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT new_owner_user_id FROM account_owner_events WHERE account_id = $1", acc).Scan(&newOwner))
 	require.Equal(t, owner, newOwner.Int64, "baseline owner event written on first listing")
 	require.Equal(t, []string{"admin_configure", "owner_list"}, marketEventActions(t, acc))
-	require.Equal(t, 1, marketOutboxCount(t, acc, service.SchedulerOutboxEventAccountGroupsChanged))
+	// Listing: one event rebuilds the tier, one (no group list) the
+	// account's own buckets — here the ungrouped bucket it leaves. The admin
+	// configure before it wrote one snapshot refresh.
+	require.Equal(t, 1, hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id = $1 AND event_type = $2 AND payload IS NOT NULL",
+		acc, service.SchedulerOutboxEventAccountGroupsChanged))
+	require.Equal(t, 2, hostedCountRows(t, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id = $1 AND event_type = $2 AND payload IS NULL",
+		acc, service.SchedulerOutboxEventAccountGroupsChanged))
 
 	// Listing again is a no-op; the baseline is written once.
 	l, err = f.list(acc, owner, tier)
@@ -623,6 +644,13 @@ func TestMarketListedAccountNotSchedulable(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, loaded.AccountGroups)
 	require.Equal(t, []int64{tier}, loaded.MarketGroupIDs)
+	// Admin views of a group (members, counts) are admin bindings only.
+	page, _, err := f.accounts.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, "", "", "", "", tier)
+	require.NoError(t, err)
+	require.Equal(t, []int64{selfRun}, ids(page))
+	total, _, err := f.groups.GetAccountCount(ctx, tier)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
 }
 
 func TestMarketListingOwnerLifecycleHooksUnlist(t *testing.T) {
@@ -807,6 +835,31 @@ func TestMarketListingConcurrentListAndRevoke(t *testing.T) {
 		t.Fatal("listing did not finish")
 	}
 	require.Empty(t, marketMemberships(t, acc))
+
+	// Account deletion takes the account lock first (same order as the
+	// listing writers): it waits for an in-flight owner transaction instead
+	// of deadlocking, then revokes.
+	victim := f.account(t, owner)
+	f.configure(t, victim, tier)
+	_, err = f.list(victim, owner, tier)
+	require.NoError(t, err)
+	holder, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback() }()
+	_, err = lockMarketAccountTx(ctx, holder, victim)
+	require.NoError(t, err)
+	deleted := make(chan error, 1)
+	go func() { deleted <- f.accounts.Delete(ctx, victim) }()
+	waitForLockWait(t)
+	require.NoError(t, marketUnlistAccountTx(ctx, holder, victim, service.MarketListingActionOwnerUnlist, false, service.MarketListingActorOwner, owner))
+	require.NoError(t, holder.Commit())
+	select {
+	case err := <-deleted:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("delete did not finish")
+	}
+	require.Equal(t, service.MarketListingStatusRevoked, marketListingState(t, f, victim).Status)
 
 	// Racing list and revoke: always ends revoked with no market row.
 	for i := 0; i < 5; i++ {

@@ -181,6 +181,9 @@ func TestMarketAccountIneligibleReason(t *testing.T) {
 	unlimited := carpool()
 	unlimited.Extra["claude_oauth_carpool_unlimited_devices"] = true
 	require.Equal(t, MarketReasonUnlimitedDevices, MarketAccountIneligibleReason(unlimited))
+	sessions := carpool()
+	sessions.Extra["max_sessions"] = 2
+	require.Equal(t, MarketReasonMaxSessions, MarketAccountIneligibleReason(sessions))
 }
 
 func TestValidateMarketProtectionForAccount(t *testing.T) {
@@ -254,8 +257,9 @@ func TestParseMarketSettings(t *testing.T) {
 type fakeMarketRepo struct {
 	account *Account
 	listing *MarketListing
-	tiers   []MarketTierOption
-	lastCfg *MarketAdminConfigureParams
+	tiers        []MarketTierOption
+	adminMembers []int64
+	lastCfg      *MarketAdminConfigureParams
 }
 
 func (f *fakeMarketRepo) GetListing(context.Context, int64) (*MarketListing, error) {
@@ -275,6 +279,9 @@ func (f *fakeMarketRepo) ListTierOptions(context.Context, []int64) ([]MarketTier
 }
 func (f *fakeMarketRepo) HasAdminMembership(context.Context, int64, int64) (bool, error) {
 	return false, nil
+}
+func (f *fakeMarketRepo) ListAdminMemberGroupIDs(context.Context, int64, []int64) ([]int64, error) {
+	return f.adminMembers, nil
 }
 func (f *fakeMarketRepo) AdminConfigure(_ context.Context, p MarketAdminConfigureParams) (*MarketListing, error) {
 	f.lastCfg = &p
@@ -296,7 +303,11 @@ func (f *fakeMarketRepo) OwnerSet(_ context.Context, p MarketOwnerSetParams) (*M
 		return nil, err
 	}
 	if p.Listed && p.Validate != nil {
-		if err := p.Validate(f.account); err != nil {
+		protection := MarketProtectionParams{Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}
+		if f.listing != nil {
+			protection = f.listing.Protection
+		}
+		if err := p.Validate(f.account, protection); err != nil {
 			return nil, err
 		}
 	}
@@ -359,6 +370,23 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, view.CanList, view.UnavailableReasons)
 	require.NotNil(t, view.Protection)
+
+	// The only tier already has the account as an admin member: not listable.
+	repo.adminMembers = []int64{3}
+	view, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.True(t, view.AllowedTiers[0].AdminMember)
+	require.Equal(t, []string{MarketReasonNoAllowedTier}, view.UnavailableReasons)
+	repo.adminMembers = nil
+	// Concurrency lowered below the stored reservation since the admin allowed it.
+	repo.listing.Protection.ReservedConcurrency = 2
+	repo.account.Concurrency = 2
+	view, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.Equal(t, []string{MarketReasonProtectionInvalid}, view.UnavailableReasons)
+	_, err = svc.OwnerSet(ctx, 7, 11, 3, true)
+	requireMarketReason(t, err, "MARKET_INVALID_PARAMS")
+	repo.account.Concurrency = 3
 
 	// Paused owner: listing refused with the reason; unlisting allowed.
 	now := repo.account.CreatedAt

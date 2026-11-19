@@ -67,6 +67,10 @@ const (
 	MarketReasonOwnerPaused       = "owner_paused"
 	MarketReasonWithdrawRequested = "withdraw_requested"
 	MarketReasonAccountInactive   = "account_inactive"
+	MarketReasonMaxSessions       = "max_sessions_enabled"
+	// MarketReasonProtectionInvalid: the stored reservations no longer fit
+	// the account (e.g. concurrency lowered); an admin must re-save them.
+	MarketReasonProtectionInvalid = "protection_invalid"
 )
 
 var (
@@ -148,6 +152,9 @@ type MarketTierOption struct {
 	RateMultiplier float64 `json:"rate_multiplier"`
 	// Available: still a live, active market tier.
 	Available bool `json:"available"`
+	// AdminMember: the account is already an admin member of this tier, so
+	// it cannot be listed there (set in per-account views).
+	AdminMember bool `json:"admin_member"`
 }
 
 // MarketAdminConfigureParams is the admin PUT, applied under the account row
@@ -169,8 +176,9 @@ type MarketOwnerSetParams struct {
 	AccountID   int64
 	GroupID     int64
 	Listed      bool
-	// Validate runs on the locked account before listing (not on unlist).
-	Validate func(account *Account) error
+	// Validate runs on the locked account with the stored protection before
+	// listing (not on unlist).
+	Validate func(account *Account, protection MarketProtectionParams) error
 }
 
 // MarketListingRepository: every write is one transaction that locks the
@@ -189,6 +197,9 @@ type MarketListingRepository interface {
 	ListTierOptions(ctx context.Context, groupIDs []int64) ([]MarketTierOption, error)
 	// HasAdminMembership reports an admin account_groups row for the pair.
 	HasAdminMembership(ctx context.Context, accountID, groupID int64) (bool, error)
+	// ListAdminMemberGroupIDs: which of groupIDs the account is an admin
+	// member of (those tiers cannot be listed into).
+	ListAdminMemberGroupIDs(ctx context.Context, accountID int64, groupIDs []int64) ([]int64, error)
 	AdminConfigure(ctx context.Context, p MarketAdminConfigureParams) (*MarketListing, error)
 	// AdminRevoke returns ErrMarketListingNotFound when there is no listing.
 	AdminRevoke(ctx context.Context, accountID, adminUserID int64) (*MarketListing, error)
@@ -212,6 +223,11 @@ func MarketAccountIneligibleReason(a *Account) string {
 	}
 	if a.IsClaudeOAuthCarpoolUnlimitedDevices() {
 		return MarketReasonUnlimitedDevices
+	}
+	// The owner reservation covers concurrency slots, not sessions: a listed
+	// account must not use the account-level session limit.
+	if a.GetMaxSessions() > 0 {
+		return MarketReasonMaxSessions
 	}
 	return ""
 }

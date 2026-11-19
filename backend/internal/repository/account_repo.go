@@ -536,9 +536,12 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 		txClient = r.client
 	}
 
-	// Deleting an account revokes its market listing (history kept) and
-	// removes the market memberships with their outbox rows, in this
-	// transaction.
+	// Lock the account row first (same order as every listing writer:
+	// account, then listing), then revoke its market listing (history kept)
+	// and remove the market memberships with their outbox rows.
+	if _, err := txClient.ExecContext(ctx, "SELECT 1 FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE", id); err != nil {
+		return err
+	}
 	if err := marketUnlistAccountTx(ctx, txClient, id, service.MarketListingActionAccountDeleted, true, service.MarketListingActorSystem, 0); err != nil {
 		return err
 	}
@@ -595,7 +598,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	if groupID == service.AccountListGroupUngrouped {
 		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))
 	} else if groupID > 0 {
-		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID)))
+		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID), dispatchableAccountGroupPredicate()))
 	}
 
 	total, err := q.Count(ctx)
@@ -972,7 +975,12 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	// Admin bindings only (market rows belong to the listing lifecycle). The
 	// account row lock serializes this with listing writes, so the conflict
 	// check below cannot race an owner listing the same pair.
-	if _, err := txClient.ExecContext(ctx, "SELECT 1 FROM accounts WHERE id = $1 FOR NO KEY UPDATE", accountID); err != nil {
+	var live bool
+	if err := scanSingleRow(ctx, txClient, "SELECT TRUE FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE",
+		[]any{accountID}, &live); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.ErrAccountNotFound
+		}
 		return err
 	}
 	if len(groupIDs) > 0 {

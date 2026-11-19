@@ -861,7 +861,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	redeemPurchase.apply(settings)
 	settings.HostedSelfOnboard = hostedSelfOnboard
-	settings.Market = &market
+	// Only a request that carries market fields writes the market block, so
+	// an unrelated settings save (stale read) cannot flip the switch back.
+	if req.marketSettingsRequest.present() {
+		settings.Market = &market
+	}
 
 	if h.pricingService != nil && req.PricingModelAliases != nil {
 		for requestModel, pricingModel := range settings.PricingModelAliases {

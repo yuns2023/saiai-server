@@ -44,8 +44,11 @@ var ErrMarketAdmissionAttemptExists = errors.New("market admission attempt alrea
 // group and seller state in its own transaction before inserting.
 type MarketAdmissionRepository interface {
 	InsertMarketAdmission(ctx context.Context, in *MarketAdmission) (*MarketAdmission, error)
-	// GetMarketAdmission returns ErrMarketAdmissionNotFound when missing.
+	// GetMarketAdmission / GetMarketAdmissionByAttempt return
+	// ErrMarketAdmissionNotFound when missing (by attempt: to confirm an
+	// insert whose commit result is unknown).
 	GetMarketAdmission(ctx context.Context, id int64) (*MarketAdmission, error)
+	GetMarketAdmissionByAttempt(ctx context.Context, attemptID string) (*MarketAdmission, error)
 }
 
 var ErrMarketAdmissionNotFound = errors.New("market admission not found")

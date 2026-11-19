@@ -38,6 +38,10 @@ func (r *adminMarketRepo) GetAccountFacts(_ context.Context, id int64) (*service
 	return r.account(), nil
 }
 
+func (r *adminMarketRepo) ListAdminMemberGroupIDs(context.Context, int64, []int64) ([]int64, error) {
+	return nil, nil
+}
+
 func (r *adminMarketRepo) GetListing(context.Context, int64) (*service.MarketListing, error) {
 	return r.listing, nil
 }
@@ -183,6 +187,9 @@ func TestResolveMarketSettings(t *testing.T) {
 		_, msg := resolveMarketSettings(&req, prev)
 		require.NotEmpty(t, msg, "%+v", req)
 	}
+
+	require.False(t, (&marketSettingsRequest{}).present(), "unrelated saves do not write the market block")
+	require.True(t, (&marketSettingsRequest{MarketDefaultCap7dPct: i(50)}).present())
 
 	// The embedded request block decodes from the flat settings body.
 	var req UpdateSettingsRequest

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 )
 
 // MarketListingService serves the admin and owner listing endpoints. The
@@ -111,13 +112,30 @@ func (s *MarketListingService) adminView(ctx context.Context, account *Account, 
 		MarketEnabled:     cfg.Enabled,
 	}
 	if listing != nil && len(listing.AllowedGroupIDs) > 0 {
-		tiers, err := s.repo.ListTierOptions(ctx, listing.AllowedGroupIDs)
+		tiers, err := s.accountTierOptions(ctx, account.ID, listing.AllowedGroupIDs)
 		if err != nil {
 			return nil, err
 		}
 		view.AllowedTiers = tiers
 	}
 	return view, nil
+}
+
+// accountTierOptions describes the tiers and marks those the account is an
+// admin member of.
+func (s *MarketListingService) accountTierOptions(ctx context.Context, accountID int64, groupIDs []int64) ([]MarketTierOption, error) {
+	tiers, err := s.repo.ListTierOptions(ctx, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	members, err := s.repo.ListAdminMemberGroupIDs(ctx, accountID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tiers {
+		tiers[i].AdminMember = slices.Contains(members, tiers[i].GroupID)
+	}
+	return tiers, nil
 }
 
 // AdminConfigure creates or updates the listing (allowed tiers + protection).
@@ -189,11 +207,12 @@ func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accoun
 		AccountID:   accountID,
 		GroupID:     groupID,
 		Listed:      listed,
-		Validate: func(account *Account) error {
+		Validate: func(account *Account, protection MarketProtectionParams) error {
 			if reason := marketListBlockedReason(account); reason != "" {
 				return NewMarketAccountNotEligibleError(reason)
 			}
-			return nil
+			// The account may have been reconfigured since the admin allowed it.
+			return validateMarketProtectionForAccount(account, protection)
 		},
 	}); err != nil {
 		return nil, err
@@ -224,7 +243,7 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 		protection := listing.Protection
 		view.Protection = &protection
 		if len(listing.AllowedGroupIDs) > 0 {
-			tiers, err := s.repo.ListTierOptions(ctx, listing.AllowedGroupIDs)
+			tiers, err := s.accountTierOptions(ctx, account.ID, listing.AllowedGroupIDs)
 			if err != nil {
 				return nil, err
 			}
@@ -232,6 +251,11 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 		}
 	}
 	reasons := view.UnavailableReasons
+	if listing != nil {
+		if err := validateMarketProtectionForAccount(account, listing.Protection); err != nil {
+			reasons = append(reasons, MarketReasonProtectionInvalid)
+		}
+	}
 	if !cfg.Enabled {
 		reasons = append(reasons, MarketReasonMarketDisabled)
 	}
@@ -243,7 +267,7 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 	default:
 		available := false
 		for _, tier := range view.AllowedTiers {
-			if tier.Available {
+			if tier.Available && !tier.AdminMember {
 				available = true
 				break
 			}

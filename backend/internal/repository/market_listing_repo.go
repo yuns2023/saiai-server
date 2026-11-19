@@ -186,6 +186,27 @@ func (r *marketListingRepository) ListTierOptions(ctx context.Context, groupIDs 
 	return out, rows.Err()
 }
 
+func (r *marketListingRepository) ListAdminMemberGroupIDs(ctx context.Context, accountID int64, groupIDs []int64) ([]int64, error) {
+	if len(groupIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT group_id FROM account_groups
+		WHERE account_id = $1 AND group_id = ANY($2) AND source = 'admin' ORDER BY group_id`, accountID, pq.Array(groupIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *marketListingRepository) HasAdminMembership(ctx context.Context, accountID, groupID int64) (bool, error) {
 	var exists bool
 	err := scanSingleRow(ctx, r.db, `SELECT EXISTS (
@@ -253,15 +274,19 @@ func deleteMarketMembershipsTx(ctx context.Context, q sqlQueryer, accountID int6
 // enqueueMarketMembershipOutboxTx writes the scheduler outbox rows for a
 // membership change inside the caller's transaction. Errors are returned
 // (the whole change rolls back).
+//
+// Two events (account_groups_changed is never deduplicated): one rebuilds
+// the changed market groups, one without a group list refreshes the account
+// snapshot and rebuilds its current admin groups — or the ungrouped bucket
+// when it has none, so a market-only account leaves (and later rejoins) the
+// cached ungrouped pool.
 func enqueueMarketMembershipOutboxTx(ctx context.Context, exec sqlExecutor, accountID int64, groupIDs []int64) error {
-	ids := mergeGroupIDs(groupIDs, nil)
-	if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountChanged, &accountID, nil, buildSchedulerGroupPayload(ids)); err != nil {
-		return err
+	if ids := mergeGroupIDs(groupIDs, nil); len(ids) > 0 {
+		if err := enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(ids)); err != nil {
+			return err
+		}
 	}
-	if len(ids) == 0 {
-		return nil
-	}
-	return enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, buildSchedulerGroupPayload(ids))
+	return enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, nil)
 }
 
 // marketUnlistAccountTx is the lifecycle hook for owner cleared / paused /
@@ -312,6 +337,14 @@ func marketUnlistAccountTx(ctx context.Context, exec sqlExecutor, accountID int6
 // row before listing rows (owner/admin listing writes lock the tier group
 // FOR SHARE before touching the listing row).
 func marketRemoveGroupTx(ctx context.Context, exec sqlExecutor, groupID int64, action string) error {
+	// Lock the affected listings in account order first, so two group
+	// removals sharing listings cannot deadlock on the UPDATE below.
+	if _, err := exec.ExecContext(ctx, `
+		SELECT account_id FROM account_market_listings
+		WHERE $1 = ANY (allowed_group_ids) OR selected_group_id = $1
+		ORDER BY account_id FOR UPDATE`, groupID); err != nil {
+		return err
+	}
 	rows, err := exec.QueryContext(ctx, `
 		UPDATE account_market_listings
 		SET allowed_group_ids = array_remove(allowed_group_ids, $1::bigint),
@@ -643,7 +676,7 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 		return nil, service.ErrMarketListingRevoked
 	}
 	if p.Validate != nil {
-		if err := p.Validate(account); err != nil {
+		if err := p.Validate(account, current.Protection); err != nil {
 			return nil, err
 		}
 	}
@@ -786,9 +819,17 @@ func (r *marketListingRepository) InsertMarketAdmission(ctx context.Context, in 
 }
 
 func (r *marketListingRepository) GetMarketAdmission(ctx context.Context, id int64) (*service.MarketAdmission, error) {
+	return r.getMarketAdmission(ctx, "id = $1", id)
+}
+
+func (r *marketListingRepository) GetMarketAdmissionByAttempt(ctx context.Context, attemptID string) (*service.MarketAdmission, error) {
+	return r.getMarketAdmission(ctx, "attempt_id = $1", attemptID)
+}
+
+func (r *marketListingRepository) getMarketAdmission(ctx context.Context, where string, arg any) (*service.MarketAdmission, error) {
 	var a service.MarketAdmission
 	var admittedAt, createdAt time.Time
-	err := scanSingleRow(ctx, r.db, "SELECT "+marketAdmissionColumns+" FROM market_admissions WHERE id = $1", []any{id},
+	err := scanSingleRow(ctx, r.db, "SELECT "+marketAdmissionColumns+" FROM market_admissions WHERE "+where, []any{arg},
 		&a.ID, &a.AttemptID, &a.AccountID, &a.GroupID, &a.OwnerUserID, &a.OwnerEventID,
 		&a.ListingVersion, &a.BuyerUserID, &a.APIKeyID, &admittedAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {

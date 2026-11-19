@@ -560,7 +560,7 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 				a.temp_unschedulable_until > NOW()
 			))
 		FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = $1`,
+		WHERE ag.group_id = $1 AND ag.source = 'admin'`,
 		[]any{groupID}, &total, &active, &rateLimited)
 	return
 }
@@ -718,7 +718,7 @@ func (r *groupRepository) loadAccountCounts(ctx context.Context, groupIDs []int6
 			)) AS rate_limited
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = ANY($1)
+		WHERE ag.group_id = ANY($1) AND ag.source = 'admin'
 		GROUP BY ag.group_id`,
 		pq.Array(groupIDs),
 	)

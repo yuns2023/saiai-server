@@ -37,6 +37,10 @@ func (r *ownerMarketRepo) GetOwnedAccountFacts(_ context.Context, owner, account
 	return r.account(), nil
 }
 
+func (r *ownerMarketRepo) ListAdminMemberGroupIDs(context.Context, int64, []int64) ([]int64, error) {
+	return nil, nil
+}
+
 func (r *ownerMarketRepo) GetListing(context.Context, int64) (*service.MarketListing, error) {
 	return r.listing, nil
 }
@@ -111,7 +115,7 @@ func TestOwnerMarketHandlerJSONAndAuth(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body.Data, &view))
 	require.True(t, view.CanList)
-	require.Equal(t, []string{"available", "group_id", "name", "rate_multiplier"}, jsonKeys(t, view.AllowedTiers[0]))
+	require.Equal(t, []string{"admin_member", "available", "group_id", "name", "rate_multiplier"}, jsonKeys(t, view.AllowedTiers[0]))
 	require.Equal(t, []string{"cap_5h_pct", "cap_7d_pct", "reserved_admissions", "reserved_concurrency", "reserved_devices",
 		"sample_max_age_minutes"}, jsonKeys(t, view.Protection))
 

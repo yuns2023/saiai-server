@@ -31,7 +31,8 @@
 -- new constraint (owner_earning = 0, new columns NULL).
 --
 -- owner_earning_wallets / owner_earning_entries: owner earnings ledger. The
--- entries table is insert-only (an UPDATE raises); accrue > 0, reverse and
+-- entries table is insert-only (UPDATE/DELETE raise, like market_admissions
+-- and account_market_listing_events); accrue > 0, reverse and
 -- convert < 0; one accrue per settlement event, one reverse per accrue, one
 -- convert per (owner, request id).
 --
@@ -47,12 +48,14 @@ ALTER TABLE groups ADD COLUMN IF NOT EXISTS market_tier BOOLEAN NOT NULL DEFAULT
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'groups_market_tier_check') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'groups_market_tier_check' AND conrelid = 'groups'::regclass) THEN
         ALTER TABLE groups ADD CONSTRAINT groups_market_tier_check CHECK (
             NOT market_tier OR (
                 subscription_type = 'standard'
                 AND hosted_usage_enabled = FALSE
                 AND rate_multiplier > 0
+                AND rate_multiplier <> 'NaN'
                 AND platform = 'anthropic'
             )
         );
@@ -63,7 +66,8 @@ ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'account_groups_source_check') THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'account_groups_source_check' AND conrelid = 'account_groups'::regclass) THEN
         ALTER TABLE account_groups ADD CONSTRAINT account_groups_source_check
             CHECK (source IN ('admin', 'market'));
     END IF;
@@ -166,17 +170,22 @@ CREATE INDEX IF NOT EXISTS market_admissions_account_idx
 CREATE INDEX IF NOT EXISTS market_admissions_owner_idx
     ON market_admissions (owner_user_id, admitted_at);
 
--- Insert-only tables: an UPDATE is always a bug.
-CREATE OR REPLACE FUNCTION market_reject_update() RETURNS trigger
+-- History tables are insert-only: an UPDATE or DELETE always raises.
+CREATE OR REPLACE FUNCTION market_reject_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION '% is insert-only', TG_TABLE_NAME USING ERRCODE = 'restrict_violation';
 END $$;
 
-DROP TRIGGER IF EXISTS market_admissions_no_update ON market_admissions;
-CREATE TRIGGER market_admissions_no_update
-    BEFORE UPDATE ON market_admissions
-    FOR EACH ROW EXECUTE FUNCTION market_reject_update();
+DROP TRIGGER IF EXISTS market_admissions_insert_only ON market_admissions;
+CREATE TRIGGER market_admissions_insert_only
+    BEFORE UPDATE OR DELETE ON market_admissions
+    FOR EACH ROW EXECUTE FUNCTION market_reject_change();
+
+DROP TRIGGER IF EXISTS account_market_listing_events_insert_only ON account_market_listing_events;
+CREATE TRIGGER account_market_listing_events_insert_only
+    BEFORE UPDATE OR DELETE ON account_market_listing_events
+    FOR EACH ROW EXECUTE FUNCTION market_reject_change();
 
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS admission_id BIGINT;
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS charged_amount NUMERIC(20,10);
@@ -184,38 +193,38 @@ ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS platform_amount NUM
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS platform_cut_rate NUMERIC(6,4);
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS earning_zero_reason TEXT;
 
-ALTER TABLE usage_settlement_events DROP CONSTRAINT IF EXISTS usage_settlement_events_category_check;
-ALTER TABLE usage_settlement_events ADD CONSTRAINT usage_settlement_events_category_check
-    CHECK (category IN ('hosted_self', 'owned_other', 'shared_sale'));
-
-ALTER TABLE usage_settlement_events DROP CONSTRAINT IF EXISTS usage_settlement_events_owner_earning_check;
-ALTER TABLE usage_settlement_events ADD CONSTRAINT usage_settlement_events_owner_earning_check
-    CHECK (owner_earning >= 0 AND (owner_earning = 0 OR category = 'shared_sale'));
-
-ALTER TABLE usage_settlement_events DROP CONSTRAINT IF EXISTS usage_settlement_events_market_check;
-ALTER TABLE usage_settlement_events ADD CONSTRAINT usage_settlement_events_market_check CHECK (
-    -- Market columns only on shared_sale rows.
-    (category = 'shared_sale' OR (
-        admission_id IS NULL AND charged_amount IS NULL AND platform_amount IS NULL
-        AND platform_cut_rate IS NULL AND earning_zero_reason IS NULL
-    ))
-    -- A shared_sale row always comes from an admission and splits the
-    -- actual charge exactly: charged = owner earning + platform amount.
-    AND (category <> 'shared_sale' OR (
-        admission_id IS NOT NULL AND charged_amount IS NOT NULL
-        AND platform_amount IS NOT NULL AND platform_cut_rate IS NOT NULL
-        AND charged_amount >= 0 AND platform_amount >= 0
-        AND owner_earning <= charged_amount
-        AND charged_amount = owner_earning + platform_amount
-        AND platform_cut_rate >= 0 AND platform_cut_rate <= 1
-        -- A zero earning always states why.
-        AND (owner_earning > 0 OR earning_zero_reason IS NOT NULL)
-    ))
-);
-
-ALTER TABLE usage_settlement_events DROP CONSTRAINT IF EXISTS usage_settlement_events_earning_zero_reason_check;
-ALTER TABLE usage_settlement_events ADD CONSTRAINT usage_settlement_events_earning_zero_reason_check
-    CHECK (earning_zero_reason IN ('self_purchase', 'zero_charge', 'owner_mismatch', 'not_eligible', 'other'));
+-- One ALTER (one validation scan) for every new CHECK on this table.
+ALTER TABLE usage_settlement_events
+    DROP CONSTRAINT IF EXISTS usage_settlement_events_category_check,
+    DROP CONSTRAINT IF EXISTS usage_settlement_events_owner_earning_check,
+    DROP CONSTRAINT IF EXISTS usage_settlement_events_market_check,
+    DROP CONSTRAINT IF EXISTS usage_settlement_events_earning_zero_reason_check,
+    ADD CONSTRAINT usage_settlement_events_category_check
+        CHECK (category IN ('hosted_self', 'owned_other', 'shared_sale')),
+    ADD CONSTRAINT usage_settlement_events_owner_earning_check
+        CHECK (owner_earning >= 0 AND owner_earning <> 'NaN' AND (owner_earning = 0 OR category = 'shared_sale')),
+    ADD CONSTRAINT usage_settlement_events_market_check CHECK (
+        -- Market columns only on shared_sale rows.
+        (category = 'shared_sale' OR (
+            admission_id IS NULL AND charged_amount IS NULL AND platform_amount IS NULL
+            AND platform_cut_rate IS NULL AND earning_zero_reason IS NULL
+        ))
+        -- A shared_sale row always comes from an admission and splits the
+        -- actual charge exactly: charged = owner earning + platform amount.
+        AND (category <> 'shared_sale' OR (
+            admission_id IS NOT NULL AND charged_amount IS NOT NULL
+            AND platform_amount IS NOT NULL AND platform_cut_rate IS NOT NULL
+            AND charged_amount >= 0 AND charged_amount <> 'NaN'
+            AND platform_amount >= 0 AND platform_amount <> 'NaN'
+            AND owner_earning <= charged_amount
+            AND charged_amount = owner_earning + platform_amount
+            AND platform_cut_rate >= 0 AND platform_cut_rate <= 1 AND platform_cut_rate <> 'NaN'
+            -- A zero earning always states why.
+            AND (owner_earning > 0 OR earning_zero_reason IS NOT NULL)
+        ))
+    ),
+    ADD CONSTRAINT usage_settlement_events_earning_zero_reason_check
+        CHECK (earning_zero_reason IN ('self_purchase', 'zero_charge', 'owner_mismatch', 'not_eligible', 'other'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS usage_settlement_events_admission_key
     ON usage_settlement_events (admission_id) WHERE admission_id IS NOT NULL;
@@ -239,7 +248,8 @@ CREATE TABLE IF NOT EXISTS owner_earning_entries (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT owner_earning_entries_kind_check CHECK (kind IN ('accrue', 'reverse', 'convert')),
     CONSTRAINT owner_earning_entries_sign_check CHECK (
-        (kind = 'accrue' AND amount > 0) OR (kind IN ('reverse', 'convert') AND amount < 0)
+        amount <> 'NaN'
+        AND ((kind = 'accrue' AND amount > 0) OR (kind IN ('reverse', 'convert') AND amount < 0))
     ),
     CONSTRAINT owner_earning_entries_shape_check CHECK (
         (kind = 'accrue' AND settlement_event_id IS NOT NULL AND reverses_entry_id IS NULL
@@ -265,7 +275,7 @@ CREATE INDEX IF NOT EXISTS owner_earning_entries_owner_available_idx
 CREATE INDEX IF NOT EXISTS owner_earning_entries_owner_created_idx
     ON owner_earning_entries (owner_user_id, created_at);
 
-DROP TRIGGER IF EXISTS owner_earning_entries_no_update ON owner_earning_entries;
-CREATE TRIGGER owner_earning_entries_no_update
-    BEFORE UPDATE ON owner_earning_entries
-    FOR EACH ROW EXECUTE FUNCTION market_reject_update();
+DROP TRIGGER IF EXISTS owner_earning_entries_insert_only ON owner_earning_entries;
+CREATE TRIGGER owner_earning_entries_insert_only
+    BEFORE UPDATE OR DELETE ON owner_earning_entries
+    FOR EACH ROW EXECUTE FUNCTION market_reject_change();
