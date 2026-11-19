@@ -49,7 +49,17 @@ var recordMarketUsageScript = redis.NewScript(`
 			-- Later observation wins; at the same second "has a 5h window"
 			-- (absent=false) wins. A response whose 7d belongs to an older
 			-- window than the stored one is late: it never sets the flag.
-			if stale and new['absent'] == true then
+			-- A known 5h window still running at the absence's time
+			-- contradicts it: such an absence is late and never stored
+			-- (the 5h field is written before this one in the same call).
+			local live5h = false
+			if new['absent'] == true then
+				local five = decode(redis.call('HGET', key, '5h') or nil)
+				if five ~= nil and (tonumber(five['reset']) or 0) > new['at'] then
+					live5h = true
+				end
+			end
+			if (stale or live5h) and new['absent'] == true then
 				out = nil
 			elseif old == nil then
 				out = raw

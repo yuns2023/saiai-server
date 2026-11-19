@@ -454,3 +454,27 @@ func TestMarketUsageReplayedHas5hClearsUltraDespiteOldWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, got[74].FiveHourAbsent.Absent, "the conservative flag is never blocked by an old window")
 }
+
+func TestMarketUsageLateAbsenceDuringLiveWindowNotStored(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMarketUsageCache(testRedis(t))
+	t0 := time.Now().Unix()
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 75, service.MarketUsageObservations{
+		FiveHour: &service.MarketUsageObservation{Utilization: 0.9, ResetAt: t0 + 4*3600, ObservedAt: t0},
+		SevenDay: &service.MarketUsageObservation{Utilization: 0.3, ResetAt: t0 + 3*24*3600, ObservedAt: t0},
+	}))
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 75, service.MarketUsageObservations{
+		SevenDay:       &service.MarketUsageObservation{Utilization: 0.3, ResetAt: t0 + 3*24*3600, ObservedAt: t0 + 300},
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: t0 + 300},
+	}))
+	got, err := cache.GetMarketUsageObservations(ctx, []int64{75})
+	require.NoError(t, err)
+	require.Nil(t, got[75].FiveHourAbsent, "an absence while the known 5h window runs is late and not stored")
+	// After that window ended, an absence is accepted.
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 75, service.MarketUsageObservations{
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: t0 + 4*3600 + 60},
+	}))
+	got, err = cache.GetMarketUsageObservations(ctx, []int64{75})
+	require.NoError(t, err)
+	require.True(t, got[75].FiveHourAbsent.Absent)
+}

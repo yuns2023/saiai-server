@@ -156,9 +156,9 @@ type MarketUsageObservationCache interface {
 type MarketSlotCache interface {
 	AcquireAccountBuyerSlot(ctx context.Context, accountID int64, totalMax, buyerMax int, requestID string) (bool, error)
 	ReleaseAccountBuyerSlot(ctx context.Context, accountID int64, requestID string) error
+	// RenewAccountBuyerSlot refreshes the lease iff it is a live member of
+	// both sets (false = lost; a half lease is never refreshed).
 	RenewAccountBuyerSlot(ctx context.Context, accountID int64, requestID string) (bool, error)
-	// AccountBuyerLeaseHeld: the lease is a live member of both sets.
-	AccountBuyerLeaseHeld(ctx context.Context, accountID int64, requestID string) (bool, error)
 	GetAccountBuyerConcurrencyBatch(ctx context.Context, accountIDs []int64) (map[int64]int, error)
 	SlotTTLSeconds() int
 }
@@ -240,7 +240,7 @@ type MarketRuntime struct {
 	lastWarn time.Time
 	// pending: listings started in this process and not yet confirmed by a
 	// poll that began after they ended (treated as listed meanwhile).
-	pending map[int64]*marketPendingListing
+	pending map[int64]map[uint64]*marketPendingListing
 	// usageDirty: observations whose write failed, kept (merged) and
 	// replayed with the next write; the account is not sellable until a
 	// write that includes them succeeds.
@@ -252,65 +252,60 @@ type MarketRuntime struct {
 // NewMarketRuntime creates the runtime; Start begins polling.
 func NewMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
 	return &MarketRuntime{store: store, usage: usage, listed: map[int64]struct{}{}, stop: make(chan struct{}),
-		pending: map[int64]*marketPendingListing{}, usageDirty: map[int64]*marketDirtyUsage{}}
+		pending: map[int64]map[uint64]*marketPendingListing{}, usageDirty: map[int64]*marketDirtyUsage{}}
 }
 
+// marketPendingListing: one entry per listing transaction (token); the
+// account counts as listed while any entry remains.
 type marketPendingListing struct {
-	active  int
-	aborted int
-	endedAt time.Time
+	endedAt time.Time // zero while the transaction runs
 }
 
-// BeginListing marks an account listed locally before its listing
-// transaction starts (MarketListingObserver).
-func (r *MarketRuntime) BeginListing(accountID int64) {
+var marketListingTokens atomic.Uint64
+
+// BeginListing marks an account listed locally once a listing passed its
+// checks, right before its writes (MarketListingObserver). The token
+// finalizes exactly this listing.
+func (r *MarketRuntime) BeginListing(accountID int64) uint64 {
+	token := marketListingTokens.Add(1)
 	if r == nil {
-		return
+		return token
 	}
 	r.mu.Lock()
-	p := r.pending[accountID]
-	if p == nil {
-		p = &marketPendingListing{}
-		r.pending[accountID] = p
+	if r.pending[accountID] == nil {
+		r.pending[accountID] = map[uint64]*marketPendingListing{}
 	}
-	p.active++
+	r.pending[accountID][token] = &marketPendingListing{}
 	r.mu.Unlock()
+	return token
 }
 
 // AbortListing drops this listing's mark at once (rolled back before the
-// commit); EndListing still runs afterwards and finds nothing to keep.
-func (r *MarketRuntime) AbortListing(accountID int64) {
+// commit). Other listings of the account are untouched.
+func (r *MarketRuntime) AbortListing(accountID int64, token uint64) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	if p := r.pending[accountID]; p != nil {
-		p.active--
-		p.aborted++
-		if p.active <= 0 && p.endedAt.IsZero() {
+	if entries := r.pending[accountID]; entries != nil {
+		delete(entries, token)
+		if len(entries) == 0 {
 			delete(r.pending, accountID)
 		}
 	}
 	r.mu.Unlock()
 }
 
-// EndListing records the end of the transaction (committed or not); the
-// pending mark stays until a registry poll that started afterwards.
-func (r *MarketRuntime) EndListing(accountID int64) {
+// EndListing records the end of this listing's transaction (committed or
+// commit result unknown); its mark stays until a registry poll that started
+// afterwards. A token that was aborted (or ended) is not touched again.
+func (r *MarketRuntime) EndListing(accountID int64, token uint64) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
-	if p := r.pending[accountID]; p != nil {
-		if p.aborted > 0 {
-			p.aborted-- // its active count was already released
-		} else {
-			p.active--
-			p.endedAt = time.Now()
-		}
-		if p.active <= 0 && p.endedAt.IsZero() {
-			delete(r.pending, accountID)
-		}
+	if p := r.pending[accountID][token]; p != nil && p.endedAt.IsZero() {
+		p.endedAt = time.Now()
 	}
 	r.mu.Unlock()
 }
@@ -458,8 +453,13 @@ func (r *MarketRuntime) setState(state *MarketDispatchState, readStarted time.Ti
 	r.enabled = state.Enabled
 	r.listed = listed
 	r.loaded = true
-	for id, p := range r.pending {
-		if p.active <= 0 && !p.endedAt.IsZero() && p.endedAt.Before(readStarted) {
+	for id, entries := range r.pending {
+		for token, p := range entries {
+			if !p.endedAt.IsZero() && p.endedAt.Before(readStarted) {
+				delete(entries, token)
+			}
+		}
+		if len(entries) == 0 {
 			delete(r.pending, id)
 		}
 	}
@@ -852,10 +852,15 @@ func (s *GatewayService) marketFilterCandidates(ctx context.Context, accounts []
 		}
 		s.prefetchMarketObservations(ctx, dispatch, buyers)
 	}
+	countTokens := tier && marketCountTokensSelection(ctx)
 	out := make([]Account, 0, len(accounts))
 	for i := range accounts {
 		class, _ := s.classifyMarketCandidateInGroup(ctx, &accounts[i], groupID, true)
 		if class == MarketClassExcluded {
+			continue
+		}
+		if countTokens && !MarketCountTokensCapable(&accounts[i]) {
+			// Filtered before ranking (never an attempt on a 404 account).
 			continue
 		}
 		out = append(out, accounts[i])
@@ -955,8 +960,11 @@ func evaluateMarketShareCaps(obs *MarketUsageObservations, p MarketProtectionPar
 	// Ultra ("no 5h window") counts only while no fresh 5h sample of a
 	// still-running window contradicts it (a late absence report never
 	// overrides a known 5h window).
+	// An absence observed while a known 5h window was still running (its
+	// reset after the absence) is a late report: ignored, so a stale 5h
+	// sample keeps the account unsellable until a new observation.
 	if a := obs.FiveHourAbsent; a != nil && a.Absent && fresh(a.ObservedAt) &&
-		(obs.FiveHour == nil || a.ObservedAt > obs.FiveHour.ObservedAt) &&
+		(obs.FiveHour == nil || (a.ObservedAt > obs.FiveHour.ObservedAt && obs.FiveHour.ResetAt <= a.ObservedAt)) &&
 		(obs.FiveHour == nil || !fresh(obs.FiveHour.ObservedAt) || !time.Unix(obs.FiveHour.ResetAt, 0).After(now)) {
 		return ""
 	}
@@ -1350,12 +1358,6 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 			logMarketAdmission(ctx, sel, "device_not_admitted", nil)
 			return ErrMarketAdmissionRejected
 		}
-		// The buyer lease must still be held in both slot sets (a lost
-		// renewal or an expired member taken by someone else = no dispatch).
-		if held, err := s.concurrencyService.BuyerLeaseHeld(ctx, account.ID, sel.LeaseID); err != nil || !held {
-			logMarketAdmission(ctx, sel, "lease_lost", err)
-			return ErrMarketAdmissionRejected
-		}
 		if dispatch == nil || authUser <= 0 || dispatch.APIKey.UserID != authUser ||
 			dispatch.APIKey.GroupID == nil || *dispatch.APIKey.GroupID != sel.GroupID {
 			// The Key as billed must be the tier the candidate was admitted to.
@@ -1440,6 +1442,14 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 	if sel.Class == MarketClassBuyer {
 		a := verdict.Admission
 		if a == nil {
+			return ErrMarketAdmissionRejected
+		}
+		// Right before the first send: the buyer lease must still be a live
+		// member of both slot sets; the same atomic step refreshes it (a lost
+		// renewal, or an expired member taken by someone else = no dispatch;
+		// the admission row then settles nothing).
+		if held, err := s.concurrencyService.RenewBuyerLease(ctx, account.ID, sel.LeaseID); err != nil || !held {
+			logMarketAdmission(ctx, sel, "lease_lost", err)
 			return ErrMarketAdmissionRejected
 		}
 		attempt.MarketPath = true
@@ -1591,8 +1601,16 @@ func marketAdmissionFailoverError(cause error) error {
 // when the tier has no platform account at all (404 like platforms without
 // count_tokens); otherwise selection errors mean "temporarily unavailable"
 // (503).
+type marketCountTokensKey struct{}
+
+func marketCountTokensSelection(ctx context.Context) bool {
+	v, _ := ctx.Value(marketCountTokensKey{}).(bool)
+	return v
+}
+
 func (s *GatewayService) SelectMarketTierCountTokensAccount(ctx context.Context, groupID *int64, model string) (*Account, error) {
 	ctx = context.WithValue(ctx, marketDispatchKey{}, (*MarketDispatch)(nil))
+	ctx = context.WithValue(ctx, marketCountTokensKey{}, true)
 	excluded := map[int64]struct{}{}
 	var err error
 	for attempt := 0; attempt < 5; attempt++ {
@@ -1601,7 +1619,7 @@ func (s *GatewayService) SelectMarketTierCountTokensAccount(ctx context.Context,
 		if err != nil {
 			break
 		}
-		if MarketCountTokensCapable(account) && s.verifyMarketTierPlatform(ctx, account, groupID) {
+		if s.verifyMarketTierPlatform(ctx, account, groupID) {
 			return account, nil
 		}
 		excluded[account.ID] = struct{}{}
@@ -1638,7 +1656,17 @@ func (s *GatewayService) verifyMarketTierPlatform(ctx context.Context, account *
 	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
 	defer cancel()
 	verdict, err := s.market.store.AdmitMarketCandidate(checkCtx, req, func(f *MarketAuthoritativeFacts) string {
-		return EvaluateMarketAdmission(sel, req, f)
+		if reason := EvaluateMarketAdmission(sel, req, f); reason != "" {
+			return reason
+		}
+		// The fresh row: still count_tokens capable and allowed for this user.
+		if !MarketCountTokensCapable(f.Account) {
+			return "count_tokens_incapable"
+		}
+		if !accountAllowsUser(ctx, f.Account) {
+			return "not_allowed"
+		}
+		return ""
 	})
 	if err != nil || verdict == nil || !verdict.Admitted {
 		reason := "db_error"

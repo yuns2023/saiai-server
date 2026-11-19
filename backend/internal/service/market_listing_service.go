@@ -19,10 +19,12 @@ type MarketListingService struct {
 
 // MarketListingObserver is implemented by MarketRuntime.
 type MarketListingObserver interface {
-	BeginListing(accountID int64)
-	// AbortListing: the listing transaction rolled back before its commit.
-	AbortListing(accountID int64)
-	EndListing(accountID int64)
+	// BeginListing returns a token that finalizes exactly this listing.
+	BeginListing(accountID int64) uint64
+	// AbortListing: this listing's transaction rolled back before its commit.
+	AbortListing(accountID int64, token uint64)
+	// EndListing: this listing's transaction ended (committed or unknown).
+	EndListing(accountID int64, token uint64)
 }
 
 // SetListingObserver wires the dispatch registry (P3a part 2).
@@ -227,12 +229,21 @@ func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accoun
 		// transaction, right before the writes); cleared at once on a
 		// rollback; otherwise kept until a registry poll that started after
 		// the transaction ended.
-		marked := false
-		beforeWrite = func() { marked = true; s.listings.BeginListing(accountID) }
-		rolledBack = func() { s.listings.AbortListing(accountID) }
+		var (
+			token            uint64
+			marked, finished bool
+		)
+		beforeWrite = func() { token, marked = s.listings.BeginListing(accountID), true }
+		rolledBack = func() {
+			if marked && !finished {
+				finished = true
+				s.listings.AbortListing(accountID, token)
+			}
+		}
 		defer func() {
-			if marked {
-				s.listings.EndListing(accountID)
+			if marked && !finished {
+				finished = true
+				s.listings.EndListing(accountID, token)
 			}
 		}()
 	}

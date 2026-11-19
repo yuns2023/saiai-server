@@ -984,18 +984,18 @@ func TestMarketRegistryPendingListing(t *testing.T) {
 	store := &fakeMarketStore{state: &MarketDispatchState{Enabled: true}}
 	rt := NewMarketRuntime(store, nil)
 	require.True(t, rt.Refresh(context.Background()))
-	rt.BeginListing(5)
+	t5 := rt.BeginListing(5)
 	require.True(t, rt.IsListed(5), "listed locally before the transaction commits")
 	require.True(t, rt.Refresh(context.Background()))
 	require.True(t, rt.IsListed(5), "a poll during the transaction keeps the mark")
-	rt.EndListing(5)
+	rt.EndListing(5, t5)
 	time.Sleep(2 * time.Millisecond)
 	store.state = &MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{5}}
 	require.True(t, rt.Refresh(context.Background()))
 	require.True(t, rt.IsListed(5))
 	// A rolled-back listing: dropped by the first poll after it ended.
-	rt.BeginListing(6)
-	rt.EndListing(6)
+	t6 := rt.BeginListing(6)
+	rt.EndListing(6, t6)
 	time.Sleep(2 * time.Millisecond)
 	require.True(t, rt.IsListed(6))
 	require.True(t, rt.Refresh(context.Background()))
@@ -1110,6 +1110,7 @@ func TestMarketRegistryColdStartIsConservative(t *testing.T) {
 type hookedMarketRepo struct {
 	*fakeMarketRepo
 	failAfterWrite bool
+	afterRollback  func()
 }
 
 func (r *hookedMarketRepo) OwnerSet(ctx context.Context, p MarketOwnerSetParams) (*MarketListing, error) {
@@ -1125,6 +1126,9 @@ func (r *hookedMarketRepo) OwnerSet(ctx context.Context, p MarketOwnerSetParams)
 		p.BeforeListWrite()
 		if r.failAfterWrite {
 			p.ListingRolledBack()
+			if r.afterRollback != nil {
+				r.afterRollback()
+			}
 			return nil, errors.New("outbox insert failed")
 		}
 	}
@@ -1363,4 +1367,108 @@ func TestMarketSelectionChangeRetriesTheGroup(t *testing.T) {
 	res.ReleaseFunc()
 	total, _ := env.slots.counts(2)
 	require.Zero(t, total, "the changed account's lease was released")
+}
+
+// ---- independent review round 2 ----
+
+func TestMarketListingRollbackNeverClearsAnotherListing(t *testing.T) {
+	rt := NewMarketRuntime(&fakeMarketStore{state: &MarketDispatchState{}}, nil)
+	rt.SetState(&MarketDispatchState{})
+	repo := &hookedMarketRepo{fakeMarketRepo: &fakeMarketRepo{account: marketTestAccount(7)}, failAfterWrite: true}
+	svc := NewMarketListingService(repo, &marketSettingRepo{values: map[string]string{}})
+	svc.SetListingObserver(rt)
+	var tokenB uint64
+	// A rolls back; B (same account) begins before A's service returns.
+	repo.afterRollback = func() { tokenB = rt.BeginListing(11) }
+	_, err := svc.OwnerSet(context.Background(), 7, 11, 3, true)
+	require.Error(t, err)
+	require.True(t, rt.IsListed(11), "A's end never touches B's mark")
+	rt.EndListing(11, tokenB)
+	require.True(t, rt.IsListed(11), "B ended: kept until a later poll")
+	time.Sleep(2 * time.Millisecond)
+	require.True(t, rt.Refresh(context.Background()))
+	require.False(t, rt.IsListed(11))
+	// Finalizing twice is harmless.
+	rt.EndListing(11, tokenB)
+	rt.AbortListing(11, tokenB)
+	require.False(t, rt.IsListed(11))
+}
+
+func TestMarketForwardLeaseLostDuringAdmission(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	inner := env.store.facts
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		// The lease expires while the admission transaction runs and its
+		// capacity is taken by someone else.
+		require.NoError(t, env.slots.ReleaseAccountBuyerSlot(context.Background(), 1, "lease-1"))
+		ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 3, "someone-else")
+		require.NoError(t, err)
+		require.True(t, ok)
+		return inner(req)
+	}
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx, attempt := buyerForwardCtx(t, c.Request.Context())
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Zero(t, upstream.calls)
+	_, proof := attempt.SettlementFields()
+	require.Nil(t, proof)
+}
+
+func TestMarketTierCountTokensFiltersIncapableBeforeRanking(t *testing.T) {
+	bedrock := mktPlatformAccount(2, mktTier)
+	bedrock.Type, bedrock.Priority = AccountTypeBedrock, 0
+	good := mktPlatformAccount(3, mktTier)
+	good.Priority = 50
+	env := newMarketEnv(t, []Account{bedrock, good})
+	ctx := context.WithValue(WithAccountUserID(context.Background(), mktBuyer), ctxkey.Group, mktGroups()[mktTier])
+	acc, err := env.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-fable-5")
+	require.NoError(t, err)
+	require.Equal(t, int64(3), acc.ID)
+	require.Len(t, env.store.requests, 1, "no attempt was spent on the Bedrock account")
+	// The fresh row became incapable (e.g. switched to Bedrock): refused.
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		a := mktPlatformAccount(req.AccountID, mktTier)
+		a.Type = AccountTypeBedrock
+		return &MarketAuthoritativeFacts{AccountFound: true, Account: &a, MembershipSource: AccountGroupSourceAdmin,
+			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic}
+	}
+	env.store.members = 1
+	_, err = env.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-fable-5")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+}
+
+func TestMarketPlatformCandidateListedWhileWaiting(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	acc.MarketGroupIDs, acc.MarketListing, acc.OwnerUserID = nil, nil, nil // cached as a tier platform account
+	env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{acc.ID}})
+	c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx, _ := WithMarketAttempt(c.Request.Context(), &MarketSelection{Class: MarketClassPlatform, AccountID: acc.ID, GroupID: mktTier, Concurrency: 4})
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover, "Messages reselects, never a client error")
+	var clientErr *ClientRequestError
+	require.False(t, errors.As(err, &clientErr))
+	require.Zero(t, upstream.calls)
+	require.NotEqual(t, 400, rec.Code)
+
+	c2, rec2, parsed2 := claudeCodeCacheSafeRetryContext(t)
+	err = env.svc.ForwardCountTokens(c2.Request.Context(), c2, acc, parsed2)
+	require.Error(t, err)
+	require.False(t, errors.As(err, &clientErr))
+	require.Equal(t, 503, rec2.Code, "count_tokens: temporarily unavailable")
+	require.Zero(t, upstream.calls)
+}
+
+func TestMarketLateAbsenceNeverReopensSales(t *testing.T) {
+	t0 := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	obs := &MarketUsageObservations{
+		SevenDay:       &MarketUsageObservation{Utilization: 0.3, ResetAt: t0.Add(72 * time.Hour).Unix(), ObservedAt: t0.Unix()},
+		FiveHour:       &MarketUsageObservation{Utilization: 0.9, ResetAt: t0.Add(4 * time.Hour).Unix(), ObservedAt: t0.Unix()},
+		FiveHourAbsent: &MarketFiveHourAbsence{Absent: true, ObservedAt: t0.Add(5 * time.Minute).Unix()},
+	}
+	obs.SevenDay.ObservedAt = t0.Add(20 * time.Minute).Unix() // 7d stays fresh
+	require.NotEqual(t, "", evaluateMarketShareCaps(obs, mktProtection(), t0.Add(31*time.Minute)),
+		"12:05 late absence vs the 12:00 sample of a window ending 16:00: still not sellable at 12:31")
 }

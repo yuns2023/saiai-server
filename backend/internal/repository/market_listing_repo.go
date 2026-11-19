@@ -789,8 +789,9 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 			}
 		}()
 		listCommit := func() (*service.MarketListing, error) {
-			reachedCommit = true
-			return r.commitListing(ctx, tx, p.AccountID)
+			// Any failure before the commit is an explicit rollback; from
+			// the commit on, the outcome may be unknown: keep the mark.
+			return r.commitListingMarked(ctx, tx, p.AccountID, func() { reachedCommit = true })
 		}
 		return r.ownerListWrite(ctx, tx, p, current, listCommit)
 	}
@@ -849,6 +850,20 @@ func (r *marketListingRepository) ownerListWrite(ctx context.Context, tx *sql.Tx
 		return nil, err
 	}
 	return commit()
+}
+
+// commitListingMarked is commitListing with a callback right before Commit.
+func (r *marketListingRepository) commitListingMarked(ctx context.Context, tx *sql.Tx, accountID int64, beforeCommit func()) (*service.MarketListing, error) {
+	out, err := queryMarketListing(ctx, tx, "SELECT "+marketListingColumns+" FROM account_market_listings WHERE account_id = $1", accountID)
+	if err != nil {
+		return nil, err
+	}
+	beforeCommit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	r.accounts.syncSchedulerAccountSnapshot(ctx, accountID)
+	return out, nil
 }
 
 func (r *marketListingRepository) commitListing(ctx context.Context, tx *sql.Tx, accountID int64) (*service.MarketListing, error) {

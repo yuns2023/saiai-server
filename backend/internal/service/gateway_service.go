@@ -1896,8 +1896,14 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 	if marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) {
 		// A listed account is used only by a market attempt (Messages final
 		// admission); count_tokens and other paths never send through it,
-		// not even the auxiliary count_tokens shape below.
-		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, ErrMarketAdmissionRejected)
+		// not even the auxiliary count_tokens shape below. It got listed
+		// after its selection: never a client error — Messages fails over
+		// (reselects), count_tokens answers "temporarily unavailable".
+		if forCountTokens {
+			s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
+			return body, nil, ErrMarketAdmissionRejected
+		}
+		return body, nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
 	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {
 		if forCountTokens && isClaudeOAuthCountTokensAuxRequest(c, parsed) {

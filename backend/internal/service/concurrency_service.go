@@ -507,9 +507,10 @@ func renewBuyerLease(cache MarketSlotCache, accountID int64, requestID string, s
 	}
 }
 
-// BuyerLeaseHeld reports whether a buyer lease is still a live member of
-// both slot sets (one Redis call). An empty lease id is never held.
-func (s *ConcurrencyService) BuyerLeaseHeld(ctx context.Context, accountID int64, leaseID string) (bool, error) {
+// RenewBuyerLease atomically refreshes a buyer lease iff it is still a
+// live member of both slot sets (one Redis call); false = lost. An empty
+// lease id is never held.
+func (s *ConcurrencyService) RenewBuyerLease(ctx context.Context, accountID int64, leaseID string) (bool, error) {
 	if s == nil || leaseID == "" {
 		return false, nil
 	}
@@ -517,7 +518,7 @@ func (s *ConcurrencyService) BuyerLeaseHeld(ctx context.Context, accountID int64
 	if !ok {
 		return false, errors.New("buyer slot cache unavailable")
 	}
-	return cache.AccountBuyerLeaseHeld(ctx, accountID, leaseID)
+	return cache.RenewAccountBuyerSlot(ctx, accountID, leaseID)
 }
 
 // GetAccountBuyerConcurrencyBatch returns live buyer leases per account.
