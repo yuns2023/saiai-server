@@ -70,14 +70,10 @@ type UsageSettlementInput struct {
 	MissingPrice bool
 	ZeroUsage    bool
 
-	// MarketPath is frozen on the successful attempt when it was admitted on
-	// the market (buyer) path, independently of Market, so a lost proof is
-	// detectable: MarketPath && Market == nil is an integrity error.
-	MarketPath bool
 	// Market is the admission proof of a market (shared_sale) attempt, set by
 	// the market selection path (BE2) and consumed by the settlement (BE3).
-	// nil for every other sale. Neither field is part of the billing
-	// fingerprint.
+	// nil for every other sale. Not part of the billing fingerprint. Whether
+	// the sale MUST settle as market is UsageBillingCommand.MarketPath.
 	Market *MarketSettlementProof
 }
 

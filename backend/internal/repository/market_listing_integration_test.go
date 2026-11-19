@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
@@ -270,15 +271,17 @@ func TestMigration134UpgradeKeepsMembershipsAndShadowEvents(t *testing.T) {
 	}
 	require.Error(t, insertEvent("m134-a", "owned_other", "0.5", ""), "positive earning only on shared_sale")
 	require.Error(t, insertEvent("m134-b", "shared_sale", "0.8", ""), "shared_sale needs admission and money columns")
-	require.Error(t, insertEvent("m134-c", "shared_sale", "0.8", "admission_id=1,charged_amount=1,platform_amount=0.3,platform_cut_rate=0.2"), "split must be exact")
-	require.Error(t, insertEvent("m134-d", "shared_sale", "1.2", "admission_id=2,charged_amount=1,platform_amount=-0.2,platform_cut_rate=0.2"), "earning above charge")
-	require.Error(t, insertEvent("m134-e", "shared_sale", "0", "admission_id=3,charged_amount=1,platform_amount=1,platform_cut_rate=0.2"), "zero earning needs a reason")
+	require.Error(t, insertEvent("m134-c", "shared_sale", "0.8", "admission_id=1,charged_amount=1,platform_amount=0.3,platform_cut_rate=0.2,earning_available_at=NOW()"), "split must be exact")
+	require.Error(t, insertEvent("m134-d", "shared_sale", "1.2", "admission_id=2,charged_amount=1,platform_amount=-0.2,platform_cut_rate=0.2,earning_available_at=NOW()"), "earning above charge")
+	require.Error(t, insertEvent("m134-e", "shared_sale", "0", "admission_id=3,charged_amount=1,platform_amount=1,platform_cut_rate=0.2,earning_available_at=NOW()"), "zero earning needs a reason")
 	require.Error(t, insertEvent("m134-f", "hosted_self", "0", "earning_zero_reason='other'"), "market columns only on shared_sale")
-	require.NoError(t, insertEvent("m134-g", "shared_sale", "0.8", "admission_id=4,charged_amount=1,platform_amount=0.2,platform_cut_rate=0.2"))
-	require.NoError(t, insertEvent("m134-h", "shared_sale", "0", "admission_id=5,charged_amount=1,platform_amount=1,platform_cut_rate=0.2,earning_zero_reason='self_purchase'"))
-	err = insertEvent("m134-i", "shared_sale", "0.8", "admission_id=4,charged_amount=1,platform_amount=0.2,platform_cut_rate=0.2")
+	require.NoError(t, insertEvent("m134-g", "shared_sale", "0.8", "admission_id=4,charged_amount=1,platform_amount=0.2,platform_cut_rate=0.2,earning_available_at=NOW()"))
+	require.NoError(t, insertEvent("m134-h", "shared_sale", "0", "admission_id=5,charged_amount=1,platform_amount=1,platform_cut_rate=0.2,earning_zero_reason='self_purchase',earning_available_at=NOW()"))
+	err = insertEvent("m134-i", "shared_sale", "0.8", "admission_id=4,charged_amount=1,platform_amount=0.2,platform_cut_rate=0.2,earning_available_at=NOW()")
 	requirePQCode(t, err, "23505", "one event per admission")
-	require.Error(t, insertEvent("m134-j", "shared_sale", "0", "admission_id=6,charged_amount=1,platform_amount=1,platform_cut_rate=0.2,earning_zero_reason='bogus'"))
+	require.Error(t, insertEvent("m134-k", "shared_sale", "0.8", "admission_id=7,charged_amount=1,platform_amount=0.2,platform_cut_rate=0.2"), "freeze snapshot required on shared_sale")
+	require.Error(t, insertEvent("m134-l", "owned_other", "0", "earning_available_at=NOW()"), "freeze snapshot only on shared_sale")
+	require.Error(t, insertEvent("m134-j", "shared_sale", "0", "admission_id=6,charged_amount=1,platform_amount=1,platform_cut_rate=0.2,earning_zero_reason='bogus',earning_available_at=NOW()"))
 
 	// groups.market_tier CHECK.
 	for _, bad := range []string{
@@ -332,8 +335,8 @@ func TestMarketLedgerConstraints(t *testing.T) {
 	var eventID int64
 	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version,
 		buyer_user_id, account_id, owner_source, self_purchase, standard_cost, charge_input, charge_source, owner_earning,
-		admission_id, charged_amount, platform_amount, platform_cut_rate)
-		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 0.8, $2, 1, 0.2, 0.2) RETURNING id`,
+		admission_id, charged_amount, platform_amount, platform_cut_rate, earning_available_at)
+		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 0.8, $2, 1, 0.2, 0.2, NOW()) RETURNING id`,
 		"ledger-"+uuid.NewString(), time.Now().UnixNano()).Scan(&eventID))
 
 	step := func(name, query string, args ...any) error {
@@ -374,15 +377,15 @@ func TestMarketLedgerConstraints(t *testing.T) {
 	var freshEventID int64
 	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version,
 		buyer_user_id, account_id, owner_source, self_purchase, standard_cost, charge_input, charge_source, owner_earning,
-		admission_id, charged_amount, platform_amount, platform_cut_rate)
-		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 0.8, $2, 1, 0.2, 0.2) RETURNING id`,
+		admission_id, charged_amount, platform_amount, platform_cut_rate, earning_available_at)
+		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 0.8, $2, 1, 0.2, 0.2, NOW()) RETURNING id`,
 		"ledger-"+uuid.NewString(), time.Now().UnixNano()+1).Scan(&freshEventID))
 	requirePQCode(t, step("NaN accrue", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount, settlement_event_id, available_at)
 		VALUES (11, 'accrue', 'NaN', $1, NOW())`, freshEventID), "23514", "NaN is not a positive amount")
 	requirePQCode(t, step("NaN split", `INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version,
 		buyer_user_id, account_id, owner_source, self_purchase, standard_cost, charge_input, charge_source, owner_earning,
-		admission_id, charged_amount, platform_amount, platform_cut_rate)
-		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 'NaN', $2, 'NaN', 'NaN', 0.2)`,
+		admission_id, charged_amount, platform_amount, platform_cut_rate, earning_available_at)
+		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 'NaN', $2, 'NaN', 'NaN', 0.2, NOW())`,
 		"ledger-"+uuid.NewString(), time.Now().UnixNano()+2), "23514", "NaN split rejected")
 	require.NoError(t, step("wallet", `INSERT INTO owner_earning_wallets (user_id) VALUES (9)`))
 	requirePQCode(t, step("wallet twice", `INSERT INTO owner_earning_wallets (user_id) VALUES (9)`), "23505", "one wallet per user")
@@ -392,29 +395,86 @@ func TestMarketAdmissionStore(t *testing.T) {
 	ctx := context.Background()
 	f := newMarketFixture(t)
 	owner := f.user(t)
+	buyer := f.user(t)
+	tier := f.group(t, true)
 	acc := f.account(t, owner)
-	in := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-" + uuid.NewString(), AccountID: acc, GroupID: 1, OwnerUserID: owner,
-		OwnerEventID: 1, ListingVersion: 1, BuyerUserID: owner + 1, APIKeyID: 3}
-	got, err := f.market.InsertMarketAdmission(ctx, in)
+	f.configure(t, acc, tier)
+	_, err := f.list(acc, owner, tier)
+	require.NoError(t, err)
+
+	// The check sees the authoritative state and fills the pinned versions.
+	var seen *service.MarketAdmissionState
+	fill := func(st *service.MarketAdmissionState, in *service.MarketAdmission) error {
+		seen = st
+		if st.Listing == nil || st.Listing.Status != service.MarketListingStatusListed || !st.MarketMember || !st.GroupMarketTier {
+			return errors.New("not listed")
+		}
+		in.OwnerUserID = *st.Account.OwnerUserID
+		in.OwnerEventID = st.OwnerEventID
+		in.ListingVersion = st.Listing.Version
+		return nil
+	}
+	in := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-" + uuid.NewString(), AccountID: acc, GroupID: tier,
+		BuyerUserID: buyer, APIKeyID: 3}
+	got, err := f.market.AdmitMarket(ctx, in, fill)
 	require.NoError(t, err)
 	require.Positive(t, got.ID)
 	require.WithinDuration(t, time.Now(), got.AdmittedAt, time.Minute)
-	_, err = f.market.InsertMarketAdmission(ctx, in)
+	require.Equal(t, service.StatusActive, seen.OwnerUserStatus)
+	require.False(t, seen.AdminMember)
+	require.Equal(t, owner, *seen.OwnerEventUserID)
+	require.False(t, seen.DBNow.IsZero())
+	require.Equal(t, owner, got.OwnerUserID)
+	require.Equal(t, seen.Listing.Version, got.ListingVersion)
+	_, err = f.market.AdmitMarket(ctx, in, fill)
 	require.ErrorIs(t, err, service.ErrMarketAdmissionAttemptExists)
 	read, err := f.market.GetMarketAdmission(ctx, got.ID)
 	require.NoError(t, err)
 	require.Equal(t, in.AttemptID, read.AttemptID)
 	require.Equal(t, in.RequestRef, read.RequestRef)
 	require.Equal(t, owner, read.OwnerUserID)
+	byAttempt, err := f.market.GetMarketAdmissionByAttempt(ctx, in.AttemptID)
+	require.NoError(t, err)
+	require.Equal(t, got.ID, byAttempt.ID)
 	_, err = f.market.GetMarketAdmission(ctx, -1)
 	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE market_admissions SET owner_user_id = 1 WHERE id = $1", got.ID)
 	require.Error(t, err, "admissions are immutable")
 	_, err = integrationDB.ExecContext(ctx, "DELETE FROM market_admissions WHERE id = $1", got.ID)
 	require.Error(t, err, "admissions are never deleted")
-	byAttempt, err := f.market.GetMarketAdmissionByAttempt(ctx, in.AttemptID)
+
+	// A failing check inserts nothing.
+	_, err = f.market.OwnerSet(ctx, service.MarketOwnerSetParams{OwnerUserID: owner, AccountID: acc, Listed: false})
 	require.NoError(t, err)
-	require.Equal(t, got.ID, byAttempt.ID)
+	refused := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-x", AccountID: acc, GroupID: tier, BuyerUserID: buyer, APIKeyID: 3}
+	_, err = f.market.AdmitMarket(ctx, refused, fill)
+	require.EqualError(t, err, "not listed")
+	_, err = f.market.GetMarketAdmissionByAttempt(ctx, refused.AttemptID)
+	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
+
+	// The listing share lock serializes with a listing write in flight.
+	_, err = f.list(acc, owner, tier)
+	require.NoError(t, err)
+	writer, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = writer.Rollback() }()
+	_, err = lockMarketAccountTx(ctx, writer, acc)
+	require.NoError(t, err)
+	require.NoError(t, marketUnlistAccountTx(ctx, writer, acc, service.MarketListingActionOwnerUnlist, false, service.MarketListingActorOwner, owner))
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.market.AdmitMarket(ctx, &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-y", AccountID: acc,
+			GroupID: tier, BuyerUserID: buyer, APIKeyID: 3}, fill)
+		done <- err
+	}()
+	waitForLockWait(t)
+	require.NoError(t, writer.Commit())
+	select {
+	case err := <-done:
+		require.EqualError(t, err, "not listed", "the admission saw the committed unlist")
+	case <-time.After(10 * time.Second):
+		t.Fatal("admission did not finish")
+	}
 }
 
 // ---- listing lifecycle ----
@@ -656,13 +716,14 @@ func TestMarketListedAccountNotSchedulable(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, loaded.AccountGroups)
 	require.Equal(t, []int64{tier}, loaded.MarketGroupIDs)
-	// Admin views of a group (members, counts) are admin bindings only.
+	// Admin views of a group list and count every member (admin bindings
+	// and market listings); only scheduling reads filter.
 	page, _, err := f.accounts.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, "", "", "", "", tier)
 	require.NoError(t, err)
-	require.Equal(t, []int64{selfRun}, ids(page))
+	require.ElementsMatch(t, []int64{selfRun, listed}, ids(page))
 	total, _, err := f.groups.GetAccountCount(ctx, tier)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), total)
+	require.Equal(t, int64(2), total)
 }
 
 func TestMarketListingOwnerLifecycleHooksUnlist(t *testing.T) {
@@ -1017,4 +1078,164 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("override save did not finish")
 	}
+}
+
+func TestMarketListingSelfOnboardedProxyUnavailable(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	owner := f.user(t)
+	tier := f.group(t, true)
+	acc := f.account(t, owner)
+	f.configure(t, acc, tier)
+	_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET self_onboarded = TRUE, proxy_id = NULL WHERE id = $1", acc)
+	require.NoError(t, err)
+
+	svc := service.NewMarketListingService(f.market, NewSettingRepository(integrationEntClient))
+	view, err := svc.OwnerGet(ctx, owner, acc)
+	require.NoError(t, err)
+	require.False(t, view.CanList)
+	require.Contains(t, view.UnavailableReasons, service.MarketReasonProxyUnavailable)
+	_, err = f.list(acc, owner, tier)
+	requireReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE")
+	require.Empty(t, marketMemberships(t, acc))
+
+	// With a live active proxy it can list.
+	proxy := mustCreateProxy(t, integrationEntClient, &service.Proxy{Name: "mkt-" + uuid.NewString()[:8], Protocol: "socks5h", Host: "203.0.113.20", Port: 1080, Status: service.StatusActive})
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "UPDATE accounts SET proxy_id = NULL WHERE id = $1", acc)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM proxies WHERE id = $1", proxy.ID)
+	})
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET proxy_id = $2 WHERE id = $1", acc, proxy.ID)
+	require.NoError(t, err)
+	view, err = svc.OwnerGet(ctx, owner, acc)
+	require.NoError(t, err)
+	require.True(t, view.CanList, view.UnavailableReasons)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE proxies SET status = 'disabled' WHERE id = $1", proxy.ID)
+	require.NoError(t, err)
+	view, err = svc.OwnerGet(ctx, owner, acc)
+	require.NoError(t, err)
+	require.Contains(t, view.UnavailableReasons, service.MarketReasonProxyUnavailable)
+}
+
+func TestAddToGroupDuplicateAdminBindingKeepsError(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	plain := f.group(t, false)
+	acc := f.account(t, 0)
+	require.NoError(t, f.accounts.AddToGroup(ctx, acc, plain, 1))
+	err := f.accounts.AddToGroup(ctx, acc, plain, 1)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, service.ErrMarketMembershipConflict, "a duplicate admin binding keeps its original error")
+}
+
+func TestBindGroupsEmptyListRebuildsBuckets(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	plain := f.group(t, false)
+	acc := f.account(t, 0)
+	require.NoError(t, f.accounts.BindGroups(ctx, acc, []int64{plain}))
+
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+	cfg := &config.Config{RunMode: config.RunModeStandard, Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+		OutboxPollIntervalSeconds: 1, DbFallbackEnabled: true}}}
+	snapshots := service.NewSchedulerSnapshotService(cache, NewSchedulerOutboxRepository(integrationDB), f.accounts, nil, cfg)
+	groupBucket := service.SchedulerBucket{GroupID: plain, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeMixed}
+	ungroupedBucket := service.SchedulerBucket{GroupID: 0, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeMixed}
+	contains := func(bucket service.SchedulerBucket) bool {
+		cached, hit, err := cache.GetSnapshot(ctx, bucket)
+		if err != nil || !hit {
+			return false
+		}
+		for _, a := range cached {
+			if a.ID == acc {
+				return true
+			}
+		}
+		return false
+	}
+	// Warm both buckets: the account is in its group, not ungrouped.
+	_, _, err := snapshots.ListSchedulableAccounts(ctx, &plain, service.PlatformAnthropic, false)
+	require.NoError(t, err)
+	_, _, err = snapshots.ListSchedulableAccounts(ctx, nil, service.PlatformAnthropic, false)
+	require.NoError(t, err)
+	require.True(t, contains(groupBucket))
+	require.False(t, contains(ungroupedBucket))
+
+	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox")
+	// Let the startup rebuild of the known buckets finish first (it would
+	// otherwise rebuild them regardless of the outbox events under test).
+	snapshots.Start()
+	t.Cleanup(snapshots.Stop)
+	lockKeys := []string{schedulerBucketKey(schedulerLockPrefix, groupBucket), schedulerBucketKey(schedulerLockPrefix, ungroupedBucket)}
+	require.Eventually(t, func() bool {
+		for _, key := range lockKeys { // one key per command (namespaced client)
+			if n, err := rdb.Exists(ctx, key).Result(); err != nil || n != 1 {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 50*time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	require.True(t, contains(groupBucket))
+	require.False(t, contains(ungroupedBucket))
+	// Lift the 30 s rebuild throttle, then change the bindings: only the
+	// outbox events can now move the account.
+	for _, key := range lockKeys {
+		require.NoError(t, rdb.Del(ctx, key).Err())
+	}
+	require.NoError(t, f.accounts.BindGroups(ctx, acc, nil))
+	require.Eventually(t, func() bool { return contains(ungroupedBucket) && !contains(groupBucket) }, 15*time.Second, 100*time.Millisecond,
+		"emptying the bindings rebuilds the old group bucket and the ungrouped bucket")
+}
+
+func TestGroupSaveAndSortOrderDeadlockRetries(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	low := f.group(t, false)  // smaller id: the fallback target
+	high := f.group(t, false) // saved with fallback → low
+
+	// The sort transaction locks "low" first (as UpdateSortOrders does in id
+	// order) and keeps its own deadlock detector slow, so the group save is
+	// the one PostgreSQL aborts — and its retry must succeed.
+	sorter, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = sorter.Rollback() }()
+	_, err = sorter.ExecContext(ctx, "SET LOCAL deadlock_timeout = '10s'")
+	require.NoError(t, err)
+	_, err = sorter.ExecContext(ctx, "UPDATE groups SET sort_order = 7 WHERE id = $1", low)
+	require.NoError(t, err)
+
+	g, err := f.groups.GetByID(ctx, high)
+	require.NoError(t, err)
+	g.FallbackGroupID = &low
+	saved := make(chan error, 1)
+	go func() { saved <- f.groups.Update(ctx, g) }()
+	waitForLockWait(t) // save holds "high", waits for its share lock on "low"
+	sorted := make(chan error, 1)
+	go func() {
+		_, err := sorter.ExecContext(ctx, "UPDATE groups SET sort_order = 8 WHERE id = $1", high)
+		if err == nil {
+			err = sorter.Commit()
+		}
+		sorted <- err
+	}()
+	for _, ch := range []chan error{sorted, saved} {
+		select {
+		case err := <-ch:
+			require.NoError(t, err)
+		case <-time.After(30 * time.Second):
+			t.Fatal("deadlock not resolved")
+		}
+	}
+	var fallback sql.NullInt64
+	var lowOrder, highOrder int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT fallback_group_id, sort_order FROM groups WHERE id = $1", high).Scan(&fallback, &highOrder))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT sort_order FROM groups WHERE id = $1", low).Scan(&lowOrder))
+	require.Equal(t, low, fallback.Int64, "the group save was retried and applied")
+	require.Equal(t, 7, lowOrder, "the sort update applied")
+	require.Equal(t, 8, highOrder)
+
+	// The repository sort path itself runs in id order with retry.
+	require.NoError(t, f.groups.UpdateSortOrders(ctx, []service.GroupSortOrderUpdate{{ID: high, SortOrder: 1}, {ID: low, SortOrder: 2}}))
 }

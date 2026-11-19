@@ -598,7 +598,9 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	if groupID == service.AccountListGroupUngrouped {
 		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))
 	} else if groupID > 0 {
-		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID), dispatchableAccountGroupPredicate()))
+		// Admin list: every member of the group, admin bindings and market
+		// listings alike (scheduling reads use the dispatchable predicate).
+		q = q.Where(dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID)))
 	}
 
 	total, err := q.Count(ctx)
@@ -893,20 +895,22 @@ func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 }
 
 func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID int64, priority int) error {
-	if market, err := r.client.AccountGroup.Query().
-		Where(dbaccountgroup.AccountIDEQ(accountID), dbaccountgroup.GroupIDEQ(groupID),
-			dbaccountgroup.SourceEQ(service.AccountGroupSourceMarket)).
-		Exist(ctx); err != nil {
-		return err
-	} else if market {
-		return service.ErrMarketMembershipConflict
-	}
 	_, err := r.client.AccountGroup.Create().
 		SetAccountID(accountID).
 		SetGroupID(groupID).
 		SetPriority(priority).
 		Save(ctx)
 	if err != nil {
+		// The pair exists: only a market listing of it maps to the market
+		// conflict; a duplicate admin binding keeps its original error.
+		if isUniqueConstraintViolation(err) {
+			if market, qerr := r.client.AccountGroup.Query().
+				Where(dbaccountgroup.AccountIDEQ(accountID), dbaccountgroup.GroupIDEQ(groupID),
+					dbaccountgroup.SourceEQ(service.AccountGroupSourceMarket)).
+				Exist(ctx); qerr == nil && market {
+				return service.ErrMarketMembershipConflict
+			}
+		}
 		return err
 	}
 	payload := buildSchedulerGroupPayload([]int64{groupID})
@@ -935,6 +939,9 @@ func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, grou
 	return nil
 }
 
+// GetGroups returns every group the account belongs to, from all
+// membership sources (admin bindings and market listings); it is not a
+// scheduling read.
 func (r *accountRepository) GetGroups(ctx context.Context, accountID int64) ([]service.Group, error) {
 	groups, err := r.client.Group.Query().
 		Where(
@@ -1002,24 +1009,18 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		return err
 	}
 
-	if len(groupIDs) == 0 {
-		if tx != nil {
-			return tx.Commit()
+	if len(groupIDs) > 0 {
+		builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
+		for i, groupID := range groupIDs {
+			builders = append(builders, txClient.AccountGroup.Create().
+				SetAccountID(accountID).
+				SetGroupID(groupID).
+				SetPriority(i+1),
+			)
 		}
-		return nil
-	}
-
-	builders := make([]*dbent.AccountGroupCreate, 0, len(groupIDs))
-	for i, groupID := range groupIDs {
-		builders = append(builders, txClient.AccountGroup.Create().
-			SetAccountID(accountID).
-			SetGroupID(groupID).
-			SetPriority(i+1),
-		)
-	}
-
-	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
-		return err
+		if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
+			return err
+		}
 	}
 
 	if tx != nil {
@@ -1027,9 +1028,19 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 			return err
 		}
 	}
+	// Also when the new list is empty (the old groups' buckets must drop the
+	// account); with no admin group left, a second event without a group
+	// list rebuilds the account's ungrouped bucket.
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
-		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+	if payload != nil {
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
+		}
+	}
+	if len(groupIDs) == 0 {
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, nil); err != nil {
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups (ungrouped) failed: account=%d err=%v", accountID, err)
+		}
 	}
 	return nil
 }

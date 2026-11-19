@@ -42,13 +42,50 @@ type MarketAdmission struct {
 // ErrMarketAdmissionAttemptExists: the attempt id was already recorded.
 var ErrMarketAdmissionAttemptExists = errors.New("market admission attempt already recorded")
 
-// MarketAdmissionRepository is the admission store. InsertMarketAdmission
-// sets ID / AdmittedAt / CreatedAt from the database and returns
-// ErrMarketAdmissionAttemptExists on a duplicate attempt id. It performs no
-// eligibility checks: BE2 verifies account, owner version, listing version,
-// group and seller state in its own transaction before inserting.
+// MarketAdmissionState is the authoritative state AdmitMarket reads inside
+// its transaction, after share-locking the listing row (every listing change
+// — owner list/unlist/switch, admin configure/revoke, owner cleared/paused/
+// withdrawn, account delete, tier group removal — updates that row, so it is
+// stable until commit).
+type MarketAdmissionState struct {
+	// Listing is nil when the account has no listing row.
+	Listing *MarketListing
+	// Account is nil when the account is missing or deleted. Same facts as
+	// the listing checks (owner, pause/withdraw, status, schedulable, carpool
+	// extra, concurrency, self-onboarded proxy).
+	Account *Account
+	// OwnerEventID / OwnerEventUserID: the latest account_owner_events row
+	// (0 / nil when the account has no ownership history).
+	OwnerEventID     int64
+	OwnerEventUserID *int64
+	// OwnerUserStatus is users.status of Account.OwnerUserID ("" = no owner
+	// or the user is deleted).
+	OwnerUserStatus string
+	// Group facts of MarketAdmission.GroupID (GroupFound=false: missing or
+	// deleted).
+	GroupFound      bool
+	GroupMarketTier bool
+	GroupStatus     string
+	GroupPlatform   string
+	// Membership rows of (account, group).
+	AdminMember  bool
+	MarketMember bool
+	// DBNow is clock_timestamp() after the locks.
+	DBNow time.Time
+}
+
+// MarketAdmissionRepository is the admission store.
+//
+// AdmitMarket is the authoritative "check then insert" unit of work, one
+// transaction: share-lock the listing row → read MarketAdmissionState →
+// check(state, in) (the caller's rules; it may fill in OwnerUserID,
+// OwnerEventID, ListingVersion from the state; an error aborts and is
+// returned unchanged) → insert. The database sets ID / AdmittedAt
+// (clock_timestamp()) / CreatedAt. A duplicate attempt id returns
+// ErrMarketAdmissionAttemptExists. A commit error leaves the outcome
+// unknown: confirm with GetMarketAdmissionByAttempt or do not dispatch.
 type MarketAdmissionRepository interface {
-	InsertMarketAdmission(ctx context.Context, in *MarketAdmission) (*MarketAdmission, error)
+	AdmitMarket(ctx context.Context, in *MarketAdmission, check func(state *MarketAdmissionState, in *MarketAdmission) error) (*MarketAdmission, error)
 	// GetMarketAdmission / GetMarketAdmissionByAttempt return
 	// ErrMarketAdmissionNotFound when missing (by attempt: to confirm an
 	// insert whose commit result is unknown).
@@ -59,9 +96,9 @@ type MarketAdmissionRepository interface {
 var ErrMarketAdmissionNotFound = errors.New("market admission not found")
 
 // MarketSettlementProof is frozen on the successful attempt and carried in
-// UsageSettlementInput.Market; UsageSettlementInput.MarketPath (outside the
-// proof) says the sale must settle as shared_sale. MarketPath with a missing
-// proof, or a proof whose fields differ from the stored admission (including
+// UsageSettlementInput.Market; UsageBillingCommand.MarketPath (top level,
+// outside the nullable Settlement) says the sale must settle as shared_sale.
+// MarketPath with a missing Settlement or proof, or a proof whose fields differ from the stored admission (including
 // RequestRef = the server-generated request id of the request being
 // settled), is an integrity error: the whole charge rolls back. Not part of
 // the billing fingerprint.

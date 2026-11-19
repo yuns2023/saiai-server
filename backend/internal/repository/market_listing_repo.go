@@ -125,7 +125,9 @@ func (r *marketListingRepository) GetListing(ctx context.Context, accountID int6
 
 // marketAccountColumns are the account fields the listing checks need.
 const marketAccountColumns = `id, platform, type, extra, concurrency, status, schedulable,
-	owner_user_id, owner_paused_at, owner_withdraw_requested_at`
+	owner_user_id, owner_paused_at, owner_withdraw_requested_at, self_onboarded, proxy_id,
+	(SELECT p.status FROM proxies p WHERE p.id = accounts.proxy_id AND p.deleted_at IS NULL),
+	(SELECT p.host FROM proxies p WHERE p.id = accounts.proxy_id AND p.deleted_at IS NULL)`
 
 func scanMarketAccount(ctx context.Context, q sqlQueryer, query string, args ...any) (*service.Account, error) {
 	var (
@@ -134,10 +136,21 @@ func scanMarketAccount(ctx context.Context, q sqlQueryer, query string, args ...
 		owner     sql.NullInt64
 		paused    sql.NullTime
 		withdrawn sql.NullTime
+		proxyID   sql.NullInt64
+		proxyStat sql.NullString
+		proxyHost sql.NullString
 	)
 	if err := scanSingleRow(ctx, q, query, args, &a.ID, &a.Platform, &a.Type, &extra, &a.Concurrency,
-		&a.Status, &a.Schedulable, &owner, &paused, &withdrawn); err != nil {
+		&a.Status, &a.Schedulable, &owner, &paused, &withdrawn, &a.SelfOnboarded, &proxyID, &proxyStat, &proxyHost); err != nil {
 		return nil, err
+	}
+	// Live proxy (same facts as the scheduling proxy predicate).
+	if proxyID.Valid {
+		id := proxyID.Int64
+		a.ProxyID = &id
+		if proxyStat.Valid {
+			a.Proxy = &service.Proxy{ID: id, Status: proxyStat.String, Host: proxyHost.String}
+		}
 	}
 	if len(extra) > 0 {
 		if err := json.Unmarshal(extra, &a.Extra); err != nil {
@@ -832,8 +845,74 @@ func insertMarketAdmissionTx(ctx context.Context, q sqlQueryer, in *service.Mark
 	return &out, nil
 }
 
-func (r *marketListingRepository) InsertMarketAdmission(ctx context.Context, in *service.MarketAdmission) (*service.MarketAdmission, error) {
-	return insertMarketAdmissionTx(ctx, r.db, in)
+func (r *marketListingRepository) AdmitMarket(ctx context.Context, in *service.MarketAdmission,
+	check func(state *service.MarketAdmissionState, in *service.MarketAdmission) error) (*service.MarketAdmission, error) {
+	if in == nil || check == nil {
+		return nil, errors.New("market admission: missing input or check")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	state := &service.MarketAdmissionState{}
+	// Share lock: conflicts with every listing write (they all UPDATE this
+	// row), not with other admissions. Lock order: listing row only.
+	if state.Listing, err = queryMarketListing(ctx, tx,
+		"SELECT "+marketListingColumns+" FROM account_market_listings WHERE account_id = $1 FOR SHARE", in.AccountID); err != nil {
+		return nil, err
+	}
+	account, err := scanMarketAccount(ctx, tx,
+		"SELECT "+marketAccountColumns+" FROM accounts WHERE id = $1 AND deleted_at IS NULL", in.AccountID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return nil, err
+	default:
+		state.Account = account
+	}
+	var lastID, lastOwner sql.NullInt64
+	if err := scanSingleRow(ctx, tx, `SELECT id, new_owner_user_id FROM account_owner_events
+		WHERE account_id = $1 ORDER BY id DESC LIMIT 1`, []any{in.AccountID}, &lastID, &lastOwner); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	state.OwnerEventID = lastID.Int64
+	if lastOwner.Valid {
+		v := lastOwner.Int64
+		state.OwnerEventUserID = &v
+	}
+	if state.Account != nil && state.Account.OwnerUserID != nil {
+		if err := scanSingleRow(ctx, tx, "SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL",
+			[]any{*state.Account.OwnerUserID}, &state.OwnerUserStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+	if err := scanSingleRow(ctx, tx, "SELECT market_tier, status, platform FROM groups WHERE id = $1 AND deleted_at IS NULL",
+		[]any{in.GroupID}, &state.GroupMarketTier, &state.GroupStatus, &state.GroupPlatform); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	} else {
+		state.GroupFound = true
+	}
+	if err := scanSingleRow(ctx, tx, `SELECT
+			COALESCE(bool_or(source = 'admin'), FALSE), COALESCE(bool_or(source = 'market'), FALSE), clock_timestamp()
+		FROM account_groups WHERE account_id = $1 AND group_id = $2`,
+		[]any{in.AccountID, in.GroupID}, &state.AdminMember, &state.MarketMember, &state.DBNow); err != nil {
+		return nil, err
+	}
+	if err := check(state, in); err != nil {
+		return nil, err
+	}
+	out, err := insertMarketAdmissionTx(ctx, tx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *marketListingRepository) GetMarketAdmission(ctx context.Context, id int64) (*service.MarketAdmission, error) {

@@ -57,8 +57,20 @@ func TestGroupValidateMarketTier(t *testing.T) {
 // marketTierGroupRepo adds the tier guard to the fallback-chain stub.
 type marketTierGroupRepo struct {
 	groupRepoStubForFallbackCycle
-	referrers map[int64][]int64
-	updated   *Group
+	referrers   map[int64][]int64
+	updated     *Group
+	tierLookups int
+}
+
+func (s *marketTierGroupRepo) ListMarketTierIDs(_ context.Context, ids []int64) ([]int64, error) {
+	s.tierLookups++
+	var out []int64
+	for _, id := range ids {
+		if g, ok := s.groups[id]; ok && g.MarketTier {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 func (s *marketTierGroupRepo) Update(_ context.Context, g *Group) error {
@@ -162,6 +174,14 @@ func TestMarketTierRateOverrideSavePaths(t *testing.T) {
 	_, err = svc.UpdateUser(ctx, 5, &UpdateUserInput{GroupRates: map[int64]*float64{1: &negative}})
 	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	require.Empty(t, userGroupRatesToCheck(map[int64]*float64{1: nil}), "deleting an override is always allowed")
+
+	// Positive-at-storage values need no lookup at all; the rest one batch.
+	groups.tierLookups = 0
+	one, tiny := 1.5, 0.00001
+	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{1: &one, 2: &one, 3: &one})))
+	require.Zero(t, groups.tierLookups)
+	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{2: &tiny, 3: &zero})))
+	require.Equal(t, 1, groups.tierLookups)
 }
 
 func TestMarketAccountIneligibleReason(t *testing.T) {
@@ -184,6 +204,16 @@ func TestMarketAccountIneligibleReason(t *testing.T) {
 	sessions := carpool()
 	sessions.Extra["max_sessions"] = 2
 	require.Equal(t, MarketReasonMaxSessions, MarketAccountIneligibleReason(sessions))
+
+	owner := int64(7)
+	self := carpool()
+	self.OwnerUserID, self.Status, self.Schedulable, self.SelfOnboarded = &owner, StatusActive, true, true
+	require.Equal(t, MarketReasonProxyUnavailable, marketListBlockedReason(self))
+	proxyID := int64(3)
+	self.ProxyID, self.Proxy = &proxyID, &Proxy{ID: 3, Status: StatusActive, Host: "203.0.113.5"}
+	require.Empty(t, marketListBlockedReason(self))
+	self.Proxy.Status = "disabled"
+	require.Equal(t, MarketReasonProxyUnavailable, marketListBlockedReason(self))
 }
 
 func TestValidateMarketProtectionForAccount(t *testing.T) {

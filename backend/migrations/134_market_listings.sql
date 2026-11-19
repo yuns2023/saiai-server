@@ -25,8 +25,9 @@
 -- the billing transaction never takes KEY SHARE locks on those rows and the
 -- history survives deletes.
 --
--- usage_settlement_events: adds the 'shared_sale' category and the market
--- money columns. Only shared_sale rows may carry a positive owner earning;
+-- usage_settlement_events: adds the 'shared_sale' category, the market
+-- money columns and earning_available_at (freeze snapshot, required on
+-- shared_sale rows, NULL on the P2b shadow rows). Only shared_sale rows may carry a positive owner earning;
 -- the P2b shadow categories stay pinned to 0. Existing rows satisfy every
 -- new constraint (owner_earning = 0, new columns NULL).
 --
@@ -289,6 +290,9 @@ ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS charged_amount NUME
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS platform_amount NUMERIC(20,10);
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS platform_cut_rate NUMERIC(6,4);
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS earning_zero_reason TEXT;
+-- Freeze snapshot: when the earning of this sale becomes available (event
+-- time + freeze days at settlement), recorded for zero earnings too.
+ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS earning_available_at TIMESTAMPTZ;
 
 -- One ALTER (one validation scan) for every new CHECK on this table.
 ALTER TABLE usage_settlement_events
@@ -304,13 +308,14 @@ ALTER TABLE usage_settlement_events
         -- Market columns only on shared_sale rows.
         (category = 'shared_sale' OR (
             admission_id IS NULL AND charged_amount IS NULL AND platform_amount IS NULL
-            AND platform_cut_rate IS NULL AND earning_zero_reason IS NULL
+            AND platform_cut_rate IS NULL AND earning_zero_reason IS NULL AND earning_available_at IS NULL
         ))
         -- A shared_sale row always comes from an admission and splits the
         -- actual charge exactly: charged = owner earning + platform amount.
         AND (category <> 'shared_sale' OR (
             admission_id IS NOT NULL AND charged_amount IS NOT NULL
             AND platform_amount IS NOT NULL AND platform_cut_rate IS NOT NULL
+            AND earning_available_at IS NOT NULL
             AND charged_amount >= 0 AND charged_amount <> 'NaN'
             AND platform_amount >= 0 AND platform_amount <> 'NaN'
             AND owner_earning <= charged_amount

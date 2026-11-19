@@ -67,7 +67,10 @@ const (
 	MarketReasonOwnerPaused       = "owner_paused"
 	MarketReasonWithdrawRequested = "withdraw_requested"
 	MarketReasonAccountInactive   = "account_inactive"
-	MarketReasonMaxSessions       = "max_sessions_enabled"
+	// MarketReasonProxyUnavailable: a self-onboarded account without a live
+	// active proxy (it is not schedulable either).
+	MarketReasonProxyUnavailable = "proxy_unavailable"
+	MarketReasonMaxSessions      = "max_sessions_enabled"
 	// MarketReasonProtectionInvalid: the stored reservations no longer fit
 	// the account (e.g. concurrency lowered); an admin must re-save them.
 	MarketReasonProtectionInvalid = "protection_invalid"
@@ -247,6 +250,9 @@ func marketListBlockedReason(a *Account) string {
 	if a.OwnerWithdrawRequestedAt != nil {
 		return MarketReasonWithdrawRequested
 	}
+	if a.SelfOnboarded && !a.hasUsableProxy() {
+		return MarketReasonProxyUnavailable
+	}
 	if a.Status != StatusActive || !a.Schedulable {
 		return MarketReasonAccountInactive
 	}
@@ -324,6 +330,12 @@ func MarketTierRateStoredPositive(rate float64) bool {
 // groupID (inbound references block promotion to a tier).
 type MarketTierGroupGuard interface {
 	ListFallbackReferrers(ctx context.Context, groupID int64) ([]int64, error)
+}
+
+// MarketTierLookup is implemented by the group repository: which of the
+// given live groups are market tiers (one query, no edges loaded).
+type MarketTierLookup interface {
+	ListMarketTierIDs(ctx context.Context, groupIDs []int64) ([]int64, error)
 }
 
 // MarketTierRateGuard is implemented by the user-group rate repository:

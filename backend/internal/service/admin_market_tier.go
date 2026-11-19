@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
+	"slices"
 	"sort"
 )
 
@@ -68,29 +68,45 @@ func userGroupRatesToCheck(rates map[int64]*float64) []marketTierRateCheck {
 
 // validateMarketTierRateOverrides refuses an override on a market tier that
 // is not > 0 at the stored DECIMAL(10,4) precision (0, negative, NaN, or a
-// value such as 0.00001 that rounds to 0). Other groups are unchanged.
+// value such as 0.00001 that rounds to 0). Values that are positive at that
+// precision are valid on every group and need no lookup; the rest are
+// checked with one batched query of the groups' market_tier flag.
 func (s *adminServiceImpl) validateMarketTierRateOverrides(ctx context.Context, rates []marketTierRateCheck) error {
-	if len(rates) == 0 || s.groupRepo == nil {
+	if s.groupRepo == nil {
 		return nil
 	}
-	tiers := make(map[int64]bool, len(rates))
+	var suspect []int64
 	for _, item := range rates {
-		isTier, seen := tiers[item.groupID]
-		if !seen {
-			group, err := s.groupRepo.GetByIDLite(ctx, item.groupID)
+		if !MarketTierRateStoredPositive(item.rate) && !slices.Contains(suspect, item.groupID) {
+			suspect = append(suspect, item.groupID)
+		}
+	}
+	if len(suspect) == 0 {
+		return nil
+	}
+	var tiers []int64
+	if lookup, ok := s.groupRepo.(MarketTierLookup); ok {
+		var err error
+		if tiers, err = lookup.ListMarketTierIDs(ctx, suspect); err != nil {
+			return err
+		}
+	} else {
+		for _, id := range suspect {
+			group, err := s.groupRepo.GetByIDLite(ctx, id)
 			if err != nil {
 				if errors.Is(err, ErrGroupNotFound) {
-					tiers[item.groupID] = false
 					continue
 				}
 				return err
 			}
-			isTier = group.MarketTier
-			tiers[item.groupID] = isTier
+			if group.MarketTier {
+				tiers = append(tiers, id)
+			}
 		}
-		if isTier && (math.IsNaN(item.rate) || !MarketTierRateStoredPositive(item.rate)) {
-			return ErrMarketTierRateOverride.WithMetadata(map[string]string{"group_id": fmt.Sprint(item.groupID)})
-		}
+	}
+	if len(tiers) > 0 {
+		sort.Slice(tiers, func(i, j int) bool { return tiers[i] < tiers[j] })
+		return ErrMarketTierRateOverride.WithMetadata(map[string]string{"group_id": fmt.Sprint(tiers[0])})
 	}
 	return nil
 }
