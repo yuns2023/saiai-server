@@ -890,8 +890,10 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 	// One transaction that locks the rows in id order, rerun once on a
 	// deadlock (40P01) against a concurrent group save (whose market tier
 	// trigger share-locks a fallback target after locking its own row).
+	// Only a transaction this method opened is rerun: on a caller's
+	// transaction the deadlock is returned as is (the transaction is aborted).
 	err := r.updateSortOrdersOnce(ctx, groupIDs, query, args)
-	if isPostgresDeadlock(err) {
+	if _, ownTx := r.sql.(*sql.DB); ownTx && isPostgresDeadlock(err) {
 		err = r.updateSortOrdersOnce(ctx, groupIDs, query, args)
 	}
 	if err != nil {

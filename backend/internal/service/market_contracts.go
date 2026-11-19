@@ -77,13 +77,16 @@ type MarketAdmissionState struct {
 // MarketAdmissionRepository is the admission store.
 //
 // AdmitMarket is the authoritative "check then insert" unit of work, one
-// transaction: share-lock the listing row → read MarketAdmissionState →
+// REPEATABLE READ transaction (all facts from one snapshot): share-lock the
+// listing row → read MarketAdmissionState →
 // check(state, in) (the caller's rules; it may fill in OwnerUserID,
 // OwnerEventID, ListingVersion from the state; an error aborts and is
 // returned unchanged) → insert. The database sets ID / AdmittedAt
 // (clock_timestamp()) / CreatedAt. A duplicate attempt id returns
 // ErrMarketAdmissionAttemptExists. A commit error leaves the outcome
-// unknown: confirm with GetMarketAdmissionByAttempt or do not dispatch.
+// unknown: confirm with GetMarketAdmissionByAttempt or do not dispatch. A
+// listing row changed after the snapshot (40001) reruns the transaction once,
+// so check may run twice; it must not have side effects.
 type MarketAdmissionRepository interface {
 	AdmitMarket(ctx context.Context, in *MarketAdmission, check func(state *MarketAdmissionState, in *MarketAdmission) error) (*MarketAdmission, error)
 	// GetMarketAdmission / GetMarketAdmissionByAttempt return

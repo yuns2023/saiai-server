@@ -1162,7 +1162,10 @@ func TestBindGroupsEmptyListRebuildsBuckets(t *testing.T) {
 	require.True(t, contains(groupBucket))
 	require.False(t, contains(ungroupedBucket))
 
-	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox")
+	// Start after the existing outbox rows (other fixtures' events stay).
+	var maxOutboxID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COALESCE(MAX(id), 0) FROM scheduler_outbox").Scan(&maxOutboxID))
+	require.NoError(t, cache.SetOutboxWatermark(ctx, maxOutboxID))
 	// Let the startup rebuild of the known buckets finish first (it would
 	// otherwise rebuild them regardless of the outbox events under test).
 	snapshots.Start()
@@ -1238,4 +1241,79 @@ func TestGroupSaveAndSortOrderDeadlockRetries(t *testing.T) {
 
 	// The repository sort path itself runs in id order with retry.
 	require.NoError(t, f.groups.UpdateSortOrders(ctx, []service.GroupSortOrderUpdate{{ID: high, SortOrder: 1}, {ID: low, SortOrder: 2}}))
+}
+
+func TestUpdateSortOrdersInCallerTxReturnsDeadlock(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	low := f.group(t, false)
+	high := f.group(t, false)
+
+	caller, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = caller.Rollback() }()
+	other, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = other.Rollback() }()
+	_, err = other.ExecContext(ctx, "SET LOCAL deadlock_timeout = '10s'") // the caller is the victim
+	require.NoError(t, err)
+
+	_, err = caller.ExecContext(ctx, "UPDATE groups SET sort_order = 1 WHERE id = $1", low)
+	require.NoError(t, err)
+	_, err = other.ExecContext(ctx, "UPDATE groups SET sort_order = 2 WHERE id = $1", high)
+	require.NoError(t, err)
+	otherDone := make(chan error, 1)
+	go func() {
+		_, err := other.ExecContext(ctx, "UPDATE groups SET sort_order = 3 WHERE id = $1", low)
+		otherDone <- err
+	}()
+	waitForLockWait(t)
+	repo := newGroupRepositoryWithSQL(integrationEntClient, caller)
+	err = repo.UpdateSortOrders(ctx, []service.GroupSortOrderUpdate{{ID: high, SortOrder: 4}})
+	require.True(t, isPostgresDeadlock(err), "the caller's transaction gets the original 40P01, got %v", err)
+	require.NoError(t, caller.Rollback())
+	select {
+	case err := <-otherDone:
+		require.NoError(t, err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("other transaction did not finish")
+	}
+	require.NoError(t, other.Commit())
+}
+
+func TestAdmitMarketUsesOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	owner := f.user(t)
+	buyer := f.user(t)
+	tier := f.group(t, true)
+	acc := f.account(t, owner)
+	f.configure(t, acc, tier)
+	_, err := f.list(acc, owner, tier)
+	require.NoError(t, err)
+	// Account schedulable, owner disabled: not admissible.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = $1", owner)
+	require.NoError(t, err)
+
+	// Between the account read and the owner read, an admin turns the
+	// account's scheduling off and then re-enables the owner. Both facts
+	// "admissible" never held at the same time.
+	admitMarketAfterAccountRead = func() {
+		_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET schedulable = FALSE WHERE id = $1", acc)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(ctx, "UPDATE users SET status = 'active' WHERE id = $1", owner)
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() { admitMarketAfterAccountRead = nil })
+	in := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-z", AccountID: acc, GroupID: tier, BuyerUserID: buyer, APIKeyID: 3}
+	_, err = f.market.AdmitMarket(ctx, in, func(st *service.MarketAdmissionState, in *service.MarketAdmission) error {
+		if st.Account == nil || !st.Account.Schedulable || st.OwnerUserStatus != service.StatusActive {
+			return errors.New("not admissible")
+		}
+		in.OwnerUserID, in.OwnerEventID, in.ListingVersion = owner, st.OwnerEventID, st.Listing.Version
+		return nil
+	})
+	require.EqualError(t, err, "not admissible")
+	_, err = f.market.GetMarketAdmissionByAttempt(ctx, in.AttemptID)
+	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
 }

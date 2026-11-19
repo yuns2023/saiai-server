@@ -845,12 +845,34 @@ func insertMarketAdmissionTx(ctx context.Context, q sqlQueryer, in *service.Mark
 	return &out, nil
 }
 
+// admitMarketAfterAccountRead is a test hook (nil in production) run
+// between the account read and the remaining reads of AdmitMarket.
+var admitMarketAfterAccountRead func()
+
+// AdmitMarket runs at REPEATABLE READ so every eligibility fact comes from
+// one snapshot. A listing row updated concurrently after that snapshot makes
+// the share lock fail with 40001: that attempt inserts nothing and the whole
+// transaction is rerun once.
 func (r *marketListingRepository) AdmitMarket(ctx context.Context, in *service.MarketAdmission,
 	check func(state *service.MarketAdmissionState, in *service.MarketAdmission) error) (*service.MarketAdmission, error) {
 	if in == nil || check == nil {
 		return nil, errors.New("market admission: missing input or check")
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	out, err := r.admitMarketOnce(ctx, in, check)
+	if isSerializationFailure(err) {
+		out, err = r.admitMarketOnce(ctx, in, check)
+	}
+	return out, err
+}
+
+func isSerializationFailure(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "40001"
+}
+
+func (r *marketListingRepository) admitMarketOnce(ctx context.Context, in *service.MarketAdmission,
+	check func(state *service.MarketAdmissionState, in *service.MarketAdmission) error) (*service.MarketAdmission, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return nil, err
 	}
@@ -871,6 +893,9 @@ func (r *marketListingRepository) AdmitMarket(ctx context.Context, in *service.M
 		return nil, err
 	default:
 		state.Account = account
+	}
+	if admitMarketAfterAccountRead != nil {
+		admitMarketAfterAccountRead()
 	}
 	var lastID, lastOwner sql.NullInt64
 	if err := scanSingleRow(ctx, tx, `SELECT id, new_owner_user_id FROM account_owner_events
