@@ -211,6 +211,23 @@ describe('HostedView sharing market', () => {
     expect(again.get('[data-testid=hosted-pause]').attributes('disabled')).toBeUndefined()
   })
 
+  it('a listing action answered after the page was re-entered: the new page shows the result', async () => {
+    const opts = { global: { plugins: [i18n] }, attachTo: document.body }
+    const w = await mountView({ views: { 11: view({ allowed_tiers: [view().allowed_tiers[0]] }) } })
+    let resolve!: (v: unknown) => void
+    market.setListing.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    await w.get('[data-testid=market-list]').trigger('click')
+    w.unmount()
+    // Re-entered while the request is still open: the server still says unlisted.
+    const again = mount(HostedView, opts)
+    await flushPromises()
+    expect(again.get('[data-testid=market-state]').text()).toBe('可上架')
+    market.getListing.mockResolvedValue(view({ status: 'listed', selected_group_id: 3, version: 3, allowed_tiers: [view().allowed_tiers[0]] }))
+    resolve(view({ status: 'listed', selected_group_id: 3, version: 3 }))
+    await flushPromises()
+    expect(again.get('[data-testid=market-state]').text()).toBe('已上架')
+  })
+
   it('a failed ledger probe (all balances zero) keeps the section and a retry', async () => {
     market.entries.mockRejectedValue({ status: 500, message: 'boom' })
     const w = await mountView({ earnings: ZERO })
@@ -547,6 +564,80 @@ describe('HostedView sharing market', () => {
       await flushPromises()
       expect(w.get('[data-testid=earnings-pending]').text()).toContain('$1.00')
       expect(localStorage.getItem(`ccyou.market.pendingConvert.${OWNER_ID}`)).not.toBeNull()
+    })
+
+    it('two tabs confirming at once (Web Locks): one request id is created and sent; no lock is held during the request', async () => {
+      const held: string[] = []
+      let chain: Promise<unknown> = Promise.resolve()
+      const request = vi.fn((name: string, fn: () => unknown) => {
+        const run = chain.then(async () => {
+          held.push(name)
+          try {
+            return await fn()
+          } finally {
+            held.pop()
+          }
+        })
+        chain = run.catch(() => undefined)
+        return run
+      })
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true })
+      try {
+        hosted.listOwnedAccounts.mockResolvedValue([account()])
+        market.getListing.mockResolvedValue(view())
+        market.earnings.mockResolvedValue(SOME)
+        const opts = { global: { plugins: [i18n] }, attachTo: document.body }
+        const tabs = []
+        for (const amt of ['1', '2']) {
+          freshPinia()
+          const w = mount(HostedView, opts)
+          await flushPromises()
+          await w.get('[data-testid=earnings-convert]').trigger('click')
+          await w.get('[data-testid=earnings-amount]').setValue(amt)
+          tabs.push(w)
+        }
+        market.convert.mockImplementation(async () => {
+          expect(held).toEqual([])
+          throw { status: 0, message: 'network' }
+        })
+        await Promise.all(tabs.map((w) => w.get('[data-testid=earnings] form').trigger('submit')))
+        await flushPromises()
+        expect(market.convert).toHaveBeenCalledTimes(1)
+        const sentId = market.convert.mock.calls[0][1]
+        expect(JSON.parse(localStorage.getItem(`ccyou.market.pendingConvert.${OWNER_ID}`) ?? 'null').requestId).toBe(sentId)
+        tabs.forEach((w) => w.unmount())
+      } finally {
+        Reflect.deleteProperty(navigator, 'locks')
+      }
+    })
+
+    it('an unreadable record: no POST, no overwrite; the user clears it explicitly after checking the ledger', async () => {
+      const key = `ccyou.market.pendingConvert.${OWNER_ID}`
+      localStorage.setItem(key, '{"requestId":"not-a-uuid"')
+      const { w } = await openDialog()
+      expect(w.get('[data-testid=earnings-unreadable]').text()).toContain('无法读取上一笔转换记录')
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      await confirm(w)
+      await flushPromises()
+      expect(market.convert).not.toHaveBeenCalled()
+      expect(localStorage.getItem(key)).toBe('{"requestId":"not-a-uuid"')
+      await w.get('[data-testid=earnings-clear-unreadable]').trigger('click')
+      await flushPromises()
+      expect(localStorage.getItem(key)).toBeNull()
+      expect(w.find('[data-testid=earnings-unreadable]').exists()).toBe(false)
+    })
+
+    it('getItem throws: no POST', async () => {
+      const { w } = await openDialog()
+      const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new Error('denied')
+      })
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      await confirm(w)
+      await flushPromises()
+      spy.mockRestore()
+      expect(market.convert).not.toHaveBeenCalled()
+      expect(w.get('[data-testid=earnings-convert-error]').text()).toContain('无法读取上一笔转换记录')
     })
 
     it('a second mount cannot send while the first request is in flight, and a late answer never clears a newer attempt', async () => {

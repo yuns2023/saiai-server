@@ -273,6 +273,14 @@ watch(
   }
 )
 
+// A listing action of an earlier visit of this page answered late: show its result.
+watch(
+  () => hosted.listingChanged,
+  (c) => {
+    if (c) void loadMarketView(c.accountId)
+  }
+)
+
 // One read per current account whenever the set of current accounts changes.
 watch(
   () => hosted.accounts.filter((a) => a.current).map((a) => a.account_id).join(','),

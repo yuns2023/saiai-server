@@ -41,7 +41,7 @@ const busy = computed(() => hosted.convertBusy)
 /** A conversion whose outcome is unknown: the next attempt replays it with the same id and amount. */
 const pending = computed(() => hosted.pendingConvert)
 
-const convertible = computed(() => canConvert(props.earnings) || pending.value !== null)
+const convertible = computed(() => canConvert(props.earnings) || pending.value !== null || hosted.pendingUnreadable)
 const maxAmount = computed(() => floorToCents(props.earnings.available))
 
 /**
@@ -52,9 +52,10 @@ const maxAmount = computed(() => floorToCents(props.earnings.available))
 const dialogTxn = ref<string | null>(null)
 
 function openDialog(): void {
+  hosted.syncPendingConvert()
   dialogTxn.value = pending.value?.requestId ?? null
   amount.value = pending.value?.amount ?? ''
-  error.value = ''
+  error.value = hosted.pendingUnreadable ? t('earnings.unreadable') : ''
   open.value = true
 }
 
@@ -96,6 +97,10 @@ async function submit(): Promise<void> {
   if (!open.value || hosted.convertBusy) return
   // Storage is the source of truth: another tab may have started or settled a conversion.
   hosted.syncPendingConvert()
+  if (hosted.pendingUnreadable) {
+    error.value = t('earnings.unreadable')
+    return
+  }
   if (dialogTxn.value !== null && hosted.pendingConvert?.requestId !== dialogTxn.value) {
     // The conversion this dialog retries was settled elsewhere: nothing to send.
     open.value = false
@@ -107,35 +112,51 @@ async function submit(): Promise<void> {
     showPending()
     return
   }
+  let checkedAmount = ''
   if (!txn) {
     const checked = checkConvertAmount(amount.value, props.earnings.min_convert, props.earnings.available)
     if ('problem' in checked) {
       error.value = t(`earnings.amount_${checked.problem}`, { min: usdExact(props.earnings.min_convert), max: usdExact(maxAmount.value) })
       return
     }
-    // Recorded before sending: until the server answers definitely, every retry (also after leaving the page) replays exactly this.
-    const fresh = { requestId: newRequestId(), amount: checked.amount }
-    const started = hosted.beginConvert(fresh)
-    if (started === 'pending') {
-      showPending()
-      return
-    }
-    if (started === 'storage') {
-      // Not recorded = could not be retried safely: never send it.
-      error.value = t('earnings.storageFailed')
-      return
-    }
-    txn = fresh
+    checkedAmount = checked.amount
   }
-  const current = txn
-  dialogTxn.value = current.requestId
   error.value = ''
   hosted.convertBusy = true
   const session = hosted.session()
-  // Only the callback of the conversion still recorded may settle it (the watch below then refreshes every mounted page).
+  try {
+    if (!txn) {
+      const fresh = { requestId: newRequestId(), amount: checkedAmount }
+      const started = await hosted.beginConvert(fresh)
+      if (hosted.session() !== session) return
+      if (started === 'pending') {
+        showPending()
+        return
+      }
+      if (started === 'unreadable') {
+        error.value = t('earnings.unreadable')
+        return
+      }
+      if (started === 'storage') {
+        // Not recorded = could not be retried safely: never send it.
+        error.value = t('earnings.storageFailed')
+        return
+      }
+      txn = fresh
+    }
+    await send(txn, session)
+  } finally {
+    if (hosted.session() === session) hosted.convertBusy = false
+  }
+}
+
+/** Sends a recorded conversion; settles it only on a definite answer. */
+async function send(current: { requestId: string; amount: string }, session: number): Promise<void> {
+  dialogTxn.value = current.requestId
+  // Only the callback of the conversion still recorded may settle it (the watches then refresh every mounted page).
   const settle = () => {
     if (dialogTxn.value === current.requestId) dialogTxn.value = null
-    hosted.settleConvert(current.requestId)
+    void hosted.settleConvert(current.requestId)
   }
   try {
     const res = await marketApi.convert(current.amount, current.requestId)
@@ -156,9 +177,13 @@ async function submit(): Promise<void> {
     } else {
       error.value = t('earnings.unconfirmed')
     }
-  } finally {
-    if (hosted.session() === session) hosted.convertBusy = false
   }
+}
+
+/** The user checked the ledger and clears an unreadable record to start again. */
+async function clearUnreadable(): Promise<void> {
+  await hosted.clearUnreadableConvert()
+  error.value = hosted.pendingUnreadable ? t('earnings.unreadable') : ''
 }
 
 // Whichever page visit got the answer, the card on screen shows the result: a settled
@@ -332,6 +357,10 @@ onMounted(() => {
         <p class="mt-2 text-xs text-ink-3">
           {{ t('earnings.dialogHint', { available: usdExact(earnings.available), max: usdExact(maxAmount), min: usdExact(earnings.min_convert) }) }}
         </p>
+        <div v-if="hosted.pendingUnreadable" class="mt-2 text-xs text-warn" data-testid="earnings-unreadable">
+          <p>{{ t('earnings.unreadableHint') }}</p>
+          <button type="button" class="btn btn-line btn-sm mt-2" :disabled="busy" data-testid="earnings-clear-unreadable" @click="clearUnreadable">{{ t('earnings.clearUnreadable') }}</button>
+        </div>
         <p v-if="pending" class="mt-2 text-xs text-warn" data-testid="earnings-pending">{{ t('earnings.pendingHint', { amount: usdExact(pending.amount) }) }}</p>
         <p v-if="error" class="mt-2 text-sm text-seal" role="alert" data-testid="earnings-convert-error">{{ error }}</p>
       </form>

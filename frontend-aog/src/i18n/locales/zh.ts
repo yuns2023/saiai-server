@@ -485,6 +485,9 @@ export default {
     amount_belowMin: '每次最少转入 {min}。',
     amount_aboveAvailable: '超过可用收益，最多可转 {max}。',
     converted: '已转入 {amount}，余额已更新。',
+    unreadable: '无法读取上一笔转换记录，暂不能发起新的转入。',
+    unreadableHint: '无法读取上一笔转换记录：它可能已经转入。请先在下方明细中核对上一笔是否已转入余额，确认后再清除并重新开始。',
+    clearUnreadable: '我已核对，清除并重新开始',
     storageFailed: '无法保存转换记录，请检查浏览器存储（如隐私模式、存储已满）后重试。未发送任何请求。',
     unconfirmed: '结果未确认，可重试：再点「确认转入」会按同一笔（同一金额）重试，不会重复转入。'
   },

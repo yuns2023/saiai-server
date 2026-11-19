@@ -5,7 +5,7 @@
  * The parent owns the view; this component sends the change and hands the
  * server's answer back (`updated`), or asks for a fresh read (`reload`).
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marketApi, type OwnerMarketView } from '@/api/market'
 import { rate } from '@/lib/format'
@@ -22,6 +22,10 @@ const hosted = useHostedStore()
  * must not depend on this component still being mounted when the answer comes).
  */
 const busy = computed(() => hosted.ownerBusy !== null)
+let mounted = true
+onUnmounted(() => {
+  mounted = false
+})
 const { t, te } = useI18n()
 const app = useAppStore()
 
@@ -79,7 +83,11 @@ async function send(listedNext: boolean): Promise<void> {
     // The server state may differ from what is shown (revoked, tier gone…): read it again.
     emit('reload')
   } finally {
-    if (hosted.session() === session) hosted.ownerBusy = null
+    if (hosted.session() === session) {
+      hosted.ownerBusy = null
+      // Answered after this page was left: the page on screen now re-reads this account.
+      if (!mounted) hosted.notifyListingChanged(props.view.account_id)
+    }
   }
 }
 

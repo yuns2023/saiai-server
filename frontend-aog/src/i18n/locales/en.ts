@@ -487,6 +487,9 @@ const en: typeof zh = {
     amount_belowMin: 'At least {min} per transfer.',
     amount_aboveAvailable: 'More than available; at most {max}.',
     converted: 'Moved {amount} to your balance.',
+    unreadable: 'Could not read the previous transfer record; no new transfer can start.',
+    unreadableHint: 'The previous transfer record cannot be read; it may have gone through. Check the ledger below first, then clear it and start again.',
+    clearUnreadable: 'Checked — clear and start again',
     storageFailed: 'Could not save the transfer record; check the browser storage (private mode, storage full) and try again. Nothing was sent.',
     unconfirmed: 'Outcome not confirmed; you can retry: Move replays the same transfer (same amount) and never moves twice.'
   },
