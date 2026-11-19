@@ -15,11 +15,10 @@ import (
 	"github.com/lib/pq"
 )
 
-// dispatchableAccountGroupPredicate is THE scheduling filter on
-// account_groups: in P3a part 1 only admin bindings are dispatchable, market
-// memberships never are. Every scheduling read of account_groups uses it (or
-// isDispatchableAccountGroupSource on loaded rows); the market selection part
-// replaces both with the three-way admission classification.
+// dispatchableAccountGroupPredicate selects admin bindings. Admin views and
+// Account.GroupIDs use it (isDispatchableAccountGroupSource on loaded rows);
+// scheduling reads by group also return market rows and leave the decision
+// to the gateway's market classification (service/market_dispatch.go).
 func dispatchableAccountGroupPredicate() dbpredicate.AccountGroup {
 	return dbaccountgroup.SourceEQ(service.AccountGroupSourceAdmin)
 }

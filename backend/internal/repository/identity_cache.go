@@ -998,9 +998,9 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 			}
 			// First-cycle reservation must not refund admissions made between
 			// saving the configuration and the worker's first pass.
-			used := 0
+			used, buyerUsed := 0, 0
 			if due == policy.InitialDue {
-				used = budget.Used
+				used, buyerUsed = budget.Used, budget.BuyerUsed
 			}
 			remaining := max(0, free-used)
 			count := 0
@@ -1027,6 +1027,7 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 				}
 				budget.LastDue = due
 				budget.Used = used
+				budget.BuyerUsed = buyerUsed
 				budget.Quota = policy.Admissions
 				encoded, err := json.Marshal(budget)
 				if err != nil {
@@ -1059,6 +1060,9 @@ type carpoolAdmissionBudget struct {
 	LastDue    string `json:"last_due"`
 	Quota      int    `json:"quota"`
 	Used       int    `json:"used"`
+	// BuyerUsed counts this cycle's admissions on the market buyer path
+	// (also included in Used). Reset with Used on cycle rollover.
+	BuyerUsed int `json:"buyer_used,omitempty"`
 }
 
 func readCarpoolAdmissionBudget(ctx context.Context, reader redis.Cmdable, key string, policy service.CarpoolAdmissionPolicy) (*carpoolAdmissionBudget, error) {

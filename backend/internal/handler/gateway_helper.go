@@ -434,6 +434,22 @@ func (h *ConcurrencyHelper) waitForAcquire(c *gin.Context, slotType string, acqu
 	}
 }
 
+// AcquireAccountSlotForWaitPlan waits for the lease class of the plan: a
+// market buyer plan re-acquires only a buyer lease (total < C and buyers <
+// C - R); every other plan waits exactly like AcquireAccountSlotWithWaitTimeout.
+func (h *ConcurrencyHelper) AcquireAccountSlotForWaitPlan(c *gin.Context, plan *service.AccountWaitPlan, isStream bool, streamStarted *bool) (func(), error) {
+	if plan == nil {
+		return nil, errors.New("missing wait plan")
+	}
+	if !plan.Market.IsBuyer() {
+		return h.AcquireAccountSlotWithWaitTimeout(c, plan.AccountID, plan.MaxConcurrency, plan.Timeout, isStream, streamStarted)
+	}
+	market := plan.Market
+	return h.waitForAcquire(c, "account", func(ctx context.Context) (*service.AcquireResult, error) {
+		return h.concurrencyService.AcquireAccountBuyerSlot(ctx, plan.AccountID, market.Concurrency, market.BuyerMaxConcurrency)
+	}, plan.Timeout, isStream, streamStarted, true)
+}
+
 // AcquireAccountSlotWithWaitTimeout acquires an account slot with a custom timeout (keeps SSE ping).
 func (h *ConcurrencyHelper) AcquireAccountSlotWithWaitTimeout(c *gin.Context, accountID int64, maxConcurrency int, timeout time.Duration, isStream bool, streamStarted *bool) (func(), error) {
 	return h.waitForSlotWithPingTimeout(c, "account", accountID, maxConcurrency, timeout, isStream, streamStarted, true)

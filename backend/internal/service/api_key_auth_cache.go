@@ -14,7 +14,8 @@ import (
 // v4: groups.client_attestation_policy.
 // v5: groups.claude_entrypoint_policy / claude_entrypoint_allowlist.
 // v6: api_keys.max_concurrency.
-const apiKeyAuthSnapshotSchemaVersion = 6
+// v7: groups.market_tier (market selection / fallback guards).
+const apiKeyAuthSnapshotSchemaVersion = 7
 
 // APIKeyAuthSnapshot API Key 认证缓存快照（仅包含认证所需字段）
 type APIKeyAuthSnapshot struct {
@@ -70,6 +71,7 @@ type APIKeyAuthGroupSnapshot struct {
 	Status                          string             `json:"status"`
 	SubscriptionType                string             `json:"subscription_type"`
 	HostedUsageEnabled              bool               `json:"hosted_usage_enabled,omitempty"`
+	MarketTier                      bool               `json:"market_tier,omitempty"`
 	IsExclusive                     bool               `json:"is_exclusive,omitempty"`
 	RateMultiplier                  float64            `json:"rate_multiplier"`
 	RequiredLevel                   *AccessLevel       `json:"required_level,omitempty"`

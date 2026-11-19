@@ -414,8 +414,15 @@ func (s *OpsService) executePinnedRetry(ctx context.Context, reqType opsRetryReq
 	}
 	// Pilot: a market-listed account is never used by a pinned retry (it
 	// would bypass the market admission).
-	if len(account.MarketGroupIDs) > 0 {
+	if len(account.MarketGroupIDs) > 0 || s.gatewayService.MarketAccountListed(account) {
 		return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account is listed on the sharing market"}
+	}
+	// A market tier dispatches only platform accounts (admin member, no
+	// owner) outside the market path; GetByID is a database read.
+	if errorLog.GroupID != nil && *errorLog.GroupID > 0 && account.OwnerUserID != nil && s.gatewayService != nil {
+		if group, err := s.gatewayService.ResolveGroupByID(ctx, *errorLog.GroupID); err == nil && group.MarketTier {
+			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account has an owner and the group is a sharing-market tier"}
+		}
 	}
 	if errorLog.GroupID != nil && *errorLog.GroupID > 0 {
 		if !containsInt64(account.GroupIDs, *errorLog.GroupID) {
@@ -481,10 +488,23 @@ func (s *OpsService) executeClientRetry(ctx context.Context, reqType opsRetryReq
 			switches++
 			continue
 		}
+		// Pilot: a retry never uses a market-listed account (no market
+		// admission on this path), even when it was reached through an
+		// admin binding of another group.
+		if s.gatewayService.MarketAccountListed(account) {
+			selection.ReleaseFunc()
+			excluded[account.ID] = struct{}{}
+			switches++
+			continue
+		}
 
 		attemptCtx := ctx
 		if switches > 0 {
 			attemptCtx = WithAccountSwitchCount(attemptCtx, switches, false)
+		}
+		if selection.Market != nil {
+			// Tier platform accounts still get the authoritative check.
+			attemptCtx, _ = WithMarketAttempt(attemptCtx, selection.Market)
 		}
 		exec := func() *opsRetryExecution {
 			defer selection.ReleaseFunc()

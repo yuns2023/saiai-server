@@ -35,6 +35,16 @@ type RateLimitService struct {
 	// openAINoReset429Gen changes whenever a reset or manual clear drops
 	// counted 429s; a backoff captured in an older generation is recomputed.
 	openAINoReset429Gen map[int64]uint64
+	// market records per-window usage observations of listed accounts
+	// (market share caps); nil = no market.
+	market *MarketRuntime
+}
+
+// SetMarketRuntime enables market usage observations.
+func (s *RateLimitService) SetMarketRuntime(rt *MarketRuntime) {
+	if s != nil {
+		s.market = rt
+	}
 }
 
 type openAINoReset429State struct {
@@ -1618,6 +1628,7 @@ func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Acc
 	}
 	applyAnthropicFiveHourAbsence(account, sample)
 	logAnthropicRateLimitHeaderShape(account, headers, sample, "success", now)
+	s.recordMarketUsageObservations(ctx, account, headers, sample, now, true)
 
 	if len(extraUpdates) > 0 {
 		if sample.hasUsageData() {
@@ -1718,6 +1729,7 @@ func (s *RateLimitService) sampleAnthropicRateLimitUsage(ctx context.Context, ac
 	now := time.Now()
 	sample := sampleAnthropicPassiveUsageHeaders(headers, now)
 	logAnthropicRateLimitHeaderShape(account, headers, sample, "429", now)
+	s.recordMarketUsageObservations(ctx, account, headers, sample, now, false)
 	updates := sample.updates
 	if len(updates) == 0 {
 		return
