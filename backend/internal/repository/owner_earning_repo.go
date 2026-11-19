@@ -586,22 +586,28 @@ func (r *ownerEarningRepository) SaleAudit(ctx context.Context, admissionID int6
 		return nil, err
 	}
 	st := &service.MarketSaleAuditSettlement{}
-	var price []byte
-	var model, reason sql.NullString
+	var price, logSnapshot []byte
+	var model, billingModel, reason, logRate, logModelRate, logDiscount, logTotal, logActual sql.NullString
+	var logFound bool
 	err = tx.QueryRowContext(ctx, `
-		SELECT e.id, e.request_id, l.model, e.standard_cost::text, e.charge_input::text, e.charged_amount::text,
-			e.owner_earning::text, e.platform_amount::text, e.platform_cut_rate::text, e.earning_zero_reason,
-			e.earning_available_at, e.charged_amount = e.owner_earning + e.platform_amount, e.created_at, e.admission_price
+		SELECT e.id, e.request_id, l.model, l.pricing_snapshot->>'billed_model', e.standard_cost::text, e.charge_input::text,
+			e.charged_amount::text, e.owner_earning::text, e.platform_amount::text, e.platform_cut_rate::text, e.earning_zero_reason,
+			e.earning_available_at, e.charged_amount = e.owner_earning + e.platform_amount, e.created_at, e.admission_price,
+			l.id IS NOT NULL, l.rate_multiplier::text, l.model_rate_multiplier::text, l.user_payg_discount_multiplier::text,
+			l.total_cost::text, l.actual_cost::text, l.pricing_snapshot
 		FROM usage_settlement_events e
 		LEFT JOIN LATERAL (
-			SELECT ul.model FROM usage_logs ul
+			SELECT ul.id, ul.model, ul.pricing_snapshot, ul.rate_multiplier, ul.model_rate_multiplier,
+				ul.user_payg_discount_multiplier, ul.total_cost, ul.actual_cost
+			FROM usage_logs ul
 			WHERE ul.request_id = e.request_id AND ul.api_key_id = e.api_key_id
 			ORDER BY ul.id LIMIT 1
 		) l ON TRUE
 		WHERE e.admission_id = $1`, admissionID).
-		Scan(&st.EventID, &st.RequestID, &model, &st.StandardCost, &st.ChargeInput, &st.ChargedAmount,
-			&st.OwnerEarning, &st.PlatformAmount, &st.PlatformCutRate, &reason,
-			&st.EarningAvailableAt, &st.SplitConserved, &st.CreatedAt, &price)
+		Scan(&st.EventID, &st.RequestID, &model, &billingModel, &st.StandardCost, &st.ChargeInput,
+			&st.ChargedAmount, &st.OwnerEarning, &st.PlatformAmount, &st.PlatformCutRate, &reason,
+			&st.EarningAvailableAt, &st.SplitConserved, &st.CreatedAt, &price,
+			&logFound, &logRate, &logModelRate, &logDiscount, &logTotal, &logActual, &logSnapshot)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil // admission without a settlement (pending / undetermined)
 	}
@@ -616,7 +622,20 @@ func (r *ownerEarningRepository) SaleAudit(ctx context.Context, admissionID int6
 		*p = d.String()
 	}
 	st.Model = nullStringPtr(model)
+	st.BillingModel = nullStringPtr(billingModel)
 	st.EarningZeroReason = nullStringPtr(reason)
+	if logFound {
+		st.FinalPrice = &service.MarketSaleFinalPrice{
+			RateMultiplier:             decimalText(logRate.String),
+			ModelRateMultiplier:        decimalTextPtr(logModelRate),
+			UserPaygDiscountMultiplier: decimalTextPtr(logDiscount),
+			TotalCost:                  decimalText(logTotal.String),
+			ActualCost:                 decimalText(logActual.String),
+		}
+		if len(logSnapshot) > 0 {
+			st.FinalPrice.PricingSnapshot = json.RawMessage(logSnapshot)
+		}
+	}
 	out.Settlement = st
 	if len(price) > 0 {
 		out.AdmissionPrice = &service.MarketPriceAudit{}
@@ -625,4 +644,22 @@ func (r *ownerEarningRepository) SaleAudit(ctx context.Context, admissionID int6
 		}
 	}
 	return out, nil
+}
+
+// decimalText trims a numeric's text form ("1.2000" → "1.2"); unparsable
+// text is returned unchanged.
+func decimalText(raw string) string {
+	d, err := decimal.NewFromString(raw)
+	if err != nil {
+		return raw
+	}
+	return d.String()
+}
+
+func decimalTextPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := decimalText(v.String)
+	return &s
 }

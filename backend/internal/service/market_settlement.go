@@ -246,8 +246,22 @@ type MarketPriceAudit struct {
 	OutputPerToken float64 `json:"output_per_token"`
 }
 
-// MarketPriceAuditFrom copies a snapshot for storage; non-finite numbers are
-// stored as 0 so the audit column can never fail the charge.
+// marketPriceAuditTextMax bounds the audit strings (runes).
+const marketPriceAuditTextMax = 200
+
+// marketPriceAuditText makes a string safe for the JSONB audit column:
+// valid UTF-8, no NUL (PostgreSQL jsonb rejects \u0000), at most 200 runes.
+func marketPriceAuditText(s string) string {
+	s = strings.ReplaceAll(strings.ToValidUTF8(s, ""), "\x00", "")
+	if r := []rune(s); len(r) > marketPriceAuditTextMax {
+		s = string(r[:marketPriceAuditTextMax])
+	}
+	return s
+}
+
+// MarketPriceAuditFrom copies a snapshot for storage. It is an audit field
+// and must never fail the settlement: strings are normalized
+// (marketPriceAuditText) and non-finite numbers are stored as 0.
 func MarketPriceAuditFrom(p *MarketPriceSnapshot) *MarketPriceAudit {
 	if p == nil {
 		return nil
@@ -259,7 +273,7 @@ func MarketPriceAuditFrom(p *MarketPriceSnapshot) *MarketPriceAudit {
 		return v
 	}
 	return &MarketPriceAudit{
-		Model: p.Model, PriceVersion: p.PriceVersion,
+		Model: marketPriceAuditText(p.Model), PriceVersion: marketPriceAuditText(p.PriceVersion),
 		GroupRate: finite(p.GroupRate), ModelRate: finite(p.ModelRate), UserDiscount: finite(p.UserDiscount),
 		InputPerToken: finite(p.InputPerToken), OutputPerToken: finite(p.OutputPerToken),
 	}

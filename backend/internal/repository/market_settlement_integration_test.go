@@ -17,6 +17,8 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -27,6 +29,7 @@ type mktFixture struct {
 	users    []int64
 	keys     []int64
 	accounts []int64
+	groups   []int64
 }
 
 func newMktFixture(t *testing.T) *mktFixture {
@@ -61,6 +64,7 @@ func (f *mktFixture) cleanup() {
 		{"DELETE FROM api_keys WHERE id = ANY($1)", []any{keys}},
 		{"DELETE FROM accounts WHERE id = ANY($1)", []any{accounts}},
 		{"DELETE FROM users WHERE id = ANY($1)", []any{users}},
+		{"DELETE FROM groups WHERE id = ANY($1)", []any{pq.Array(f.groups)}},
 	} {
 		_, _ = integrationDB.ExecContext(bg, stmt.q, stmt.args...)
 	}
@@ -1522,4 +1526,112 @@ func TestMarketSettlementPriceChangedAfterAdmission(t *testing.T) {
 		count(*) FILTER (WHERE admission_price IS NOT NULL) FROM usage_settlement_events WHERE api_key_id = $1`, s.key).Scan(&shadowRows, &withPrice))
 	require.Equal(t, 1, shadowRows)
 	require.Equal(t, 2, withPrice, "only the two sales that carried a snapshot")
+}
+
+// A price snapshot with NUL and invalid UTF-8 never fails the sale: the
+// charge, the event and the accrue commit, the audit is stored normalized.
+func TestMarketSettlementPriceSnapshotWithNULStillSettles(t *testing.T) {
+	ctx := context.Background()
+	setMarketCut(t, "0.2", 7)
+	f := newMktFixture(t)
+	s := basicSale(f, 100)
+	repo := NewUsageBillingRepository(nil, integrationDB)
+	a := f.admit(s)
+	cmd := mktCommand(a, 1)
+	cmd.Settlement.MarketPrice = &service.MarketPriceSnapshot{Model: "claude\x00-sonnet", PriceVersion: "v\x00-1\xff", GroupRate: 1.2}
+	before := loadMktState(t, s.buyer, s.key, s.owner)
+	res, err := repo.Apply(ctx, cmd)
+	require.NoError(t, err)
+	require.True(t, res.Applied)
+	ev, ok := loadMktEvent(t, a)
+	require.True(t, ok)
+	_, ok = loadAccrue(t, ev.ID)
+	require.True(t, ok)
+	require.True(t, dec(t, before.Balance).Sub(dec(t, loadMktState(t, s.buyer, s.key, s.owner).Balance)).Equal(decimal.NewFromInt(1)))
+	got, err := newEarningRepo().SaleAudit(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "claude-sonnet", got.AdmissionPrice.Model)
+	require.Equal(t, "v-1", got.AdmissionPrice.PriceVersion)
+}
+
+// The pilot price promise end to end through GatewayService.RecordUsage:
+// admitted at the snapshot price (group rate 1.2), the admin then changes
+// the group rate (2.4, then 0) before the usage is recorded. RecordUsage
+// charges the new price, the event keeps the old snapshot, the split is
+// conserved; the 0 price settles as zero_charge.
+func TestMarketRecordUsageChargesCurrentPriceKeepsSnapshot(t *testing.T) {
+	ctx := context.Background()
+	setMarketCut(t, "0.2", 7)
+	f := newMktFixture(t)
+	s := basicSale(f, 100)
+	g := mustCreateGroup(t, integrationEntClient, &service.Group{Name: "mkt-price-" + uuid.NewString(), Platform: service.PlatformAnthropic, RateMultiplier: 1.2})
+	f.groups = append(f.groups, g.ID)
+	s.group = g.ID
+
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1
+	billing := service.NewBillingService(cfg, nil)
+	cache := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(cache.Stop)
+	usage := newUsageLogRepositoryWithSQL(integrationEntClient, integrationDB)
+	usage.db = nil // synchronous log insert
+	svc := service.NewGatewayService(nil, nil, usage, NewUsageBillingRepository(integrationEntClient, integrationDB), nil, nil, nil, nil, cfg,
+		nil, nil, billing, nil, cache, nil, nil, &service.DeferredService{}, nil, nil, nil, nil, nil)
+
+	const model = "claude-sonnet-4"
+	tokens := service.UsageTokens{InputTokens: 1000, OutputTokens: 200}
+	snapshot := &service.MarketPriceSnapshot{Model: model, PriceVersion: "v-admission", GroupRate: 1.2, ModelRate: 1, UserDiscount: 1}
+	record := func(groupRate float64) *service.MarketAdmission {
+		a := f.admit(s)
+		group := g.ID
+		key := &service.APIKey{ID: s.key, UserID: s.buyer, GroupID: &group,
+			Group: &service.Group{ID: g.ID, Platform: service.PlatformAnthropic, RateMultiplier: groupRate, SubscriptionType: service.SubscriptionTypeStandard, Status: service.StatusActive}}
+		err := svc.RecordUsage(ctx, &service.RecordUsageInput{
+			Result:           &service.ForwardResult{RequestID: "upstream-" + uuid.NewString(), Model: model, Duration: time.Second, Usage: service.ClaudeUsage{InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens}},
+			APIKey:           key,
+			User:             &service.User{ID: s.buyer},
+			Account:          &service.Account{ID: s.account, Platform: service.PlatformAnthropic, Type: service.AccountTypeSetupToken},
+			MarketPath:       true,
+			Market:           &service.MarketSettlementProof{AdmissionID: a.ID, AttemptID: a.AttemptID, RequestRef: a.RequestRef, AccountID: a.AccountID, GroupID: a.GroupID, BuyerUserID: a.BuyerUserID, APIKeyID: a.APIKeyID},
+			MarketPrice:      snapshot,
+			BillingRequestID: service.ResolveUsageBillingRequestID(context.WithValue(ctx, ctxkey.ClientRequestID, a.RequestRef), ""),
+		})
+		require.NoError(t, err)
+		return a
+	}
+
+	atAdmission, err := billing.CalculateCost(model, tokens, 1.2)
+	require.NoError(t, err)
+	atRecording, err := billing.CalculateCost(model, tokens, 2.4)
+	require.NoError(t, err)
+	require.Greater(t, atAdmission.ActualCost, 0.0)
+
+	before := loadMktState(t, s.buyer, s.key, s.owner)
+	a := record(2.4)
+	got, err := newEarningRepo().SaleAudit(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.MarketPriceAuditFrom(snapshot), got.AdmissionPrice, "old snapshot kept")
+	require.NotNil(t, got.Settlement)
+	charged := dec(t, got.Settlement.ChargedAmount)
+	require.True(t, charged.Equal(dec(t, before.Balance).Sub(dec(t, loadMktState(t, s.buyer, s.key, s.owner).Balance))))
+	require.InDelta(t, atRecording.ActualCost, charged.InexactFloat64(), 1e-8, "charged at the new price")
+	require.Greater(t, charged.InexactFloat64(), atAdmission.ActualCost*1.5, "not the admission price")
+	earning, platform := dec(t, got.Settlement.OwnerEarning), dec(t, got.Settlement.PlatformAmount)
+	require.True(t, earning.Equal(charged.Mul(dec(t, "0.8")).Truncate(10)))
+	require.True(t, charged.Equal(earning.Add(platform)))
+	require.True(t, got.Settlement.SplitConserved)
+	// The final price basis comes from the usage log.
+	require.NotNil(t, got.Settlement.Model)
+	require.Equal(t, model, *got.Settlement.Model)
+	require.NotNil(t, got.Settlement.FinalPrice)
+	require.Equal(t, "2.4", got.Settlement.FinalPrice.RateMultiplier)
+	require.NotNil(t, got.Settlement.BillingModel)
+
+	z := record(0)
+	got, err = newEarningRepo().SaleAudit(ctx, z.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Settlement)
+	require.Equal(t, "0", got.Settlement.ChargedAmount)
+	require.Equal(t, service.SettlementEarningZeroReasonZeroCharge, *got.Settlement.EarningZeroReason)
+	require.Equal(t, service.MarketPriceAuditFrom(snapshot), got.AdmissionPrice)
 }

@@ -51,7 +51,8 @@ func (r *adminEarningsRepo) SaleAudit(_ context.Context, id int64) (*service.Mar
 	return &service.MarketSaleAudit{
 		Admission:      service.MarketSaleAuditAdmission{ID: 9},
 		AdmissionPrice: &service.MarketPriceAudit{Model: model, PriceVersion: "v1"},
-		Settlement:     &service.MarketSaleAuditSettlement{EventID: 3, Model: &model, ChargedAmount: "1", OwnerEarning: "0.8", PlatformAmount: "0.2", SplitConserved: true},
+		Settlement: &service.MarketSaleAuditSettlement{EventID: 3, Model: &model, BillingModel: &model, ChargedAmount: "1", OwnerEarning: "0.8", PlatformAmount: "0.2", SplitConserved: true,
+			FinalPrice: &service.MarketSaleFinalPrice{RateMultiplier: "2.4", TotalCost: "0.5", ActualCost: "1.2", PricingSnapshot: json.RawMessage(`{"version":"v2"}`)}},
 	}, nil
 }
 
@@ -149,8 +150,14 @@ func TestAdminMarketSaleAuditJSON(t *testing.T) {
 	require.Equal(t, []string{"account_id", "admitted_at", "api_key_id", "attempt_id", "buyer_user_id", "group_id", "id", "listing_version",
 		"owner_event_id", "owner_user_id", "request_ref"}, adminKeys(t, body.Admission))
 	require.Equal(t, []string{"group_rate", "input_per_token", "model", "model_rate", "output_per_token", "price_version", "user_discount"}, adminKeys(t, body.AdmissionPrice))
-	require.Equal(t, []string{"charge_input", "charged_amount", "created_at", "earning_available_at", "earning_zero_reason", "event_id", "model",
-		"owner_earning", "platform_amount", "platform_cut_rate", "request_id", "split_conserved", "standard_cost"}, adminKeys(t, body.Settlement))
+	require.Equal(t, []string{"billing_model", "charge_input", "charged_amount", "created_at", "earning_available_at", "earning_zero_reason", "event_id",
+		"final_price", "model", "owner_earning", "platform_amount", "platform_cut_rate", "request_id", "split_conserved", "standard_cost"}, adminKeys(t, body.Settlement))
+	var settlement struct {
+		FinalPrice json.RawMessage `json:"final_price"`
+	}
+	require.NoError(t, json.Unmarshal(body.Settlement, &settlement))
+	require.Equal(t, []string{"actual_cost", "model_rate_multiplier", "pricing_snapshot", "rate_multiplier", "total_cost", "user_payg_discount_multiplier"}, adminKeys(t, settlement.FinalPrice))
+	require.Contains(t, string(settlement.FinalPrice), `"pricing_snapshot":{"version":"v2"}`)
 	for path, code := range map[string]int{"/admin/market/admissions/8": http.StatusNotFound, "/admin/market/admissions/x": http.StatusBadRequest} {
 		w = httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))

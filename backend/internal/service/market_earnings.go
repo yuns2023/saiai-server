@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -209,22 +210,40 @@ type MarketSaleAuditAdmission struct {
 	AdmittedAt     time.Time `json:"admitted_at"`
 }
 
-// MarketSaleAuditSettlement: Model is the usage log's model (null when the
-// log is missing or expired). Amounts are exact decimal strings.
+// MarketSaleAuditSettlement: the event's own columns are always present.
+// Model (display), BillingModel (the model the charge was priced as) and
+// FinalPrice come from the sale's usage log and are null when that log is
+// missing (best-effort write failed) or purged by retention; BillingModel is
+// also null for a log without a pricing snapshot. Amounts are exact decimal
+// strings.
 type MarketSaleAuditSettlement struct {
-	EventID            int64     `json:"event_id"`
-	RequestID          string    `json:"request_id"`
-	Model              *string   `json:"model"`
-	StandardCost       string    `json:"standard_cost"`
-	ChargeInput        string    `json:"charge_input"`
-	ChargedAmount      string    `json:"charged_amount"`
-	OwnerEarning       string    `json:"owner_earning"`
-	PlatformAmount     string    `json:"platform_amount"`
-	PlatformCutRate    string    `json:"platform_cut_rate"`
-	EarningZeroReason  *string   `json:"earning_zero_reason"`
-	EarningAvailableAt time.Time `json:"earning_available_at"`
-	SplitConserved     bool      `json:"split_conserved"`
-	CreatedAt          time.Time `json:"created_at"`
+	EventID            int64                 `json:"event_id"`
+	RequestID          string                `json:"request_id"`
+	Model              *string               `json:"model"`
+	BillingModel       *string               `json:"billing_model"`
+	FinalPrice         *MarketSaleFinalPrice `json:"final_price"`
+	StandardCost       string                `json:"standard_cost"`
+	ChargeInput        string                `json:"charge_input"`
+	ChargedAmount      string                `json:"charged_amount"`
+	OwnerEarning       string                `json:"owner_earning"`
+	PlatformAmount     string                `json:"platform_amount"`
+	PlatformCutRate    string                `json:"platform_cut_rate"`
+	EarningZeroReason  *string               `json:"earning_zero_reason"`
+	EarningAvailableAt time.Time             `json:"earning_available_at"`
+	SplitConserved     bool                  `json:"split_conserved"`
+	CreatedAt          time.Time             `json:"created_at"`
+}
+
+// MarketSaleFinalPrice is the price basis the usage log persisted for the
+// sale: multipliers, standard/actual cost and the raw pricing snapshot
+// (version, billed model, effective unit prices; null on logs without one).
+type MarketSaleFinalPrice struct {
+	RateMultiplier             string          `json:"rate_multiplier"`
+	ModelRateMultiplier        *string         `json:"model_rate_multiplier"`
+	UserPaygDiscountMultiplier *string         `json:"user_payg_discount_multiplier"`
+	TotalCost                  string          `json:"total_cost"`
+	ActualCost                 string          `json:"actual_cost"`
+	PricingSnapshot            json.RawMessage `json:"pricing_snapshot"`
 }
 
 // OwnerEarningsView is GET /api/v1/hosted/earnings. Amounts are exact

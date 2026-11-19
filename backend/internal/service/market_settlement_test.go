@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -259,7 +260,8 @@ func TestRecordUsageWithLongContextCarriesMarketContract(t *testing.T) {
 		billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
 		svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
 		in.Result = &ForwardResult{RequestID: "upstream-volatile", Usage: ClaudeUsage{InputTokens: 10, OutputTokens: 6}, Model: "claude-sonnet-4", Duration: time.Second}
-		in.APIKey, in.User, in.Account = &APIKey{ID: 5}, &User{ID: 7}, &Account{ID: 11}
+		group := int64(30) // the proof's group
+		in.APIKey, in.User, in.Account = &APIKey{ID: 5, GroupID: &group, Group: &Group{ID: 30}}, &User{ID: 7}, &Account{ID: 11}
 		in.LongContextThreshold, in.LongContextMultiplier = 200000, 2
 		require.NoError(t, svc.RecordUsageWithLongContext(context.Background(), in))
 		require.NotNil(t, billingRepo.lastCmd)
@@ -281,4 +283,16 @@ func TestRecordUsageWithLongContextCarriesMarketContract(t *testing.T) {
 	require.Equal(t, "upstream-volatile", plain.RequestID)
 	require.Nil(t, plain.Settlement.Market)
 	require.Nil(t, plain.Settlement.MarketPrice)
+}
+
+// Audit strings can never break the JSONB column (NUL, invalid UTF-8, size).
+func TestMarketPriceAuditFromSanitizes(t *testing.T) {
+	long := strings.Repeat("é", 300)
+	got := MarketPriceAuditFrom(&MarketPriceSnapshot{Model: "claude\x00-sonnet\xff", PriceVersion: long, GroupRate: math.NaN(), InputPerToken: math.Inf(1), ModelRate: 1.5})
+	require.Equal(t, "claude-sonnet", got.Model)
+	require.Equal(t, 200, len([]rune(got.PriceVersion)))
+	require.Zero(t, got.GroupRate)
+	require.Zero(t, got.InputPerToken)
+	require.Equal(t, 1.5, got.ModelRate)
+	require.Nil(t, MarketPriceAuditFrom(nil))
 }

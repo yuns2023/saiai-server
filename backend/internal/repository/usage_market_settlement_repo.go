@@ -273,13 +273,16 @@ func insertSharedSaleEventTx(ctx context.Context, tx *sql.Tx, ev *service.Shared
 	if len(ev.InvalidFields) > 0 {
 		invalid = pq.Array(ev.InvalidFields)
 	}
+	// Audit only: an encoding problem stores NULL and is logged, never
+	// fails the sale.
 	var admissionPrice any
 	if ev.AdmissionPrice != nil {
-		raw, err := json.Marshal(ev.AdmissionPrice)
-		if err != nil {
-			return 0, time.Time{}, fmt.Errorf("encode admission price: %w", err)
+		if raw, err := json.Marshal(ev.AdmissionPrice); err != nil {
+			logger.L().Error("market admission price not recorded: encode failed",
+				zap.String("request_id", ev.RequestID), zap.Int64("admission_id", ev.AdmissionID), zap.Error(err))
+		} else {
+			admissionPrice = string(raw)
 		}
-		admissionPrice = string(raw)
 	}
 	var id int64
 	var availableAt time.Time
