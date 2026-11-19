@@ -433,8 +433,9 @@ Listing and tiers
 - Deleting or demoting a tier unlists the listings that sell into it and
   removes it from every allowed set; the rest of the permission stays (it is
   not a revoke).
-- A stale admin group form can write `market_tier = false` back (whole-row
-  save), which demotes the tier.
+- The admin group form sends `market_tier` only when the toggle was changed,
+  but the group PUT itself has no version check: an API client that sends a
+  stale `market_tier = false` demotes the tier.
 - Admin share-settings modal: the UI re-reads the listing right before
   saving and reloads if the owner, version or status changed, but the
   server PUT has no version check, so a change between that read and the
