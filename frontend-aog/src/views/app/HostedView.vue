@@ -6,19 +6,28 @@
  * or what they were charged. The owner can pause / resume an account or ask
  * for it to be taken down. While self-onboarding is open, the page also lists
  * my applications and offers the form to submit my own Claude account.
+ *
+ * Sharing market: when an administrator allowed any of my accounts into a
+ * price tier, or I have earnings, each current account gets a 共享出售 block
+ * and the page a 共享收益 section. Otherwise none of it shows.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { hostedApi, type HostedApplication, type HostedUsageSummary, type HostedWindow, type OwnedAccount, type OwnedUsageItem } from '@/api'
 import type { ApiError } from '@/api/client'
+import { marketApi, type OwnerEarnings, type OwnerMarketView } from '@/api/market'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import HostedApplications from '@/components/HostedApplications.vue'
+import HostedEarnings from '@/components/HostedEarnings.vue'
+import HostedMarket from '@/components/HostedMarket.vue'
 import HostedOnboard from '@/components/HostedOnboard.vue'
 import { intlLocale } from '@/i18n'
 import { cost, count, dateTime, daysAgo, shortTime, ymd } from '@/lib/format'
 import { localMidnight, MAX_SPAN_DAYS, rangeProblem, utcWindow } from '@/lib/hosted'
+import { hasEarnings, hasPermission } from '@/lib/market'
 import { onboardErrorKey } from '@/lib/selfOnboard'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useHostedStore } from '@/stores/hosted'
 
 type Range = 'today' | '7d' | '30d' | 'custom'
@@ -31,6 +40,9 @@ const WARN_AT = 80
 const { t, te } = useI18n()
 const hosted = useHostedStore()
 const app = useAppStore()
+const auth = useAuthStore()
+// An unsettled earnings conversion survives reloads: resume it for this user.
+hosted.loadPendingConvert(auth.user?.id)
 
 /* ---------- Accounts ---------- */
 const loading = ref(true)
@@ -149,6 +161,8 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
       app.notify('ok', t(`hosted.owner_${action}_done`))
       // Status and badges then come from the server, read after this write.
       void loadAccounts(true)
+      // Pausing or asking for take-down also stops sharing.
+      void loadMarketView(a.account_id)
     }
   } catch (e) {
     if (hosted.session() !== session) return
@@ -165,6 +179,114 @@ async function confirmWithdraw(): Promise<void> {
   if (a) await ownerAction(a, 'withdraw')
   withdrawTarget.value = null
 }
+
+/* ---------- Sharing market ---------- */
+const marketViews = ref<Record<number, OwnerMarketView>>({})
+/** Accounts whose market read failed (not a 404: that means "no market here"). */
+const marketFailed = ref<Record<number, boolean>>({})
+const earnings = ref<OwnerEarnings | null>(null)
+const earningsFailed = ref(false)
+/** All balances are zero but the ledger has entries (e.g. everything was reversed): still show the section. */
+const hasLedger = ref(false)
+/** Latest read per account; older answers are dropped. */
+const marketSeq = new Map<number, number>()
+let earningsSeq = 0
+
+/** Shown only when one of my current accounts may be shared (or is still listed), or there are earnings. */
+const showMarket = computed(
+  () =>
+    hosted.accounts.some((a) => a.current && hasPermission(marketViews.value[a.account_id])) ||
+    hasEarnings(earnings.value) ||
+    (earnings.value !== null && hasLedger.value)
+)
+/** A failed earnings read is reported to owners (and whoever already saw earnings), never to everyone else. */
+const showEarningsError = computed(() => earningsFailed.value && (showMarket.value || earnings.value !== null || hosted.accounts.length > 0))
+
+function isNotFound(e: unknown): boolean {
+  return (e as Partial<ApiError> | undefined)?.status === 404
+}
+
+function setMarketView(v: OwnerMarketView): void {
+  const shown = marketViews.value[v.account_id]
+  if (shown && v.version < shown.version) {
+    // An answer older than what is on screen: read the current state instead.
+    void loadMarketView(v.account_id)
+    return
+  }
+  marketSeq.set(v.account_id, (marketSeq.get(v.account_id) ?? 0) + 1)
+  marketViews.value = { ...marketViews.value, [v.account_id]: v }
+  marketFailed.value = { ...marketFailed.value, [v.account_id]: false }
+}
+
+async function loadMarketView(id: number): Promise<void> {
+  const mine = (marketSeq.get(id) ?? 0) + 1
+  marketSeq.set(id, mine)
+  try {
+    const v = await marketApi.getListing(id)
+    if (marketSeq.get(id) !== mine) return
+    marketViews.value = { ...marketViews.value, [id]: v }
+    marketFailed.value = { ...marketFailed.value, [id]: false }
+  } catch (e) {
+    if (marketSeq.get(id) !== mine) return
+    const { [id]: _gone, ...rest } = marketViews.value
+    marketViews.value = rest
+    // Not mine any more, or a server without the market: nothing to show.
+    marketFailed.value = { ...marketFailed.value, [id]: !isNotFound(e) }
+  }
+}
+
+async function loadEarnings(): Promise<void> {
+  const mine = ++earningsSeq
+  try {
+    const e = await marketApi.earnings()
+    if (mine !== earningsSeq) return
+    let probeFailed = false
+    if (!hasEarnings(e)) {
+      // All zero: one ledger line is enough to know there is history (e.g. reversals) to show.
+      try {
+        const page = await marketApi.entries(null, 1)
+        if (mine !== earningsSeq) return
+        hasLedger.value = page.items.length > 0
+      } catch (err) {
+        if (mine !== earningsSeq) return
+        // Unknown is not "no history": keep the section (and a retry) rather than hiding it.
+        hasLedger.value = !isNotFound(err)
+        probeFailed = !isNotFound(err)
+      }
+    }
+    earnings.value = e
+    earningsFailed.value = probeFailed
+  } catch (e) {
+    if (mine !== earningsSeq) return
+    // A server without earnings (404) has nothing to show, not even the last answer.
+    if (isNotFound(e)) earnings.value = null
+    earningsFailed.value = !isNotFound(e)
+  }
+}
+
+// A listing action of an earlier visit of this page answered late: show its result.
+watch(
+  () => hosted.listingChanged,
+  (c) => {
+    if (c) void loadMarketView(c.accountId)
+  }
+)
+
+// A definite conversion outcome (here, from an earlier visit, or another tab; also when the local record
+// could not be removed): read the summary again. Watched here, not in the card, so it covers a card not mounted yet.
+watch(
+  () => hosted.settledSeq,
+  () => void loadEarnings()
+)
+
+// One read per current account whenever the set of current accounts changes.
+watch(
+  () => hosted.accounts.filter((a) => a.current).map((a) => a.account_id).join(','),
+  (ids) => {
+    for (const id of ids ? ids.split(',').map(Number) : []) void loadMarketView(id)
+  },
+  { immediate: true }
+)
 
 /* ---------- Self-onboarding ---------- */
 const onboardEnabled = computed(() => hosted.onboard?.enabled === true)
@@ -322,6 +444,7 @@ onMounted(() => {
   void loadAccounts()
   hosted.loadConfig().catch(() => undefined)
   void loadApplications()
+  void loadEarnings()
 })
 onUnmounted(() => {
   usageGen++
@@ -468,11 +591,29 @@ onUnmounted(() => {
                   <span class="text-xs text-ink-3">{{ a.owner_paused ? t('hosted.pausedHint') : t('hosted.pauseHint') }}</span>
                 </template>
               </div>
+              <template v-if="a.current && (showMarket || marketFailed[a.account_id])">
+                <HostedMarket
+                  v-if="showMarket && marketViews[a.account_id]"
+                  :view="marketViews[a.account_id]"
+                  @updated="setMarketView"
+                  @reload="loadMarketView(a.account_id)"
+                />
+                <p v-else-if="marketFailed[a.account_id]" class="mb-4 ml-10 text-sm text-seal" role="alert" :data-testid="`market-error-${a.account_id}`">
+                  {{ t('market.loadFailed') }}
+                  <button type="button" class="btn btn-quiet btn-sm" @click="loadMarketView(a.account_id)">{{ t('common.retry') }}</button>
+                </p>
+              </template>
             </li>
           </ul>
         </section>
       </div>
     </template>
+
+    <p v-if="showEarningsError" class="mt-8 text-sm text-seal" role="alert" data-testid="earnings-error">
+      {{ earnings ? t('earnings.refreshFailed') : t('earnings.loadFailed') }}
+      <button type="button" class="btn btn-quiet btn-sm" @click="loadEarnings">{{ t('common.retry') }}</button>
+    </p>
+    <HostedEarnings v-if="showMarket && earnings" :earnings="earnings" />
 
     <p v-if="appsFailed" class="mt-8 text-sm text-seal" role="alert" data-testid="apps-error">
       {{ t('onboard.apps.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadApplications">{{ t('common.retry') }}</button>

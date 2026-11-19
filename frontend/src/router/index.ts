@@ -404,6 +404,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/market-earnings',
+    name: 'AdminMarketEarnings',
+    component: () => import('@/views/admin/MarketEarningsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Sharing Earnings',
+      titleKey: 'market.earnings.title',
+      descriptionKey: 'market.earnings.description'
+    }
+  },
+  {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/admin/SettingsView.vue'),

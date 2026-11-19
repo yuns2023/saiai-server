@@ -53,6 +53,8 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const cryptoPayConfigured = ref(readCachedBool('crypto_pay_configured_cached', false))
   // Hosted self-onboarding is opt-in per site; its review page is listed only while the switch is on.
   const hostedSelfOnboardEnabled = ref(readCachedBool('hosted_self_onboard_enabled_cached', false))
+  // Sharing market switch; its earnings page is listed only while it is on.
+  const marketEnabled = ref(readCachedBool('market_enabled_cached', false))
 
   async function fetchCryptoPayConfigured(): Promise<void> {
     try {
@@ -86,6 +88,9 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
 
       hostedSelfOnboardEnabled.value = settings.hosted_self_onboard_enabled === true
       writeCachedBool('hosted_self_onboard_enabled_cached', hostedSelfOnboardEnabled.value)
+
+      marketEnabled.value = settings.market_enabled === true
+      writeCachedBool('market_enabled_cached', marketEnabled.value)
 
       loaded.value = true
     } catch (err) {
@@ -149,6 +154,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     customMenuItems,
     cryptoPayConfigured,
     hostedSelfOnboardEnabled,
+    marketEnabled,
     fetch,
     setOpsMonitoringEnabledLocal,
     setOpsRealtimeMonitoringEnabledLocal,

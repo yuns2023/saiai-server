@@ -2,6 +2,81 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { hostedApi, type OwnedAccount, type OwnerState, type SelfOnboardConfig } from '@/api'
 
+export interface PendingConvert {
+  requestId: string
+  amount: string
+}
+
+export function pendingConvertKey(userId: number): string {
+  return `ccyou.market.pendingConvert.${userId}`
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * absent: no record (a new conversion may start); valid: retry only that one;
+ * unreadable: storage threw, or a record is there but is not valid — neither
+ * start a new conversion nor overwrite it (the user clears it explicitly).
+ */
+export type StoredConvert = { state: 'absent' } | { state: 'valid'; value: PendingConvert } | { state: 'unreadable' }
+
+const NIL_UUID = '00000000-0000-0000-0000-000000000000'
+
+/** What the server accepts: a non-nil UUID and a positive amount with at most 2 decimals. */
+function validRecord(requestId: unknown, amount: unknown): requestId is string {
+  return (
+    typeof requestId === 'string' &&
+    UUID_RE.test(requestId) &&
+    requestId !== NIL_UUID &&
+    typeof amount === 'string' &&
+    /^\d+(\.\d{1,2})?$/.test(amount) &&
+    /[1-9]/.test(amount)
+  )
+}
+
+export function readPendingConvert(userId: number): StoredConvert {
+  let raw: string | null
+  try {
+    raw = localStorage.getItem(pendingConvertKey(userId))
+  } catch {
+    return { state: 'unreadable' }
+  }
+  if (raw === null) return { state: 'absent' }
+  try {
+    const v = JSON.parse(raw) as Partial<PendingConvert> | null
+    if (v && validRecord(v.requestId, v.amount)) return { state: 'valid', value: { requestId: v.requestId, amount: v.amount as string } }
+  } catch {
+    // Not JSON: unreadable below.
+  }
+  return { state: 'unreadable' }
+}
+
+/** Writes the record and reads it back; false when storage refused it (then nothing may be sent). */
+function storePendingConvert(userId: number, v: PendingConvert): boolean {
+  try {
+    localStorage.setItem(pendingConvertKey(userId), JSON.stringify(v))
+  } catch {
+    return false
+  }
+  const back = readPendingConvert(userId)
+  return back.state === 'valid' && back.value.requestId === v.requestId && back.value.amount === v.amount
+}
+
+/**
+ * Runs the local read/check/write steps under a per-user Web Lock so two tabs
+ * cannot interleave them. Never held across the HTTP call. Without
+ * navigator.locks (old browsers) the steps run unlocked: two tabs racing
+ * within the same moment could both start — an accepted limitation.
+ */
+async function withConvertLock<T>(userId: number, fn: () => T): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined
+  if (!locks || typeof locks.request !== 'function') return fn()
+  return (await locks.request(`ccyou-market-convert-${userId}`, () => fn())) as T
+}
+
+/** 'aborted': the user or session changed while waiting for the lock — nothing written. */
+export type BeginConvertResult = 'started' | 'pending' | 'unreadable' | 'storage' | 'aborted'
+
 /** A successful list is trusted this long before a navigation or focus checks again. */
 export const HOSTED_TTL_MS = 5 * 60_000
 /** After a failed attempt, wait at least this long before trying again. */
@@ -30,6 +105,27 @@ export const useHostedStore = defineStore('hosted', () => {
   const ownerBusy = ref<number | null>(null)
   /** I have at least one self-onboarding application (any status); null = unknown. */
   const hasApplications = ref<boolean | null>(null)
+  /**
+   * An earnings conversion sent but not definitely answered yet (in flight,
+   * timeout, network, 429/401/403/5xx). The next attempt replays it with the
+   * same request id and amount — after leaving the page, after a reload and
+   * from another tab: localStorage (one key per user) is the source of truth,
+   * this ref mirrors it. Change it only through beginConvert / settleConvert.
+   */
+  const pendingConvert = ref<PendingConvert | null>(null)
+  /** The user whose stored conversion pendingConvert mirrors (null: not loaded). */
+  let pendingOwner: number | null = null
+  /** A record is stored but cannot be read: no new conversion until the user clears it. */
+  const pendingUnreadable = ref(false)
+  /**
+   * Bumped on every definite outcome — here (even if the local record could
+   * not be removed) or seen from another visit / tab: pages refresh summary
+   * and ledger once per outcome.
+   */
+  const settledSeq = ref(0)
+  let settlingHere = false
+  /** A conversion request is in flight (kept across page remounts). */
+  const convertBusy = ref(false)
   /**
    * The /hosted entry: owners, anyone while self-onboarding is open, and anyone
    * with an application (switch off: they can still see and cancel it).
@@ -170,6 +266,121 @@ export const useHostedStore = defineStore('hosted', () => {
     return true
   }
 
+  /** Starts mirroring the stored unsettled conversion of this user (and follows other tabs). */
+  function loadPendingConvert(userId: number | null | undefined): void {
+    if (!userId) {
+      pendingOwner = null
+      pendingConvert.value = null
+      pendingUnreadable.value = false
+      return
+    }
+    pendingOwner = userId
+    syncPendingConvert()
+  }
+
+  /** Reads the stored record again (another tab may have started or settled one). */
+  function syncPendingConvert(): void {
+    const stored: StoredConvert = pendingOwner !== null ? readPendingConvert(pendingOwner) : { state: 'absent' }
+    const value = stored.state === 'valid' ? stored.value : null
+    const before = pendingConvert.value
+    if (value?.requestId !== before?.requestId || value?.amount !== before?.amount) {
+      pendingConvert.value = value
+      // Settled by another visit or tab: pages refresh as for a local outcome.
+      if (before && value?.requestId !== before.requestId && !settlingHere) settledSeq.value++
+    }
+    pendingUnreadable.value = stored.state === 'unreadable'
+  }
+
+  /**
+   * Records a NEW conversion before it is sent (read → empty? → write → read
+   * back, under the per-user lock). 'pending': a conversion of this user is
+   * still unsettled (any tab), the mirror shows it; 'unreadable': the record
+   * cannot be read — nothing is written; 'storage': no signed-in user or the
+   * record did not stick. Only 'started' may be sent.
+   */
+  async function beginConvert(v: PendingConvert): Promise<BeginConvertResult> {
+    const userId = pendingOwner
+    if (userId === null) return 'storage'
+    const gen = generation
+    // A lock failure rejects: the caller reports "not sent" (nothing was written or sent).
+    const result = await withConvertLock(userId, (): BeginConvertResult => {
+      if (pendingOwner !== userId || generation !== gen) return 'aborted'
+      const stored = readPendingConvert(userId)
+      if (stored.state === 'valid') return 'pending'
+      if (stored.state === 'unreadable') return 'unreadable'
+      return storePendingConvert(userId, v) ? 'started' : 'storage'
+    })
+    if (pendingOwner === userId) syncPendingConvert()
+    return result
+  }
+
+
+  /**
+   * A definite outcome for this conversion: compare-and-delete under the lock
+   * (another tab's record is never removed). false when the lock or the delete
+   * failed: the record stays and a retry replays it with the same id (safe).
+   */
+  async function settleConvert(requestId: string): Promise<boolean> {
+    settledSeq.value++
+    const userId = pendingOwner
+    if (userId === null) return false
+    const gen = generation
+    let ok = false
+    try {
+      ok = await withConvertLock(userId, () => {
+        if (pendingOwner !== userId || generation !== gen) return false
+        const stored = readPendingConvert(userId)
+        // Unreadable (before or after the delete) = clean-up not confirmed.
+        if (stored.state === 'unreadable') return false
+        if (stored.state !== 'valid' || stored.value.requestId !== requestId) return true
+        try {
+          localStorage.removeItem(pendingConvertKey(userId))
+        } catch {
+          return false
+        }
+        const after = readPendingConvert(userId)
+        return after.state === 'absent' || (after.state === 'valid' && after.value.requestId !== requestId)
+      })
+    } catch {
+      ok = false
+    }
+    if (pendingOwner === userId) {
+      settlingHere = true
+      syncPendingConvert()
+      settlingHere = false
+    }
+    return ok
+  }
+
+  /** The user's explicit step after checking the ledger: drop an unreadable record (only if it is still unreadable). */
+  /** Rejects when the lock or the delete fails (the caller shows an error). */
+  async function clearUnreadableConvert(): Promise<void> {
+    const userId = pendingOwner
+    if (userId === null) return
+    const gen = generation
+    try {
+      await withConvertLock(userId, () => {
+        if (pendingOwner !== userId || generation !== gen) return
+        if (readPendingConvert(userId).state !== 'unreadable') return
+        localStorage.removeItem(pendingConvertKey(userId))
+      })
+    } finally {
+      if (pendingOwner === userId) syncPendingConvert()
+    }
+  }
+
+  /** A listing action answered after its page was left: the page on screen re-reads that account. */
+  const listingChanged = ref<{ accountId: number; seq: number } | null>(null)
+  function notifyListingChanged(accountId: number): void {
+    listingChanged.value = { accountId, seq: (listingChanged.value?.seq ?? 0) + 1 }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (pendingOwner !== null && (e.key === null || e.key === pendingConvertKey(pendingOwner))) syncPendingConvert()
+    })
+  }
+
   function reset(): void {
     generation++
     inflight = null
@@ -185,7 +396,12 @@ export const useHostedStore = defineStore('hosted', () => {
     hasApplications.value = null
     ownerOverrides.clear()
     ownerBusy.value = null
+    // Memory only: the stored conversion stays for when this user signs in again.
+    pendingConvert.value = null
+    pendingUnreadable.value = false
+    pendingOwner = null
+    convertBusy.value = false
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, pendingConvert, convertBusy, pendingUnreadable, loadPendingConvert, syncPendingConvert, beginConvert, settleConvert, clearUnreadableConvert, settledSeq, listingChanged, notifyListingChanged, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })

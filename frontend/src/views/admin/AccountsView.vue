@@ -294,8 +294,9 @@
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @quota-window-restart="handleQuotaWindowRestart" @reset-quota="handleResetQuota" @codex-reset="handleCodexReset" @set-owner="handleSetOwner" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @stats="handleViewStats" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @clear-quota-snapshot="handleClearQuotaSnapshot" @quota-window-restart="handleQuotaWindowRestart" @reset-quota="handleResetQuota" @codex-reset="handleCodexReset" @set-owner="handleSetOwner" @market="handleMarket" />
     <AccountOwnerModal :show="showOwner" :account="ownerAcc" @close="closeOwnerModal" @updated="handleOwnerUpdated" />
+    <AccountMarketModal :show="showMarket" :account="marketAcc" @close="closeMarketModal" />
     <CodexResetModal :show="showCodexReset" :account="codexResetAcc" @close="showCodexReset = false" @updated="reload" />
     <QuotaWindowRestartModal :show="showQuotaWindowRestart" :account="quotaWindowRestartAcc" @close="showQuotaWindowRestart = false" @updated="usageManualRefreshToken += 1" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
@@ -341,6 +342,7 @@ import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
 import AccountOwnerModal from '@/components/admin/account/AccountOwnerModal.vue'
+import AccountMarketModal from '@/components/admin/account/AccountMarketModal.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
@@ -399,6 +401,8 @@ const showStats = ref(false)
 const showErrorPassthrough = ref(false)
 const showOwner = ref(false)
 const ownerAcc = ref<Account | null>(null)
+const showMarket = ref(false)
+const marketAcc = ref<Account | null>(null)
 const edAcc = ref<Account | null>(null)
 const tempUnschedAcc = ref<Account | null>(null)
 const deletingAcc = ref<Account | null>(null)
@@ -728,7 +732,8 @@ const isAnyModalOpen = computed(() => {
     showReAuth.value ||
     showStats.value ||
     showErrorPassthrough.value ||
-    showOwner.value
+    showOwner.value ||
+    showMarket.value
   )
 })
 
@@ -1321,6 +1326,8 @@ const confirmClearQuotaSnapshot = async () => {
 }
 const handleSetOwner = (account: Account) => { ownerAcc.value = account; showOwner.value = true }
 const closeOwnerModal = () => { showOwner.value = false; ownerAcc.value = null }
+const handleMarket = (account: Account) => { marketAcc.value = account; showMarket.value = true }
+const closeMarketModal = () => { showMarket.value = false; marketAcc.value = null }
 // The owner endpoint returns only the owner fields, so patch them onto the current row.
 const handleOwnerUpdated = (result: AccountOwnerResult) => {
   const current = accounts.value.find(account => account.id === result.account_id)

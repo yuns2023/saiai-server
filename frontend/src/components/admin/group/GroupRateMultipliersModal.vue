@@ -249,6 +249,7 @@
 
 <script setup lang="ts">
 import UserIdentityTooltip from '@/components/admin/user/UserIdentityTooltip.vue'
+import { marketErrorCode, marketErrorText } from '@/utils/market'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -474,7 +475,8 @@ const handleSave = async () => {
     emit('success')
     emit('close')
   } catch (error) {
-    appStore.showError(t('admin.groups.failedToSave'))
+    // A zero override on a sharing tier is refused (MARKET_TIER_RATE_OVERRIDE): say why.
+    appStore.showError(marketErrorCode(error) ? marketErrorText(error, t, t('admin.groups.failedToSave')) : t('admin.groups.failedToSave'))
     console.error('Error saving rate multipliers:', error)
   } finally {
     saving.value = false

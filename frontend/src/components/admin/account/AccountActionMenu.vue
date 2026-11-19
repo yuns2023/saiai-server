@@ -18,6 +18,10 @@
               <Icon name="userCircle" size="sm" class="text-sky-600" />
               {{ t('admin.accounts.owner.menu') }}
             </button>
+            <button v-if="account.platform === 'anthropic' && account.owner_user_id" data-testid="menu-market" @click="$emit('market', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-dark-700">
+              <Icon name="users" size="sm" class="text-emerald-600" />
+              {{ t('market.account.menu') }}
+            </button>
             <template v-if="!isRetiredPlatform && (account.type === 'oauth' || account.type === 'setup-token')">
               <button @click="$emit('reauth', account); $emit('close')" class="flex w-full items-center gap-2 px-4 py-2 text-sm text-blue-600 hover:bg-gray-100 dark:hover:bg-dark-700">
                 <Icon name="link" size="sm" />
@@ -63,7 +67,7 @@ import { Icon } from '@/components/icons'
 import type { Account } from '@/types'
 
 const props = defineProps<{ show: boolean; account: Account | null; position: { top: number; left: number } | null }>()
-const emit = defineEmits(['close', 'stats', 'reauth', 'refresh-token', 'recover-state', 'clear-quota-snapshot', 'quota-window-restart', 'reset-quota', 'codex-reset', 'set-owner'])
+const emit = defineEmits(['close', 'stats', 'reauth', 'refresh-token', 'recover-state', 'clear-quota-snapshot', 'quota-window-restart', 'reset-quota', 'codex-reset', 'set-owner', 'market'])
 const { t } = useI18n()
 const isRetiredPlatform = computed(() => props.account?.platform === 'antigravity' || props.account?.platform === 'sora')
 const isRateLimited = computed(() => {

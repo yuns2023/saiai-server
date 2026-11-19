@@ -954,6 +954,60 @@
             </div>
           </div>
         </div>
+        <!-- Sharing market (P3a): owners list accounts into admin-made price tiers; earnings convert into balance -->
+        <div class="card" data-testid="market-settings">
+          <div class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <div>
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('market.settings.title') }}</h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('market.settings.description') }}</p>
+            </div>
+            <RouterLink to="/admin/market-earnings" class="btn btn-secondary btn-sm" data-testid="market-earnings-link">{{ t('market.settings.openEarnings') }}</RouterLink>
+          </div>
+          <div class="space-y-6 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="font-medium text-gray-900 dark:text-white">{{ t('market.settings.enabled') }}</label>
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('market.settings.enabledHint') }}</p>
+              </div>
+              <Toggle v-model="form.market_enabled" data-testid="market-enabled" />
+            </div>
+            <div class="grid gap-4 md:grid-cols-3">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('market.settings.cutRate') }}</label>
+                <input v-model.number="form.market_platform_cut_rate" type="number" min="0" max="1" step="0.0001" class="input" data-testid="market-cut-rate" />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.cutRateHint') }}</p>
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('market.settings.freezeDays') }}</label>
+                <input v-model.number="form.market_earning_freeze_days" type="number" min="0" :max="MARKET_FREEZE_DAYS_MAX" step="1" class="input" data-testid="market-freeze-days" />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.freezeDaysHint', { max: MARKET_FREEZE_DAYS_MAX }) }}</p>
+              </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('market.settings.minConvert') }}</label>
+                <input v-model.number="form.market_min_convert_usd" type="number" min="0.01" max="10000" step="0.01" class="input" data-testid="market-min-convert" />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.minConvertHint') }}</p>
+              </div>
+            </div>
+            <div>
+              <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('market.settings.defaultsTitle') }}</h3>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.defaultsHint') }}</p>
+              <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div v-for="field in marketDefaultFields" :key="field.key">
+                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ field.label }}</label>
+                  <input
+                    v-model.number="form[field.key]"
+                    type="number"
+                    :min="field.min"
+                    :max="field.max"
+                    step="1"
+                    class="input"
+                    :data-testid="`market-default-${field.key}`"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
         </div><!-- /Tab: Users -->
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
@@ -1758,6 +1812,7 @@ import type {
 } from '@/api/admin/settings'
 import type { AdminGroup, Proxy } from '@/types'
 import { APPROVE_LIMITS, HOSTED_FEE_RATE_MAX, validHostedFeeRate } from '@/api/admin/hostedApplications'
+import { MARKET_FREEZE_DAYS_MAX, MARKET_PROTECTION_BOUNDS, validCutRate, validIntIn, validMinConvert } from '@/utils/market'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
@@ -1948,8 +2003,99 @@ const form = reactive<SettingsForm>({
   hosted_self_onboard_default_priority: 1,
   hosted_self_onboard_default_device_limit: 5,
   hosted_self_onboard_default_admissions_per_cycle: 1,
-  hosted_self_onboard_default_interval_hours: 24
+  hosted_self_onboard_default_interval_hours: 24,
+  market_enabled: false,
+  market_platform_cut_rate: 0.2,
+  market_earning_freeze_days: 7,
+  market_min_convert_usd: 1,
+  market_default_reserved_concurrency: 1,
+  market_default_reserved_devices: 2,
+  market_default_reserved_admissions: 1,
+  market_default_cap_5h_pct: 70,
+  market_default_cap_7d_pct: 60,
+  market_default_sample_max_age_minutes: 30
 })
+
+/* ---------- Sharing market ---------- */
+type MarketDefaultKey =
+  | 'market_default_reserved_concurrency'
+  | 'market_default_reserved_devices'
+  | 'market_default_reserved_admissions'
+  | 'market_default_cap_5h_pct'
+  | 'market_default_cap_7d_pct'
+  | 'market_default_sample_max_age_minutes'
+
+const MARKET_DEFAULT_PARAMS = [
+  'reserved_concurrency',
+  'reserved_devices',
+  'reserved_admissions',
+  'cap_5h_pct',
+  'cap_7d_pct',
+  'sample_max_age_minutes'
+] as const
+
+const marketDefaultFields = computed<Array<{ key: MarketDefaultKey; label: string; min: number; max: number }>>(() =>
+  MARKET_DEFAULT_PARAMS.map((param) => ({
+    key: `market_default_${param}` as MarketDefaultKey,
+    label: t(`market.protection.${param}`),
+    ...MARKET_PROTECTION_BOUNDS[param]
+  }))
+)
+
+const MARKET_NUMBER_KEYS = [
+  'market_platform_cut_rate',
+  'market_earning_freeze_days',
+  'market_min_convert_usd',
+  'market_default_reserved_concurrency',
+  'market_default_reserved_devices',
+  'market_default_reserved_admissions',
+  'market_default_cap_5h_pct',
+  'market_default_cap_7d_pct',
+  'market_default_sample_max_age_minutes'
+] as const
+type MarketNumberKey = (typeof MARKET_NUMBER_KEYS)[number]
+/** Market values as last read from (or saved to) the server. */
+const marketLastRead = reactive({} as Record<MarketNumberKey, number>)
+const marketEnabledLastRead = ref(false)
+function rememberMarketNumbers() {
+  for (const key of MARKET_NUMBER_KEYS) marketLastRead[key] = form[key]
+  marketEnabledLastRead.value = form.market_enabled
+}
+
+/** The market keys whose value differs from what the server last returned (0 is a value, compared exactly). */
+function marketChanges(): Partial<Pick<SettingsForm, MarketNumberKey | 'market_enabled'>> {
+  const out: Partial<Pick<SettingsForm, MarketNumberKey | 'market_enabled'>> = {}
+  if (form.market_enabled !== marketEnabledLastRead.value) out.market_enabled = form.market_enabled
+  for (const key of MARKET_NUMBER_KEYS) if (form[key] !== marketLastRead[key]) out[key] = form[key]
+  return out
+}
+rememberMarketNumbers()
+
+/** Each market number: label and whether the server would accept it (0 is a value: cut rate and freeze days may be 0). */
+function marketFieldChecks(): Array<{ key: MarketNumberKey; label: string; ok: boolean }> {
+  return [
+    { key: 'market_platform_cut_rate', label: t('market.settings.cutRate'), ok: validCutRate(form.market_platform_cut_rate) },
+    { key: 'market_earning_freeze_days', label: t('market.settings.freezeDays'), ok: validIntIn(form.market_earning_freeze_days, 0, MARKET_FREEZE_DAYS_MAX) },
+    { key: 'market_min_convert_usd', label: t('market.settings.minConvert'), ok: validMinConvert(form.market_min_convert_usd) },
+    ...marketDefaultFields.value.map((f) => ({ key: f.key, label: f.label, ok: validIntIn(form[f.key], f.min, f.max) }))
+  ]
+}
+
+/**
+ * Like the hosted block: while the market is on, an invalid value blocks the
+ * save with a message; while it is off, it never blocks other settings — each
+ * invalid field (only that one) goes back to what the server last returned.
+ */
+function validateMarket(): boolean {
+  const bad = marketFieldChecks().filter((c) => !c.ok)
+  if (!bad.length) return true
+  if (form.market_enabled) {
+    appStore.showError(t('market.settings.invalidField', { field: bad[0].label }))
+    return false
+  }
+  for (const c of bad) form[c.key] = marketLastRead[c.key]
+  return true
+}
 
 /* ---------- Hosted self-onboarding ---------- */
 const hostedProxies = ref<Proxy[]>([])
@@ -2177,6 +2323,7 @@ async function loadSettings() {
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     rememberHostedNumbers()
+    rememberMarketNumbers()
     settingsLoaded.value = true
     form.smtp_password = ''
     form.turnstile_secret_key = ''
@@ -2311,6 +2458,7 @@ async function saveSettings() {
   }
   if (!validateUrlSettings()) return
   if (!validateHostedSelfOnboard()) return
+  if (!validateMarket()) return
 
   saving.value = true
   try {
@@ -2417,7 +2565,9 @@ async function saveSettings() {
       hosted_self_onboard_default_priority: form.hosted_self_onboard_default_priority,
       hosted_self_onboard_default_device_limit: form.hosted_self_onboard_default_device_limit,
       hosted_self_onboard_default_admissions_per_cycle: form.hosted_self_onboard_default_admissions_per_cycle,
-      hosted_self_onboard_default_interval_hours: form.hosted_self_onboard_default_interval_hours
+      hosted_self_onboard_default_interval_hours: form.hosted_self_onboard_default_interval_hours,
+      // Only the market keys edited here: the server keeps omitted ones, so a stale tab never writes old values back.
+      ...marketChanges()
     }
     const updated = await adminAPI.settings.updateSettings(payload)
     Object.assign(form, updated)
@@ -2426,6 +2576,7 @@ async function saveSettings() {
     )
     registrationEmailSuffixWhitelistDraft.value = ''
     rememberHostedNumbers()
+    rememberMarketNumbers()
     form.smtp_password = ''
     form.turnstile_secret_key = ''
     form.linuxdo_connect_client_secret = ''

@@ -74,8 +74,9 @@
 
       <template #table>
         <DataTable :columns="columns" :data="groups" :loading="loading">
-          <template #cell-name="{ value }">
+          <template #cell-name="{ value, row }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <span v-if="row.market_tier" class="badge badge-success ml-2" data-testid="market-tier-badge">{{ t('market.groupTier.badge') }}</span>
           </template>
 
           <template #cell-platform="{ value }">
@@ -460,6 +461,25 @@
             data-testid="hosted-usage-blocked-reason"
           >
             {{ t('hostedUsage.adminBlockedReason') }}
+          </p>
+        </div>
+        <div v-if="createForm.platform === 'anthropic' || createForm.market_tier" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="market-tier-section">
+          <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            <input
+              v-model="createForm.market_tier"
+              type="checkbox"
+              :disabled="!createForm.market_tier && !isMarketTierEligible(createForm)"
+              data-testid="market-tier-checkbox"
+            />
+            <span>{{ t('market.groupTier.label') }}</span>
+          </label>
+          <p class="input-hint">{{ t('market.groupTier.hint') }}</p>
+          <p
+            v-if="!isMarketTierEligible(createForm)"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="market-tier-blocked-reason"
+          >
+            {{ t('market.groupTier.blocked') }}
           </p>
         </div>
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
@@ -1285,6 +1305,25 @@
             {{ t('hostedUsage.adminBlockedReason') }}
           </p>
         </div>
+        <div v-if="editForm.platform === 'anthropic' || editForm.market_tier" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="market-tier-section">
+          <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
+            <input
+              v-model="editForm.market_tier"
+              type="checkbox"
+              :disabled="!editForm.market_tier && !isMarketTierEligible(editForm)"
+              data-testid="market-tier-checkbox"
+            />
+            <span>{{ t('market.groupTier.label') }}</span>
+          </label>
+          <p class="input-hint">{{ t('market.groupTier.hint') }}</p>
+          <p
+            v-if="!isMarketTierEligible(editForm)"
+            class="mt-1 text-xs text-amber-600 dark:text-amber-400"
+            data-testid="market-tier-blocked-reason"
+          >
+            {{ t('market.groupTier.blocked') }}
+          </p>
+        </div>
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
             <input v-model="editForm.show_account_quota" type="checkbox" :disabled="!editForm.is_exclusive" />
@@ -2050,6 +2089,7 @@ import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { isHostedUsageEligible, supportsHostedUsage } from '@/utils/hostedUsage'
+import { isMarketTierEligible, marketErrorCode, marketErrorText } from '@/utils/market'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
@@ -2117,7 +2157,7 @@ const fallbackGroupOptions = computed(() => {
     { value: null, label: t('admin.groups.claudeCode.noFallback') }
   ]
   const eligibleGroups = groups.value.filter(
-    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && !g.hosted_usage_enabled
+    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && !g.hosted_usage_enabled && !g.market_tier
   )
   eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name })
@@ -2132,7 +2172,7 @@ const fallbackGroupOptionsForEdit = computed(() => {
   ]
   const currentId = editingGroup.value?.id
   const eligibleGroups = groups.value.filter(
-    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && !g.hosted_usage_enabled && g.id !== currentId
+    (g) => g.platform === 'anthropic' && !g.claude_code_only && g.status === 'active' && !g.hosted_usage_enabled && !g.market_tier && g.id !== currentId
   )
   eligibleGroups.forEach((g) => {
     options.push({ value: g.id, label: g.name })
@@ -2151,6 +2191,7 @@ const invalidRequestFallbackOptions = computed(() => {
       g.status === 'active' &&
       g.subscription_type !== 'subscription' &&
       !g.hosted_usage_enabled &&
+      !g.market_tier &&
       g.fallback_group_id_on_invalid_request === null
   )
   eligibleGroups.forEach((g) => {
@@ -2171,6 +2212,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
       g.status === 'active' &&
       g.subscription_type !== 'subscription' &&
       !g.hosted_usage_enabled &&
+      !g.market_tier &&
       g.fallback_group_id_on_invalid_request === null &&
       g.id !== currentId
   )
@@ -2255,6 +2297,7 @@ const createForm = reactive({
   is_exclusive: false,
   show_account_quota: false,
   hosted_usage_enabled: false,
+  market_tier: false,
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
   daily_limit_usd: null as number | null,
@@ -2523,6 +2566,7 @@ const editForm = reactive({
   is_exclusive: false,
   show_account_quota: false,
   hosted_usage_enabled: false,
+  market_tier: false,
   status: 'active' as 'active' | 'inactive',
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
@@ -2689,6 +2733,7 @@ const closeCreateModal = () => {
   createForm.required_level_id = null
   createForm.is_exclusive = false
   createForm.hosted_usage_enabled = false
+  createForm.market_tier = false
   createForm.show_account_quota = false
   createForm.subscription_type = 'standard'
   createForm.five_hour_limit_usd = null
@@ -2783,7 +2828,7 @@ const handleCreateGroup = async () => {
       onboardingStore.nextStep(500)
     }
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || error.message || t('admin.groups.failedToCreate'))
+    appStore.showError(marketErrorCode(error) ? marketErrorText(error, t, t('admin.groups.failedToCreate')) : error.response?.data?.detail || error.message || t('admin.groups.failedToCreate'))
     console.error('Error creating group:', error)
     // Don't advance tour on error
   } finally {
@@ -2800,6 +2845,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.required_level_id = group.required_level_id ?? null
   editForm.is_exclusive = group.is_exclusive
   editForm.hosted_usage_enabled = group.hosted_usage_enabled || false
+  editForm.market_tier = group.market_tier || false
+  editMarketTierLoaded = editForm.market_tier
   editForm.show_account_quota = group.show_account_quota || false
   editForm.status = group.status
   editForm.subscription_type = group.subscription_type || 'standard'
@@ -2859,6 +2906,9 @@ const closeEditModal = () => {
   editForm.model_rate_multipliers_text = ''
 }
 
+/** market_tier as loaded into the edit form. */
+let editMarketTierLoaded = false
+
 const handleUpdateGroup = async () => {
   if (!editingGroup.value) return
   if (!editForm.name.trim()) {
@@ -2895,12 +2945,14 @@ const handleUpdateGroup = async () => {
     payload.weekly_limit_usd = emptyToNull(payload.weekly_limit_usd)
     payload.monthly_limit_usd = emptyToNull(payload.monthly_limit_usd)
     payload.subscription_revenue_rate = emptyToNull(payload.subscription_revenue_rate)
-    await adminAPI.groups.update(editingGroup.value.id, payload)
+    // market_tier only when toggled here: a stale form must not promote or demote a tier (server keeps an omitted value).
+    const { market_tier: marketTier, ...withoutTier } = payload
+    await adminAPI.groups.update(editingGroup.value.id, marketTier === editMarketTierLoaded ? withoutTier : payload)
     appStore.showSuccess(t('admin.groups.groupUpdated'))
     closeEditModal()
     loadGroups()
   } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || error.message || t('admin.groups.failedToUpdate'))
+    appStore.showError(marketErrorCode(error) ? marketErrorText(error, t, t('admin.groups.failedToUpdate')) : error.response?.data?.detail || error.message || t('admin.groups.failedToUpdate'))
     console.error('Error updating group:', error)
   } finally {
     submitting.value = false
@@ -2969,6 +3021,7 @@ watch(
     }
     if (!['anthropic', 'antigravity'].includes(newVal)) createForm.claude_device_limit_mode = 'off'
     if (!supportsHostedUsage(newVal)) createForm.hosted_usage_enabled = false
+    if (newVal !== 'anthropic') createForm.market_tier = false
   }
 )
 
@@ -2990,6 +3043,7 @@ watch(
     }
     if (!['anthropic', 'antigravity'].includes(newVal)) editForm.claude_device_limit_mode = 'off'
     if (!supportsHostedUsage(newVal)) editForm.hosted_usage_enabled = false
+    if (newVal !== 'anthropic') editForm.market_tier = false
   }
 )
 
