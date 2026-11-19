@@ -474,12 +474,20 @@ func buyerLeaseRenewInterval(cache MarketSlotCache) time.Duration {
 
 const defaultBuyerLeaseTTLSeconds = 15 * 60
 
+// maxBuyerLeaseRenewal bounds renewal: a lease whose release was somehow
+// lost still expires (TTL after the last renewal) instead of living forever.
+const maxBuyerLeaseRenewal = 6 * time.Hour
+
 func renewBuyerLease(cache MarketSlotCache, accountID int64, requestID string, stop <-chan struct{}) {
 	ticker := time.NewTicker(buyerLeaseRenewInterval(cache))
 	defer ticker.Stop()
+	deadline := time.NewTimer(maxBuyerLeaseRenewal)
+	defer deadline.Stop()
 	for {
 		select {
 		case <-stop:
+			return
+		case <-deadline.C:
 			return
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -637,13 +637,6 @@ func (s *GatewayService) marketFilterCandidates(ctx context.Context, accounts []
 	return out
 }
 
-// marketCandidateAllowed is the per-account form used where a candidate is
-// loaded by id (sticky / fresh reloads): false for excluded accounts.
-func (s *GatewayService) marketCandidateAllowed(ctx context.Context, account *Account) bool {
-	class, _ := s.classifyMarketCandidate(ctx, account)
-	return class != MarketClassExcluded
-}
-
 // isAccountInGroupForSelection: admin membership of the group, or a buyer
 // candidate of the tier, and never an excluded market candidate.
 func (s *GatewayService) isAccountInGroupForSelection(ctx context.Context, account *Account, groupID *int64) bool {
@@ -1103,7 +1096,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 
 	admitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
 	verdict, err := s.market.store.AdmitMarketCandidate(admitCtx, req, func(f *MarketAuthoritativeFacts) string {
-		return evaluateMarketAdmission(sel, req, f)
+		return EvaluateMarketAdmission(sel, req, f)
 	})
 	cancel()
 	if err != nil {
@@ -1163,8 +1156,8 @@ func logMarketAdmission(ctx context.Context, sel *MarketSelection, reason string
 	logger.FromContext(ctx).Warn("gateway.market_admission_rejected", fields...)
 }
 
-// evaluateMarketAdmission decides on the authoritative facts ("" = admit).
-func evaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, f *MarketAuthoritativeFacts) string {
+// EvaluateMarketAdmission decides on the authoritative facts ("" = admit).
+func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, f *MarketAuthoritativeFacts) string {
 	if sel == nil || req == nil || f == nil {
 		return "invalid"
 	}
