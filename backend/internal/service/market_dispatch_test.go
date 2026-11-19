@@ -1472,3 +1472,98 @@ func TestMarketLateAbsenceNeverReopensSales(t *testing.T) {
 	require.NotEqual(t, "", evaluateMarketShareCaps(obs, mktProtection(), t0.Add(31*time.Minute)),
 		"12:05 late absence vs the 12:00 sample of a window ending 16:00: still not sellable at 12:31")
 }
+
+// ---- independent review round 3 ----
+
+// listingDuringRegistrationStub lists the account (registry) while the plain
+// carpool device registration of an ordinary attempt is in progress.
+type listingDuringRegistrationStub struct {
+	identityCacheStub
+	onRegister func()
+}
+
+func (s *listingDuringRegistrationStub) GetOrCreateCarpoolDevice(_ context.Context, _ int64, device string, _ ClientHints, _ int, now int64) (*CarpoolDeviceRecord, error) {
+	if s.onRegister != nil {
+		s.onRegister()
+	}
+	return &CarpoolDeviceRecord{OriginalDeviceID: device, CreatedAt: now}, nil
+}
+
+func TestMarketListedDuringDeviceRegistrationNeverSends(t *testing.T) {
+	newEnv := func(t *testing.T) (*marketEnv, *queuedClaudeCodeUpstream, *Account, *bool) {
+		env, upstream, acc := marketForwardEnv(t)
+		// An ordinary owner-group carpool account, not listed yet.
+		acc.MarketGroupIDs, acc.MarketListing = nil, nil
+		env.rt.SetState(&MarketDispatchState{Enabled: true})
+		registered := false
+		env.svc.identityService = NewIdentityService(&listingDuringRegistrationStub{onRegister: func() {
+			registered = true
+			env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{acc.ID}})
+		}}, strings.Repeat("x", 32))
+		return env, upstream, acc, &registered
+	}
+
+	t.Run("messages fails over", func(t *testing.T) {
+		env, upstream, acc, registered := newEnv(t)
+		c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+		_, err := env.svc.Forward(c.Request.Context(), c, acc, parsed)
+		require.True(t, *registered, "the listing happened during device registration")
+		var failover *UpstreamFailoverError
+		require.ErrorAs(t, err, &failover)
+		require.Zero(t, upstream.calls)
+		require.NotEqual(t, 400, rec.Code)
+	})
+	t.Run("count_tokens answers 503 once", func(t *testing.T) {
+		env, upstream, acc, registered := newEnv(t)
+		c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+		err := env.svc.ForwardCountTokens(c.Request.Context(), c, acc, parsed)
+		require.True(t, *registered)
+		require.Error(t, err)
+		require.Zero(t, upstream.calls)
+		require.Equal(t, 503, rec.Code)
+		require.Equal(t, 1, strings.Count(rec.Body.String(), "temporarily unavailable"), "written once")
+	})
+}
+
+func TestMarketTierCountTokensSkipsManyIncapableAccounts(t *testing.T) {
+	var accounts []Account
+	for i := int64(10); i < 15; i++ {
+		b := mktPlatformAccount(i, mktTier)
+		b.Type, b.Priority = AccountTypeBedrock, 0
+		b.Credentials = map[string]any{"auth_mode": "apikey", "api_key": "k", "aws_region": "us-east-1"}
+		accounts = append(accounts, b)
+	}
+	good := mktPlatformAccount(3, mktTier)
+	good.Priority = 50
+	accounts = append(accounts, good)
+	env := newMarketEnv(t, accounts)
+	require.True(t, env.svc.isModelSupportedByAccount(&accounts[0], "claude-sonnet-4-5"), "the Bedrock accounts do support the model")
+	ctx := context.WithValue(WithAccountUserID(context.Background(), mktBuyer), ctxkey.Group, mktGroups()[mktTier])
+	acc, err := env.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-sonnet-4-5")
+	require.NoError(t, err, "five higher-priority Bedrock accounts never exhaust the attempts")
+	require.Equal(t, int64(3), acc.ID)
+	require.Len(t, env.store.requests, 1)
+}
+
+// The scheduler re-reads the single-account snapshot after ranking and
+// returns that copy: it must itself be count_tokens capable.
+func TestMarketTierCountTokensChecksTheReturnedCopy(t *testing.T) {
+	listed := mktPlatformAccount(2, mktTier) // what the bucket says
+	listed.Priority = 0
+	freshBedrock := listed
+	freshBedrock.Type = AccountTypeBedrock
+	freshBedrock.Credentials = map[string]any{"auth_mode": "apikey", "api_key": "k", "aws_region": "us-east-1"}
+	good := mktPlatformAccount(3, mktTier)
+	good.Priority = 50
+	env := newMarketEnv(t, []Account{listed, good})
+	env.svc.schedulerSnapshot = &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{&listed, &good},
+		accountsByID:     map[int64]*Account{2: &freshBedrock, 3: &good},
+	}}
+	ctx := context.WithValue(WithAccountUserID(context.Background(), mktBuyer), ctxkey.Group, mktGroups()[mktTier])
+	for i := 0; i < 5; i++ {
+		acc, err := env.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-sonnet-4-5")
+		require.NoError(t, err)
+		require.Equal(t, int64(3), acc.ID, "a returned Bedrock copy is excluded and the loop continues")
+	}
+}

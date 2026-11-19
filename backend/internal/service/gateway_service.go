@@ -5709,6 +5709,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := marketDispatchCancelled(ctx); err != nil {
 			return nil, err
 		}
+		if s.marketListedWithoutAdmission(ctx, account) {
+			// Listed while this non-market attempt waited (e.g. in device
+			// registration): never send through it; reselect.
+			return nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
+		}
 
 		// 发送请求
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, resolveTransportAccountID(account, oauthIdentity), account.Concurrency, account.IsTLSFingerprintEnabled())
@@ -10410,6 +10415,12 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 发送请求
+	if s.marketListedWithoutAdmission(ctx, account) {
+		// Listed after its selection (count_tokens never uses a listed
+		// account): one "temporarily unavailable", nothing sent.
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
+		return ErrMarketAdmissionRejected
+	}
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, resolveTransportAccountID(account, oauthIdentity), account.Concurrency, account.IsTLSFingerprintEnabled())
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")

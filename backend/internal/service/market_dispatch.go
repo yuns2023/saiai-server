@@ -1326,6 +1326,13 @@ func marketDeviceAdmissionFor(ctx context.Context, account *Account) *MarketDevi
 	return nil
 }
 
+// marketListedWithoutAdmission: right before a first send, an attempt
+// without a buyer/owner market admission whose account is now listed (local
+// registry or cached copy only; no DB/Redis round trip).
+func (s *GatewayService) marketListedWithoutAdmission(ctx context.Context, account *Account) bool {
+	return account != nil && marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account)
+}
+
 // markMarketDeviceAdmitted records a successful class-aware device
 // admission on the current attempt.
 func markMarketDeviceAdmitted(ctx context.Context, account *Account) {
@@ -1619,7 +1626,9 @@ func (s *GatewayService) SelectMarketTierCountTokensAccount(ctx context.Context,
 		if err != nil {
 			break
 		}
-		if s.verifyMarketTierPlatform(ctx, account, groupID) {
+		// The copy actually returned (the scheduler may re-read the account
+		// snapshot after ranking) must itself be capable, plus the DB check.
+		if MarketCountTokensCapable(account) && s.verifyMarketTierPlatform(ctx, account, groupID) {
 			return account, nil
 		}
 		excluded[account.ID] = struct{}{}
