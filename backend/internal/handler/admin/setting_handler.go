@@ -863,9 +863,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	settings.HostedSelfOnboard = hostedSelfOnboard
 	// Only a request that carries market fields writes the market block, so
 	// an unrelated settings save (stale read) cannot flip the switch back.
-	if req.marketSettingsRequest.present() {
+	if req.present() {
 		settings.Market = &market
-		settings.MarketFields = req.marketSettingsRequest.providedKeys()
+		settings.MarketFields = req.providedKeys()
 	}
 
 	if h.pricingService != nil && req.PricingModelAliases != nil {
