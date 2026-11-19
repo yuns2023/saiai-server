@@ -86,11 +86,15 @@ CREATE OR REPLACE FUNCTION market_tier_group_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
     target_tier BOOLEAN;
+    is_insert BOOLEAN := (TG_OP = 'INSERT');
 BEGIN
     IF NEW.deleted_at IS NOT NULL THEN
         RETURN NEW;
     END IF;
-    IF NEW.fallback_group_id IS NOT NULL THEN
+    -- Only changed values are checked (a whole-row save of an unrelated
+    -- field takes no extra lock).
+    IF NEW.fallback_group_id IS NOT NULL
+       AND (is_insert OR NEW.fallback_group_id IS DISTINCT FROM OLD.fallback_group_id) THEN
         SELECT market_tier INTO target_tier FROM groups
          WHERE id = NEW.fallback_group_id AND id <> NEW.id FOR SHARE;
         IF COALESCE(target_tier, FALSE) THEN
@@ -98,7 +102,8 @@ BEGIN
                 USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_fallback';
         END IF;
     END IF;
-    IF NEW.fallback_group_id_on_invalid_request IS NOT NULL THEN
+    IF NEW.fallback_group_id_on_invalid_request IS NOT NULL
+       AND (is_insert OR NEW.fallback_group_id_on_invalid_request IS DISTINCT FROM OLD.fallback_group_id_on_invalid_request) THEN
         SELECT market_tier INTO target_tier FROM groups
          WHERE id = NEW.fallback_group_id_on_invalid_request AND id <> NEW.id FOR SHARE;
         IF COALESCE(target_tier, FALSE) THEN
@@ -107,20 +112,30 @@ BEGIN
         END IF;
     END IF;
     IF NEW.market_tier THEN
-        IF NEW.fallback_group_id IS NOT NULL OR EXISTS (
-            SELECT 1 FROM groups g
-             WHERE g.deleted_at IS NULL AND g.id <> NEW.id
-               AND (g.fallback_group_id = NEW.id OR g.fallback_group_id_on_invalid_request = NEW.id)
-        ) THEN
+        -- No lock needed: a tier never has its own claude_code_only
+        -- fallback or an invalid-request fallback to itself.
+        IF NEW.fallback_group_id IS NOT NULL OR NEW.fallback_group_id_on_invalid_request = NEW.id THEN
             RAISE EXCEPTION 'market tier % is part of a fallback chain', NEW.id
                 USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_fallback';
         END IF;
-        IF EXISTS (
-            SELECT 1 FROM user_group_rate_multipliers r
-             WHERE r.group_id = NEW.id AND (r.rate_multiplier <= 0 OR r.rate_multiplier = 'NaN')
-        ) THEN
-            RAISE EXCEPTION 'market tier % has a user rate override <= 0', NEW.id
-                USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_rate_override';
+        -- Promotion only: inbound references and stored overrides (writers
+        -- of those share-lock this row, so they serialize with the UPDATE).
+        IF is_insert OR NOT OLD.market_tier THEN
+            IF EXISTS (
+                SELECT 1 FROM groups g
+                 WHERE g.deleted_at IS NULL AND g.id <> NEW.id
+                   AND (g.fallback_group_id = NEW.id OR g.fallback_group_id_on_invalid_request = NEW.id)
+            ) THEN
+                RAISE EXCEPTION 'market tier % is part of a fallback chain', NEW.id
+                    USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_fallback';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM user_group_rate_multipliers r
+                 WHERE r.group_id = NEW.id AND (r.rate_multiplier <= 0 OR r.rate_multiplier = 'NaN')
+            ) THEN
+                RAISE EXCEPTION 'market tier % has a user rate override <= 0', NEW.id
+                    USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_rate_override';
+            END IF;
         END IF;
     END IF;
     RETURN NEW;
@@ -136,6 +151,10 @@ LANGUAGE plpgsql AS $$
 DECLARE
     tier BOOLEAN;
 BEGIN
+    -- A positive rate is valid everywhere: no lock taken.
+    IF NEW.rate_multiplier > 0 AND NEW.rate_multiplier <> 'NaN' THEN
+        RETURN NEW;
+    END IF;
     SELECT market_tier INTO tier FROM groups WHERE id = NEW.group_id FOR SHARE;
     IF COALESCE(tier, FALSE) AND NOT (NEW.rate_multiplier > 0 AND NEW.rate_multiplier <> 'NaN') THEN
         RAISE EXCEPTION 'user rate override on market tier % must be > 0', NEW.group_id

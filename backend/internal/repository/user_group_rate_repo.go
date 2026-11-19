@@ -140,6 +140,30 @@ func (r *userGroupRateRepository) GetByUserAndGroup(ctx context.Context, userID,
 
 // SyncUserGroupRates 同步用户的分组专属倍率
 func (r *userGroupRateRepository) SyncUserGroupRates(ctx context.Context, userID int64, rates map[int64]*float64) error {
+	// One transaction: a rejected upsert (market tier guard) must not leave
+	// the deletes committed.
+	return r.inTx(ctx, func(q *userGroupRateRepository) error { return q.syncUserGroupRates(ctx, userID, rates) })
+}
+
+// inTx runs fn on a transaction when the repository holds a *sql.DB (else on
+// the caller's executor, which is already a transaction or a test double).
+func (r *userGroupRateRepository) inTx(ctx context.Context, fn func(q *userGroupRateRepository) error) error {
+	db, ok := r.sql.(*sql.DB)
+	if !ok {
+		return fn(r)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(&userGroupRateRepository{sql: tx}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *userGroupRateRepository) syncUserGroupRates(ctx context.Context, userID int64, rates map[int64]*float64) error {
 	if len(rates) == 0 {
 		// 如果传入空 map，删除该用户的所有专属倍率
 		_, err := r.sql.ExecContext(ctx, `DELETE FROM user_group_rate_multipliers WHERE user_id = $1`, userID)
@@ -195,6 +219,10 @@ func (r *userGroupRateRepository) SyncUserGroupRates(ctx context.Context, userID
 
 // SyncGroupRateMultipliers 批量同步分组的用户专属倍率（先删后插）
 func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, groupID int64, entries []service.GroupRateMultiplierInput) error {
+	return r.inTx(ctx, func(q *userGroupRateRepository) error { return q.syncGroupRateMultipliers(ctx, groupID, entries) })
+}
+
+func (r *userGroupRateRepository) syncGroupRateMultipliers(ctx context.Context, groupID int64, entries []service.GroupRateMultiplierInput) error {
 	if _, err := r.sql.ExecContext(ctx, `DELETE FROM user_group_rate_multipliers WHERE group_id = $1`, groupID); err != nil {
 		return err
 	}

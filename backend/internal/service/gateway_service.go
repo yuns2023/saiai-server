@@ -3119,24 +3119,47 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 // dispatchable; a market-only account is not ungrouped). The market
 // selection part replaces this with the admission classification.
 func withoutMarketMembership(accounts []Account, groupID *int64) []Account {
-	out := accounts[:0:0]
+	var out []Account
 	for i := range accounts {
-		if marketMembershipOnly(&accounts[i], groupID) {
+		if !marketMembershipOnly(&accounts[i], groupID) {
+			if out != nil {
+				out = append(out, accounts[i])
+			}
 			continue
 		}
-		out = append(out, accounts[i])
+		if out == nil {
+			// Allocate only when something is dropped (the common path
+			// returns the input unchanged).
+			out = make([]Account, 0, len(accounts)-1)
+			out = append(out, accounts[:i]...)
+		}
+	}
+	if out == nil {
+		return accounts
 	}
 	return out
 }
 
+// marketMembershipOnly: a listed account (MarketGroupIDs non-empty) is a
+// candidate only through a current admin binding of the requested group,
+// never in the ungrouped context. Accounts without market rows: false.
 func marketMembershipOnly(account *Account, groupID *int64) bool {
 	if account == nil || len(account.MarketGroupIDs) == 0 {
 		return false
 	}
 	if groupID == nil {
-		return len(account.AccountGroups) == 0
+		return true
 	}
-	return slices.Contains(account.MarketGroupIDs, *groupID)
+	return !slices.Contains(account.GroupIDs, *groupID)
+}
+
+// marketMembershipChanged: the fresh copy of a listed candidate no longer
+// has the memberships it was selected with (list → use window).
+func marketMembershipChanged(selected, fresh *Account) bool {
+	if selected == nil || fresh == nil || (len(selected.MarketGroupIDs) == 0 && len(fresh.MarketGroupIDs) == 0) {
+		return false
+	}
+	return !slices.Equal(selected.MarketGroupIDs, fresh.MarketGroupIDs) || !slices.Equal(selected.GroupIDs, fresh.GroupIDs)
 }
 
 func (s *GatewayService) isRunModeSimple() bool {
@@ -3719,6 +3742,9 @@ func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Cont
 			return nil
 		}
 		fresh = current
+	}
+	if marketMembershipChanged(account, fresh) {
+		return nil
 	}
 	if !s.isAccountSchedulableForSelection(ctx, fresh) {
 		return nil

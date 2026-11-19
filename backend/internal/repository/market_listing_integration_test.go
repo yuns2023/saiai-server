@@ -970,10 +970,34 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	require.Equal(t, service.ErrMarketTierFallback, translateMarketTierGuardError(err))
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id_on_invalid_request = $2 WHERE id = $1", referrer, tier)
 	require.Equal(t, service.ErrMarketTierFallback, translateMarketTierGuardError(err))
-	require.ErrorIs(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{tier: &small}), service.ErrMarketTierRateOverride)
-	require.ErrorIs(t, rates.SyncGroupRateMultipliers(ctx, tier, []service.GroupRateMultiplierInput{{UserID: u1, RateMultiplier: 0}}), service.ErrMarketTierRateOverride)
 	ok := 1.5
 	require.NoError(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{tier: &ok}))
+	// A rejected save rolls back as a whole (its deletes included).
+	require.ErrorIs(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{plain: nil, tier: &small}), service.ErrMarketTierRateOverride)
+	require.ErrorIs(t, rates.SyncGroupRateMultipliers(ctx, tier, []service.GroupRateMultiplierInput{{UserID: u2, RateMultiplier: 0}}), service.ErrMarketTierRateOverride)
+	kept, err := rates.GetByUserID(ctx, u1)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]float64{plain: 0, tier: 1.5}, kept)
+
+	// Saving an unrelated field takes no lock on the fallback target (no
+	// lock cycle between groups that reference each other).
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = $2 WHERE id = $1", referrer, plain)
+	require.NoError(t, err)
+	locker, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = locker.ExecContext(ctx, "SELECT 1 FROM groups WHERE id = $1 FOR UPDATE", plain)
+	require.NoError(t, err)
+	conn, err := integrationDB.Conn(ctx)
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, "SET lock_timeout = '1s'")
+	require.NoError(t, err)
+	_, err = conn.ExecContext(ctx, "UPDATE groups SET description = 'x' WHERE id = $1", referrer)
+	require.NoError(t, err, "unchanged fallback is not re-checked")
+	_, _ = conn.ExecContext(ctx, "RESET lock_timeout")
+	require.NoError(t, conn.Close())
+	require.NoError(t, locker.Rollback())
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = NULL WHERE id = $1", referrer)
+	require.NoError(t, err)
 
 	// Concurrent promotion vs zero override: the override waits for the
 	// promotion's row lock, then sees the tier and fails.

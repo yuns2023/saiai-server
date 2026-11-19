@@ -824,6 +824,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	// 同步用户专属分组倍率
 	if input.GroupRates != nil && s.userGroupRateRepo != nil {
 		if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
+			// A market tier rejection (a concurrent promotion after the check
+			// above) is reported; other failures keep the old log-only path.
+			if errors.Is(err, ErrMarketTierRateOverride) {
+				return nil, err
+			}
 			logger.LegacyPrintf("service.admin", "failed to sync user group rates: user_id=%d err=%v", user.ID, err)
 		}
 	}
@@ -1684,6 +1689,14 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err
 	}
+	// The group row is committed: invalidate the Key auth snapshots even if
+	// the account copy below fails.
+	authInvalidated := false
+	defer func() {
+		if !authInvalidated && s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
+		}
+	}()
 
 	// 如果指定了复制账号的源分组，同步绑定（替换当前分组的账号）
 	if len(input.CopyAccountsFromGroupIDs) > 0 {
@@ -1735,6 +1748,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if s.authCacheInvalidator != nil {
 		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
 	}
+	authInvalidated = true
 	return group, nil
 }
 

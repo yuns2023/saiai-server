@@ -415,10 +415,18 @@ func TestWithoutMarketMembershipFiltersStaleBuckets(t *testing.T) {
 		return out
 	}
 	all := []Account{listedOnly, listedWithAdmin, plain}
-	require.Equal(t, []int64{2, 3}, ids(withoutMarketMembership(all, nil)), "market-only accounts leave the ungrouped pool")
+	require.Equal(t, []int64{3}, ids(withoutMarketMembership(all, nil)), "listed accounts are never ungrouped")
 	require.Equal(t, []int64{3}, ids(withoutMarketMembership(all, &tier)), "the tier never dispatches market rows")
-	require.Equal(t, []int64{1, 2, 3}, ids(withoutMarketMembership(all, &other)))
+	require.Equal(t, []int64{2, 3}, ids(withoutMarketMembership(all, &other)), "a stale bucket of another group needs a current admin binding")
 	require.Len(t, all, 3, "input untouched")
+	plainOnly := []Account{plain, {ID: 4}}
+	out := withoutMarketMembership(plainOnly, nil)
+	require.Same(t, &plainOnly[0], &out[0], "no copy when nothing is dropped")
+
+	require.False(t, marketMembershipChanged(&plain, &Account{ID: 3, GroupIDs: []int64{9}}), "non-market accounts unaffected")
+	require.True(t, marketMembershipChanged(&plain, &listedOnly))
+	require.True(t, marketMembershipChanged(&listedWithAdmin, &Account{ID: 2, MarketGroupIDs: []int64{tier}}))
+	require.False(t, marketMembershipChanged(&listedWithAdmin, &listedWithAdmin))
 }
 
 func TestResolveGatewayGroupNeverEntersMarketTier(t *testing.T) {
