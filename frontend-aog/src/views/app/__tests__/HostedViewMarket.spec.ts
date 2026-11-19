@@ -596,12 +596,14 @@ describe('HostedView sharing market', () => {
           await w.get('[data-testid=earnings-amount]').setValue(amt)
           tabs.push(w)
         }
+        const heldDuringRequest: number[] = []
         market.convert.mockImplementation(async () => {
-          expect(held).toEqual([])
+          heldDuringRequest.push(held.length)
           throw { status: 0, message: 'network' }
         })
         await Promise.all(tabs.map((w) => w.get('[data-testid=earnings] form').trigger('submit')))
         await flushPromises()
+        expect(heldDuringRequest).toEqual([0])
         expect(market.convert).toHaveBeenCalledTimes(1)
         const sentId = market.convert.mock.calls[0][1]
         expect(JSON.parse(localStorage.getItem(`ccyou.market.pendingConvert.${OWNER_ID}`) ?? 'null').requestId).toBe(sentId)
@@ -625,6 +627,74 @@ describe('HostedView sharing market', () => {
       await flushPromises()
       expect(localStorage.getItem(key)).toBeNull()
       expect(w.find('[data-testid=earnings-unreadable]').exists()).toBe(false)
+    })
+
+    it('records the server would reject (nil UUID, zero amount) are unreadable: no POST, the record stays', async () => {
+      const key = `ccyou.market.pendingConvert.${OWNER_ID}`
+      for (const record of ['{"requestId":"00000000-0000-0000-0000-000000000000","amount":"1"}', '{"requestId":"33333333-3333-4333-8333-333333333333","amount":"0.00"}']) {
+        localStorage.setItem(key, record)
+        const { w } = await openDialog()
+        expect(w.get('[data-testid=earnings-unreadable]').text()).toContain('清除并重新开始')
+        await w.get('[data-testid=earnings-amount]').setValue('1')
+        await confirm(w)
+        await flushPromises()
+        expect(market.convert).not.toHaveBeenCalled()
+        expect(localStorage.getItem(key)).toBe(record)
+        w.unmount()
+      }
+    })
+
+    it('the create lock fails: no POST, "未发出转换"', async () => {
+      const { w } = await openDialog()
+      Object.defineProperty(navigator, 'locks', { value: { request: vi.fn(() => Promise.reject(new Error('lock'))) }, configurable: true })
+      try {
+        await w.get('[data-testid=earnings-amount]').setValue('1')
+        await confirm(w)
+        await flushPromises()
+        expect(market.convert).not.toHaveBeenCalled()
+        expect(w.get('[data-testid=earnings-convert-error]').text()).toContain('未发出转换')
+      } finally {
+        Reflect.deleteProperty(navigator, 'locks')
+      }
+    })
+
+    it('success but the settle lock fails: success shown with a note, record kept, balance / summary / ledger refreshed', async () => {
+      const { w, auth } = await openDialog()
+      const appStore = (await import('@/stores/app')).useAppStore()
+      const notify = vi.spyOn(appStore, 'notify')
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      let calls = 0
+      const request = vi.fn((_n: string, fn: () => unknown) => (++calls === 1 ? Promise.resolve(fn()) : Promise.reject(new Error('lock'))))
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true })
+      try {
+        market.convert.mockResolvedValueOnce({ entry_id: 1, request_id: 'x', amount: '1', created_at: 'x', replayed: false })
+        const earningsBefore = market.earnings.mock.calls.length
+        const entriesBefore = market.entries.mock.calls.length
+        await confirm(w)
+        await flushPromises()
+        expect(notify).toHaveBeenCalledWith('ok', expect.stringContaining('本地记录未清理'))
+        expect(localStorage.getItem(`ccyou.market.pendingConvert.${OWNER_ID}`)).not.toBeNull()
+        expect(auth.refreshUser).toHaveBeenCalled()
+        expect(market.earnings.mock.calls.length).toBeGreaterThan(earningsBefore)
+        expect(market.entries.mock.calls.length).toBeGreaterThan(entriesBefore)
+      } finally {
+        Reflect.deleteProperty(navigator, 'locks')
+      }
+    })
+
+    it('the explicit clear fails: an error is shown and the record stays', async () => {
+      const key = `ccyou.market.pendingConvert.${OWNER_ID}`
+      localStorage.setItem(key, '{broken')
+      const { w } = await openDialog()
+      Object.defineProperty(navigator, 'locks', { value: { request: vi.fn(() => Promise.reject(new Error('lock'))) }, configurable: true })
+      try {
+        await w.get('[data-testid=earnings-clear-unreadable]').trigger('click')
+        await flushPromises()
+        expect(w.get('[data-testid=earnings-convert-error]').text()).toContain('清除失败')
+        expect(localStorage.getItem(key)).toBe('{broken')
+      } finally {
+        Reflect.deleteProperty(navigator, 'locks')
+      }
     })
 
     it('getItem throws: no POST', async () => {

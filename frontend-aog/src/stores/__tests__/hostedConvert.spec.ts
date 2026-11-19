@@ -47,7 +47,17 @@ describe('hosted store: unsettled conversion record', () => {
     expect(readPendingConvert(USER)).toEqual({ state: 'absent' })
     localStorage.setItem(KEY, JSON.stringify(A))
     expect(readPendingConvert(USER)).toEqual({ state: 'valid', value: A })
-    for (const bad of ['{not json', '{"requestId":"x","amount":"1"}', '{"requestId":"' + A.requestId + '","amount":"1.234"}', 'null', '""']) {
+    for (const bad of [
+      '{not json',
+      '{"requestId":"x","amount":"1"}',
+      '{"requestId":"' + A.requestId + '","amount":"1.234"}',
+      '{"requestId":"00000000-0000-0000-0000-000000000000","amount":"1"}',
+      '{"requestId":"' + A.requestId + '","amount":"0.00"}',
+      '{"requestId":"' + A.requestId + '","amount":"-1"}',
+      '{"requestId":"' + A.requestId + '","amount":"abc"}',
+      'null',
+      '""'
+    ]) {
       localStorage.setItem(KEY, bad)
       expect(readPendingConvert(USER)).toEqual({ state: 'unreadable' })
     }
@@ -101,6 +111,33 @@ describe('hosted store: unsettled conversion record', () => {
     expect(localStorage.getItem(KEY)).toBeNull()
     expect(t.pendingUnreadable).toBe(false)
     expect(await t.beginConvert(A)).toBe('started')
+  })
+
+  it('lock failures: begin rejects (caller reports "not sent"), settle reports false and keeps the record, clear rejects', async () => {
+    const t = tab()
+    expect(await t.beginConvert(A)).toBe('started')
+    Object.defineProperty(navigator, 'locks', { value: { request: vi.fn(() => Promise.reject(new Error('lock'))) }, configurable: true })
+    await expect(t.beginConvert(B)).rejects.toThrow('lock')
+    const before = t.settledSeq
+    expect(await t.settleConvert(A.requestId)).toBe(false)
+    expect(t.settledSeq).toBe(before + 1)
+    expect(readPendingConvert(USER)).toEqual({ state: 'valid', value: A })
+    localStorage.setItem(KEY, '{broken')
+    t.syncPendingConvert()
+    await expect(t.clearUnreadableConvert()).rejects.toThrow('lock')
+    expect(localStorage.getItem(KEY)).toBe('{broken')
+  })
+
+  it('a session change while waiting for the lock writes nothing', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    Object.defineProperty(navigator, 'locks', { value: { request: vi.fn(async (_n: string, fn: () => unknown) => { await gate; return fn() }) }, configurable: true })
+    const t = tab()
+    const started = t.beginConvert(A)
+    t.reset()
+    release()
+    expect(await started).toBe('aborted')
+    expect(localStorage.getItem(KEY)).toBeNull()
   })
 
   it('without navigator.locks the same steps still run (accepted limitation for old browsers)', async () => {

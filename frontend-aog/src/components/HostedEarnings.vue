@@ -127,8 +127,19 @@ async function submit(): Promise<void> {
   try {
     if (!txn) {
       const fresh = { requestId: newRequestId(), amount: checkedAmount }
-      const started = await hosted.beginConvert(fresh)
+      let started: Awaited<ReturnType<typeof hosted.beginConvert>>
+      try {
+        started = await hosted.beginConvert(fresh)
+      } catch {
+        // The lock (or storage) failed before anything was sent.
+        if (hosted.session() === session) error.value = t('earnings.notSent')
+        return
+      }
       if (hosted.session() !== session) return
+      if (started === 'aborted') {
+        error.value = t('earnings.notSent')
+        return
+      }
       if (started === 'pending') {
         showPending()
         return
@@ -154,37 +165,50 @@ async function submit(): Promise<void> {
 async function send(current: { requestId: string; amount: string }, session: number): Promise<void> {
   dialogTxn.value = current.requestId
   // Only the callback of the conversion still recorded may settle it (the watches then refresh every mounted page).
-  const settle = () => {
+  // false: the local record could not be removed — kept, a retry replays the same id (safe).
+  const settle = async (): Promise<boolean> => {
     if (dialogTxn.value === current.requestId) dialogTxn.value = null
-    void hosted.settleConvert(current.requestId)
+    return hosted.settleConvert(current.requestId)
   }
+  let res
   try {
-    const res = await marketApi.convert(current.amount, current.requestId)
-    if (hosted.session() !== session) return
-    settle()
-    open.value = false
-    app.notify('ok', t('earnings.converted', { amount: usdExact(res.amount) }))
-    // The balance shown everywhere (also when this page was left meanwhile).
-    auth.refreshUser().catch(() => undefined)
+    res = await marketApi.convert(current.amount, current.requestId)
   } catch (e) {
     if (hosted.session() !== session) return
     const key = marketErrorKey(e)
     if (definite(e)) {
       // Decided: nothing was converted under this id, or (conflict) it was already used — never reuse it.
-      settle()
+      await settle()
       amount.value = ''
       error.value = te(key) ? t(key) : t('market.errors.generic')
     } else {
       error.value = t('earnings.unconfirmed')
     }
+    return
   }
+  if (hosted.session() !== session) return
+  const cleaned = await settle()
+  open.value = false
+  app.notify('ok', t('earnings.converted', { amount: usdExact(res.amount) }) + (cleaned ? '' : t('earnings.notCleaned')))
+  // The balance shown everywhere (also when this page was left meanwhile).
+  auth.refreshUser().catch(() => undefined)
 }
 
 /** The user checked the ledger and clears an unreadable record to start again. */
 async function clearUnreadable(): Promise<void> {
-  await hosted.clearUnreadableConvert()
-  error.value = hosted.pendingUnreadable ? t('earnings.unreadable') : ''
+  try {
+    await hosted.clearUnreadableConvert()
+    error.value = hosted.pendingUnreadable ? t('earnings.unreadable') : ''
+  } catch {
+    error.value = t('earnings.clearFailed')
+  }
 }
+
+// A definite outcome (here, even when the local record could not be removed, or from another visit / tab): reload the ledger.
+watch(
+  () => hosted.settledSeq,
+  () => void reloadEntries()
+)
 
 // Whichever page visit got the answer, the card on screen shows the result: a settled
 // conversion closes a dialog that was retrying it and reloads the ledger (the page reloads the summary).
@@ -194,7 +218,6 @@ watch(
     if (!prev || now === prev) return
     // dialogTxn stays: a late confirm still sees that its conversion is settled.
     if (open.value && dialogTxn.value === prev) open.value = false
-    void reloadEntries()
   }
 )
 

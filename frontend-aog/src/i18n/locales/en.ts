@@ -490,6 +490,9 @@ const en: typeof zh = {
     unreadable: 'Could not read the previous transfer record; no new transfer can start.',
     unreadableHint: 'The previous transfer record cannot be read; it may have gone through. Check the ledger below first, then clear it and start again.',
     clearUnreadable: 'Checked — clear and start again',
+    notSent: 'The transfer was not sent; try again.',
+    notCleaned: ' (The local record could not be cleared: the next attempt first replays the same transfer and never moves twice.)',
+    clearFailed: 'Could not clear it; try again.',
     storageFailed: 'Could not save the transfer record; check the browser storage (private mode, storage full) and try again. Nothing was sent.',
     unconfirmed: 'Outcome not confirmed; you can retry: Move replays the same transfer (same amount) and never moves twice.'
   },

@@ -264,21 +264,19 @@ async function loadEarnings(): Promise<void> {
   }
 }
 
-// A conversion settled (by this or an earlier visit of the page): read the summary again.
-// Watched here, not in the card, so it also covers a card not mounted yet.
-watch(
-  () => hosted.pendingConvert?.requestId ?? null,
-  (now, prev) => {
-    if (prev && now !== prev) void loadEarnings()
-  }
-)
-
 // A listing action of an earlier visit of this page answered late: show its result.
 watch(
   () => hosted.listingChanged,
   (c) => {
     if (c) void loadMarketView(c.accountId)
   }
+)
+
+// A definite conversion outcome (here, from an earlier visit, or another tab; also when the local record
+// could not be removed): read the summary again. Watched here, not in the card, so it covers a card not mounted yet.
+watch(
+  () => hosted.settledSeq,
+  () => void loadEarnings()
 )
 
 // One read per current account whenever the set of current accounts changes.
