@@ -822,14 +822,18 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		return nil, err
 	}
 	// 同步用户专属分组倍率
+	var rateErr error
 	if input.GroupRates != nil && s.userGroupRateRepo != nil {
 		if err := s.userGroupRateRepo.SyncUserGroupRates(ctx, user.ID, input.GroupRates); err != nil {
 			// A market tier rejection (a concurrent promotion after the check
-			// above) is reported; other failures keep the old log-only path.
+			// above) is reported after the committed user change is finished
+			// (cache invalidation, concurrency record); other failures keep
+			// the old log-only path.
 			if errors.Is(err, ErrMarketTierRateOverride) {
-				return nil, err
+				rateErr = err
+			} else {
+				logger.LegacyPrintf("service.admin", "failed to sync user group rates: user_id=%d err=%v", user.ID, err)
 			}
-			logger.LegacyPrintf("service.admin", "failed to sync user group rates: user_id=%d err=%v", user.ID, err)
 		}
 	}
 
@@ -843,6 +847,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		code, err := GenerateRedeemCode()
 		if err != nil {
 			logger.LegacyPrintf("service.admin", "failed to generate adjustment redeem code: %v", err)
+			if rateErr != nil {
+				return nil, rateErr
+			}
 			return user, nil
 		}
 		adjustmentRecord := &RedeemCode{
@@ -859,6 +866,9 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 	}
 
+	if rateErr != nil {
+		return nil, rateErr
+	}
 	return user, nil
 }
 
@@ -1694,7 +1704,11 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	authInvalidated := false
 	defer func() {
 		if !authInvalidated && s.authCacheInvalidator != nil {
-			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
+			// Independent of the request context (it may be the reason the
+			// copy below failed).
+			invCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			s.authCacheInvalidator.InvalidateAuthCacheByGroupID(invCtx, id)
 		}
 	}()
 

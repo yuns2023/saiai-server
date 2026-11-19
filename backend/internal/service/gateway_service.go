@@ -3159,7 +3159,17 @@ func marketMembershipChanged(selected, fresh *Account) bool {
 	if selected == nil || fresh == nil || (len(selected.MarketGroupIDs) == 0 && len(fresh.MarketGroupIDs) == 0) {
 		return false
 	}
-	return !slices.Equal(selected.MarketGroupIDs, fresh.MarketGroupIDs) || !slices.Equal(selected.GroupIDs, fresh.GroupIDs)
+	return !sameInt64Set(selected.MarketGroupIDs, fresh.MarketGroupIDs) || !sameInt64Set(selected.GroupIDs, fresh.GroupIDs)
+}
+
+func sameInt64Set(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	x, y := slices.Clone(a), slices.Clone(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(x, y)
 }
 
 func (s *GatewayService) isRunModeSimple() bool {
@@ -3743,7 +3753,7 @@ func (s *GatewayService) resolveFreshAccountForSessionAdmission(ctx context.Cont
 		}
 		fresh = current
 	}
-	if marketMembershipChanged(account, fresh) {
+	if !s.isRunModeSimple() && marketMembershipChanged(account, fresh) {
 		return nil
 	}
 	if !s.isAccountSchedulableForSelection(ctx, fresh) {

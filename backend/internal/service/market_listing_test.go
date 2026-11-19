@@ -427,6 +427,8 @@ func TestWithoutMarketMembershipFiltersStaleBuckets(t *testing.T) {
 	require.True(t, marketMembershipChanged(&plain, &listedOnly))
 	require.True(t, marketMembershipChanged(&listedWithAdmin, &Account{ID: 2, MarketGroupIDs: []int64{tier}}))
 	require.False(t, marketMembershipChanged(&listedWithAdmin, &listedWithAdmin))
+	twoAdmin := Account{ID: 5, MarketGroupIDs: []int64{tier}, GroupIDs: []int64{7, 8}}
+	require.False(t, marketMembershipChanged(&twoAdmin, &Account{ID: 5, MarketGroupIDs: []int64{tier}, GroupIDs: []int64{8, 7}}), "order does not matter")
 }
 
 func TestResolveGatewayGroupNeverEntersMarketTier(t *testing.T) {
@@ -470,4 +472,36 @@ func TestIsAccountInGroupIgnoresMarketMemberships(t *testing.T) {
 	require.True(t, hostedAccountUsedOnlyBy(owned, 9, 1))
 	owned.MarketGroupIDs = []int64{tier}
 	require.False(t, hostedAccountUsedOnlyBy(owned, 9, 1))
+}
+
+type marketUserRepo struct {
+	userRepoStub
+	updates int
+}
+
+func (r *marketUserRepo) Update(_ context.Context, _ *User) error {
+	r.updates++
+	return nil
+}
+
+type rejectingRateRepo struct {
+	marketTierRateRepo
+}
+
+func (r *rejectingRateRepo) SyncUserGroupRates(context.Context, int64, map[int64]*float64) error {
+	return ErrMarketTierRateOverride
+}
+
+func TestUpdateUserReportsRaceRejectedOverrideAfterFinishingCommit(t *testing.T) {
+	groups, _ := newMarketTierRepos()
+	users := &marketUserRepo{userRepoStub: userRepoStub{user: &User{ID: 5, Role: RoleUser, Status: StatusActive}}}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{groupRepo: groups, userGroupRateRepo: &rejectingRateRepo{}, userRepo: users, authCacheInvalidator: invalidator}
+	rate := 1.0
+	// The pre-check passes (group 2 is not a tier); the database then
+	// rejects it (promoted meanwhile).
+	_, err := svc.UpdateUser(context.Background(), 5, &UpdateUserInput{Status: StatusDisabled, GroupRates: map[int64]*float64{2: &rate}})
+	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
+	require.Equal(t, 1, users.updates, "the user change was committed")
+	require.Equal(t, []int64{5}, invalidator.userIDs, "and its cache invalidation still ran")
 }
