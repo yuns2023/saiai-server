@@ -1567,3 +1567,54 @@ func TestMarketTierCountTokensChecksTheReturnedCopy(t *testing.T) {
 		require.Equal(t, int64(3), acc.ID, "a returned Bedrock copy is excluded and the loop continues")
 	}
 }
+
+// ---- independent review round 4 ----
+
+// The account gets listed between a same-account replay's response and the
+// replay send: the round ends with that response's own outcome (the
+// cache-safe client-retryable 502), never a failover to another account.
+func TestMarketListedDuringCacheSafeReplayKeepsClientRetryable(t *testing.T) {
+	c, rec, parsed := claudeCodeCacheSafeRetryContext(t)
+	acc := claudeCodeCacheSafeRetryAccount() // ordinary, not listed yet
+	rt := NewMarketRuntime(&fakeMarketStore{}, nil)
+	rt.SetState(&MarketDispatchState{Enabled: true})
+	upstream := &queuedClaudeCodeUpstream{responses: []func() *http.Response{
+		func() *http.Response {
+			// Listed while the cache-safe backoff runs.
+			rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{acc.ID}})
+			return transient502UnexpectedEOFResponse()
+		},
+		okClaudeStreamResponse,
+	}}
+	svc := claudeCodeCacheSafeRetryService(upstream)
+	svc.market = rt
+	_, err := svc.Forward(c.Request.Context(), c, acc, parsed)
+	require.Equal(t, 1, upstream.calls, "no replay through the now-listed account")
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr), "never replayed on another account")
+	var clientRetryErr *ClientRetryableUpstreamError
+	require.ErrorAs(t, err, &clientRetryErr)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+// Same for the generic same-account 5xx replay: one send, then that
+// response's normal (no-replay) outcome.
+func TestMarketListedDuringSameAccount5xxReplaySendsOnce(t *testing.T) {
+	c, _, parsed := gatewayHTTPRetryRequest(t)
+	acc := gatewayHTTPRetryAccount()
+	rt := NewMarketRuntime(&fakeMarketStore{}, nil)
+	rt.SetState(&MarketDispatchState{Enabled: true})
+	upstream := &scriptedGatewayHTTPUpstream{results: []scriptedGatewayHTTPResult{
+		{response: func() *http.Response {
+			rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{acc.ID}})
+			return gatewayHTTPErrorResponse(http.StatusServiceUnavailable)
+		}},
+		{response: gatewayHTTPSuccessResponse},
+	}}
+	svc := claudeCodeCacheSafeRetryService(upstream)
+	svc.market = rt
+	_, err := svc.Forward(c.Request.Context(), c, acc, parsed)
+	require.Error(t, err)
+	require.Equal(t, 1, upstream.calls, "no replay through the now-listed account")
+	require.NotErrorIs(t, err, ErrMarketAdmissionRejected, "the 503's own outcome, not the market refusal")
+}

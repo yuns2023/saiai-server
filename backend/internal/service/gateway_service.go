@@ -5698,6 +5698,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var resp *http.Response
 	retryStart := time.Now()
 	sameAccountHTTPReplayUsed := false
+	// The response that led to a same-account replay (for the late-listing
+	// guard: a replay round ends with that response's own outcome, never a
+	// failover to another account).
+	var replayResp *http.Response
+	var replayBody []byte
+	replayCacheSafe := false
 	for attempt := 1; attempt <= maxRetryLoopAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
@@ -5711,7 +5717,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 		if s.marketListedWithoutAdmission(ctx, account) {
 			// Listed while this non-market attempt waited (e.g. in device
-			// registration): never send through it; reselect.
+			// registration): never send through it.
+			if replayResp != nil {
+				// A same-account replay round: end with the response that
+				// asked for it, exactly as if no replay were allowed.
+				if replayCacheSafe {
+					return s.writeClientRetryableClaudeCodeUpstreamError(c, account, replayResp, replayBody)
+				}
+				resp = replayResp
+				resp.Body = io.NopCloser(bytes.NewReader(replayBody))
+				break
+			}
+			// First send: reselect.
 			return nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
 		}
 
@@ -5949,6 +5966,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						Message:            upstreamMsg,
 					})
 					logger.LegacyPrintf("service.gateway", "Account %d: cache-safe Claude Code transient 502, retrying same account once", account.ID)
+					replayResp, replayBody, replayCacheSafe = resp, respBody, true
 					if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
 						return nil, err
 					}
@@ -5984,6 +6002,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}(),
 				})
 				logger.LegacyPrintf("service.gateway", "Account %d: upstream HTTP %d, retrying same account once", account.ID, resp.StatusCode)
+				replayResp, replayBody, replayCacheSafe = resp, respBody, false
 				if err := sleepWithContext(ctx, retryBaseDelay); err != nil {
 					return nil, err
 				}
@@ -6035,6 +6054,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				})
 				logger.LegacyPrintf("service.gateway", "Account %d: upstream error %d, retry %d/%d after %v (elapsed=%v/%v)",
 					account.ID, resp.StatusCode, attempt, maxRetryAttempts, delay, elapsed, maxRetryElapsed)
+				replayResp, replayBody, replayCacheSafe = resp, respBody, false
 				if err := sleepWithContext(ctx, delay); err != nil {
 					return nil, err
 				}
