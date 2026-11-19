@@ -10147,9 +10147,11 @@ type RecordUsageLongContextInput struct {
 	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
 	ClientAttestation     *int16             // SAIAI 客户端校验状态（请求级）
-	// MarketPath / BillingRequestID: same semantics as RecordUsageInput
-	// (the frozen id applies only to a market command; never set today).
+	// MarketPath / Market / MarketPrice / BillingRequestID: same semantics
+	// as RecordUsageInput (the frozen id applies only to a market command).
 	MarketPath       bool
+	Market           *MarketSettlementProof
+	MarketPrice      *MarketPriceSnapshot
 	BillingRequestID string
 }
 
@@ -10326,6 +10328,8 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 			APIKeyService:         input.APIKeyService,
 			PriceMissing:          priceMissing,
 			MarketPath:            input.MarketPath,
+			Market:                input.Market,
+			MarketPrice:           input.MarketPrice,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

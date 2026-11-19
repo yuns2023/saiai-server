@@ -249,3 +249,36 @@ func TestRecordUsageUsesFrozenBillingRequestIDOnlyForMarket(t *testing.T) {
 		}
 	}
 }
+
+// The long-context entry carries the whole market contract into the
+// command (path, proof, price snapshot, frozen id); a non-market call is
+// unchanged.
+func TestRecordUsageWithLongContextCarriesMarketContract(t *testing.T) {
+	run := func(in *RecordUsageLongContextInput) *UsageBillingCommand {
+		usageRepo := &openAIRecordUsageLogRepoStub{}
+		billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+		svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+		in.Result = &ForwardResult{RequestID: "upstream-volatile", Usage: ClaudeUsage{InputTokens: 10, OutputTokens: 6}, Model: "claude-sonnet-4", Duration: time.Second}
+		in.APIKey, in.User, in.Account = &APIKey{ID: 5}, &User{ID: 7}, &Account{ID: 11}
+		in.LongContextThreshold, in.LongContextMultiplier = 200000, 2
+		require.NoError(t, svc.RecordUsageWithLongContext(context.Background(), in))
+		require.NotNil(t, billingRepo.lastCmd)
+		require.Equal(t, billingRepo.lastCmd.RequestID, usageRepo.lastLog.RequestID)
+		return billingRepo.lastCmd
+	}
+	proof := &MarketSettlementProof{AdmissionID: 99, AttemptID: "att-1", RequestRef: "req-1", AccountID: 11, GroupID: 30, BuyerUserID: 7, APIKeyID: 5}
+	price := &MarketPriceSnapshot{Model: "claude-sonnet-4", PriceVersion: "v1", GroupRate: 1.2, ModelRate: 1, UserDiscount: 1}
+	cmd := run(&RecordUsageLongContextInput{MarketPath: true, Market: proof, MarketPrice: price, BillingRequestID: "client:req-1"})
+	require.True(t, cmd.MarketPath)
+	require.Equal(t, "client:req-1", cmd.RequestID)
+	require.NotNil(t, cmd.Settlement)
+	require.Equal(t, *proof, *cmd.Settlement.Market)
+	require.NotSame(t, proof, cmd.Settlement.Market, "copied, not shared")
+	require.Equal(t, *price, *cmd.Settlement.MarketPrice)
+
+	plain := run(&RecordUsageLongContextInput{BillingRequestID: "client:ignored"})
+	require.False(t, plain.MarketPath)
+	require.Equal(t, "upstream-volatile", plain.RequestID)
+	require.Nil(t, plain.Settlement.Market)
+	require.Nil(t, plain.Settlement.MarketPrice)
+}
