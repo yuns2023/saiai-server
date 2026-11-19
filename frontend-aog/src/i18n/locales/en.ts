@@ -443,6 +443,7 @@ const en: typeof zh = {
       MARKET_EARNING_CONVERT_CONFLICT: 'The previous transfer already went through; earnings refreshed. Enter an amount again to move more.',
       BALANCE_OUT_OF_RANGE: 'The balance would exceed its limit; use a smaller amount.',
       MARKET_EARNING_UNAVAILABLE: 'Earnings are unavailable right now; try again later.',
+      MARKET_EARNING_INVALID_QUERY: 'Invalid earnings query; reload the page.',
       network: 'Network error.',
       generic: 'Something went wrong; try again later.'
     }
@@ -486,6 +487,7 @@ const en: typeof zh = {
     amount_belowMin: 'At least {min} per transfer.',
     amount_aboveAvailable: 'More than available; at most {max}.',
     converted: 'Moved {amount} to your balance.',
+    storageFailed: 'Could not save the transfer record; check the browser storage (private mode, storage full) and try again. Nothing was sent.',
     unconfirmed: 'Outcome not confirmed; you can retry: Move replays the same transfer (same amount) and never moves twice.'
   },
   onboard: {
@@ -759,6 +761,7 @@ const en: typeof zh = {
     revokeBody: 'The code stops working right away and {amount} goes back to your balance. Redeemed codes cannot be revoked.',
     revoked: 'Revoked. {amount} is back in your balance.',
     unknownOutcome: 'No answer from the server; this purchase may have gone through. Retry with the same request to find out: you will not be charged twice.',
+    retrySame: 'Retry the {amount} purchase',
     failed: 'Could not buy the code. Try again.',
     revokeFailed: 'Could not revoke the code. Try again.',
     noCount: 'No purchases left in the last 24 hours. Try again later.',

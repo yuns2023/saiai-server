@@ -27,14 +27,27 @@ function readPendingConvert(userId: number): PendingConvert | null {
   return null
 }
 
-function writePendingConvert(userId: number, v: PendingConvert | null): void {
+/** Writes the record and reads it back; false when storage refused it (then nothing may be sent). */
+function storePendingConvert(userId: number, v: PendingConvert): boolean {
   try {
-    if (v) localStorage.setItem(pendingConvertKey(userId), JSON.stringify(v))
-    else localStorage.removeItem(pendingConvertKey(userId))
+    localStorage.setItem(pendingConvertKey(userId), JSON.stringify(v))
   } catch {
-    // Storage unavailable: the in-memory copy still covers this page session.
+    return false
+  }
+  const back = readPendingConvert(userId)
+  return back !== null && back.requestId === v.requestId && back.amount === v.amount
+}
+
+/** Compare-and-delete: removes the stored record only if it is still this conversion (another tab may have stored its own). */
+function removePendingConvert(userId: number, requestId: string): void {
+  try {
+    if (readPendingConvert(userId)?.requestId === requestId) localStorage.removeItem(pendingConvertKey(userId))
+  } catch {
+    // Storage unavailable: nothing stored to remove.
   }
 }
+
+export type BeginConvertResult = 'started' | 'pending' | 'storage'
 
 /** A successful list is trusted this long before a navigation or focus checks again. */
 export const HOSTED_TTL_MS = 5 * 60_000
@@ -67,9 +80,9 @@ export const useHostedStore = defineStore('hosted', () => {
   /**
    * An earnings conversion sent but not definitely answered yet (in flight,
    * timeout, network, 429/401/403/5xx). The next attempt replays it with the
-   * same request id and amount — after leaving the page, and after a reload:
-   * it is also kept in localStorage per signed-in user (loadPendingConvert).
-   * Change it only through setPendingConvert.
+   * same request id and amount — after leaving the page, after a reload and
+   * from another tab: localStorage (one key per user) is the source of truth,
+   * this ref mirrors it. Change it only through beginConvert / settleConvert.
    */
   const pendingConvert = ref<PendingConvert | null>(null)
   /** The user whose stored conversion pendingConvert mirrors (null: not loaded). */
@@ -216,22 +229,48 @@ export const useHostedStore = defineStore('hosted', () => {
     return true
   }
 
-  /** Reads the stored unsettled conversion of this user (once per user and session). */
+  /** Starts mirroring the stored unsettled conversion of this user (and follows other tabs). */
   function loadPendingConvert(userId: number | null | undefined): void {
     if (!userId) {
       pendingOwner = null
       pendingConvert.value = null
       return
     }
-    if (pendingOwner === userId) return
     pendingOwner = userId
-    pendingConvert.value = readPendingConvert(userId)
+    syncPendingConvert()
   }
 
-  /** Records (or clears) the unsettled conversion, in memory and in storage. */
-  function setPendingConvert(v: PendingConvert | null): void {
+  /** Reads the stored record again (another tab may have started or settled one). */
+  function syncPendingConvert(): void {
+    const stored = pendingOwner !== null ? readPendingConvert(pendingOwner) : null
+    if (stored?.requestId !== pendingConvert.value?.requestId || stored?.amount !== pendingConvert.value?.amount) pendingConvert.value = stored
+  }
+
+  /**
+   * Records a NEW conversion before it is sent. Refused when any conversion of
+   * this user is still unsettled (in any tab): 'pending', and the mirror shows
+   * it. 'storage' when there is no signed-in user or storage did not keep the
+   * record: then it must not be sent.
+   */
+  function beginConvert(v: PendingConvert): BeginConvertResult {
+    if (pendingOwner === null) return 'storage'
+    syncPendingConvert()
+    if (pendingConvert.value) return 'pending'
+    if (!storePendingConvert(pendingOwner, v)) return 'storage'
     pendingConvert.value = v
-    if (pendingOwner !== null) writePendingConvert(pendingOwner, v)
+    return 'started'
+  }
+
+  /** A definite outcome for this conversion: remove it (only if it is still the stored one). */
+  function settleConvert(requestId: string): void {
+    if (pendingOwner !== null) removePendingConvert(pendingOwner, requestId)
+    syncPendingConvert()
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (pendingOwner !== null && (e.key === null || e.key === pendingConvertKey(pendingOwner))) syncPendingConvert()
+    })
   }
 
   function reset(): void {
@@ -255,5 +294,5 @@ export const useHostedStore = defineStore('hosted', () => {
     convertBusy.value = false
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, pendingConvert, convertBusy, loadPendingConvert, setPendingConvert, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, pendingConvert, convertBusy, loadPendingConvert, syncPendingConvert, beginConvert, settleConvert, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })

@@ -119,6 +119,17 @@ describe('AccountMarketModal', () => {
     expect(w.get('[data-testid=market-status-badge]').text()).toBe('market.status.revoked')
   })
 
+  it('the owner changed since loading (no listing either time) → reload showing the new owner, no PUT', async () => {
+    market.getListing.mockResolvedValueOnce(view({ owner_user_id: 7 })).mockResolvedValueOnce(view({ owner_user_id: 9 }))
+    const w = await mountModal()
+    await w.get('[data-testid=market-allow-3] input').setValue(true)
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(market.putListing).not.toHaveBeenCalled()
+    expect(w.get('[data-testid=market-error]').text()).toBe('market.account.staleReload')
+    expect(w.get('[data-testid=market-status]').text()).toContain('#9')
+  })
+
   it('owner label comes from the listing endpoint, the row email only for the same owner', async () => {
     market.getListing.mockResolvedValue(view({ owner_user_id: null }))
     const w = await mountModal()

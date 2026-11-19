@@ -65,17 +65,17 @@ function fillAll(): void {
 
 /**
  * Answers that decide this request for good: nothing was converted under this
- * id (amount / id rejected, not enough available, balance limit) or the id
- * was already used for another amount. Everything else — 429, 401/403, 5xx,
- * network, timeout — leaves the outcome open: keep the id and amount.
+ * id (amount / id rejected, not enough available) or the id was already used
+ * for another amount. Everything else — 429, 401/403, 5xx, BALANCE_OUT_OF_RANGE
+ * (not proven terminal), network, timeout — leaves the outcome open: keep the
+ * id and amount.
  */
 const DEFINITE_ERRORS: ReadonlySet<string> = new Set([
   'MARKET_EARNING_CONVERT_CONFLICT',
   'MARKET_EARNING_INSUFFICIENT',
   'MARKET_EARNING_INVALID_AMOUNT',
   'MARKET_EARNING_BELOW_MINIMUM',
-  'MARKET_EARNING_INVALID_REQUEST_ID',
-  'BALANCE_OUT_OF_RANGE'
+  'MARKET_EARNING_INVALID_REQUEST_ID'
 ])
 
 function definite(e: unknown): boolean {
@@ -83,8 +83,19 @@ function definite(e: unknown): boolean {
   return [x.reason, x.code].some((v) => typeof v === 'string' && DEFINITE_ERRORS.has(v))
 }
 
+/** Shows the unsettled conversion (this or another tab's) instead of starting a new one. */
+function showPending(): void {
+  const p = hosted.pendingConvert
+  if (!p) return
+  dialogTxn.value = p.requestId
+  amount.value = p.amount
+  error.value = t('earnings.unconfirmed')
+}
+
 async function submit(): Promise<void> {
   if (!open.value || hosted.convertBusy) return
+  // Storage is the source of truth: another tab may have started or settled a conversion.
+  hosted.syncPendingConvert()
   if (dialogTxn.value !== null && hosted.pendingConvert?.requestId !== dialogTxn.value) {
     // The conversion this dialog retries was settled elsewhere: nothing to send.
     open.value = false
@@ -92,9 +103,8 @@ async function submit(): Promise<void> {
   }
   let txn = hosted.pendingConvert
   if (txn && dialogTxn.value === null) {
-    // Another visit recorded a conversion after this dialog opened: show it instead of sending a different one.
-    dialogTxn.value = txn.requestId
-    amount.value = txn.amount
+    // Another visit or tab recorded a conversion after this dialog opened: show it instead of sending a different one.
+    showPending()
     return
   }
   if (!txn) {
@@ -104,8 +114,18 @@ async function submit(): Promise<void> {
       return
     }
     // Recorded before sending: until the server answers definitely, every retry (also after leaving the page) replays exactly this.
-    txn = { requestId: newRequestId(), amount: checked.amount }
-    hosted.setPendingConvert(txn)
+    const fresh = { requestId: newRequestId(), amount: checked.amount }
+    const started = hosted.beginConvert(fresh)
+    if (started === 'pending') {
+      showPending()
+      return
+    }
+    if (started === 'storage') {
+      // Not recorded = could not be retried safely: never send it.
+      error.value = t('earnings.storageFailed')
+      return
+    }
+    txn = fresh
   }
   const current = txn
   dialogTxn.value = current.requestId
@@ -115,7 +135,7 @@ async function submit(): Promise<void> {
   // Only the callback of the conversion still recorded may settle it (the watch below then refreshes every mounted page).
   const settle = () => {
     if (dialogTxn.value === current.requestId) dialogTxn.value = null
-    if (hosted.pendingConvert?.requestId === current.requestId) hosted.setPendingConvert(null)
+    hosted.settleConvert(current.requestId)
   }
   try {
     const res = await marketApi.convert(current.amount, current.requestId)

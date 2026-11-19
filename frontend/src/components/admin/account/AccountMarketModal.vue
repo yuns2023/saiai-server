@@ -209,8 +209,9 @@ function boundHint(key: keyof MarketProtection): string {
   return base
 }
 
-/** Whether the listing changed (version, status, or created/removed) since the form was loaded. */
+/** Whether the owner or the listing (version, status, created/removed) changed since the form was loaded. */
 function changedSince(loaded: AdminMarketListingView | null, latest: AdminMarketListingView): boolean {
+  if ((loaded?.owner_user_id ?? null) !== (latest.owner_user_id ?? null)) return true
   const a = loaded?.listing ?? null
   const b = latest.listing
   if (!a || !b) return a !== b

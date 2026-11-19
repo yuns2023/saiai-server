@@ -441,6 +441,7 @@ export default {
       MARKET_EARNING_CONVERT_CONFLICT: '上一次转入已经完成，已刷新收益；如还要转入，请重新填写金额。',
       BALANCE_OUT_OF_RANGE: '转入后余额超出上限，请减少金额。',
       MARKET_EARNING_UNAVAILABLE: '收益服务暂时不可用，请稍后再试。',
+      MARKET_EARNING_INVALID_QUERY: '收益明细查询条件无效，请刷新页面。',
       network: '网络连接失败。',
       generic: '操作失败，请稍后再试。'
     }
@@ -484,6 +485,7 @@ export default {
     amount_belowMin: '每次最少转入 {min}。',
     amount_aboveAvailable: '超过可用收益，最多可转 {max}。',
     converted: '已转入 {amount}，余额已更新。',
+    storageFailed: '无法保存转换记录，请检查浏览器存储（如隐私模式、存储已满）后重试。未发送任何请求。',
     unconfirmed: '结果未确认，可重试：再点「确认转入」会按同一笔（同一金额）重试，不会重复转入。'
   },
   onboard: {
@@ -757,6 +759,7 @@ export default {
     revokeBody: '撤回后兑换码立即失效，{amount} 退回你的余额。已被兑换的码不能撤回。',
     revoked: '已撤回，{amount} 已退回余额。',
     unknownOutcome: '没有收到服务器的确认，这笔购买可能已经完成。请用同一请求重试确认：不会重复扣款。',
+    retrySame: '重试确认 {amount} 的购买',
     failed: '购买失败，请重试。',
     revokeFailed: '撤回失败，请重试。',
     noCount: '24 小时内的购买次数已用完，稍后再试。',

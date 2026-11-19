@@ -11,9 +11,17 @@ import { marketApi, type OwnerMarketView } from '@/api/market'
 import { rate } from '@/lib/format'
 import { errorReason, marketErrorKey, marketState, pickableTiers, reasonKey, visibleReasons } from '@/lib/market'
 import { useAppStore } from '@/stores/app'
+import { useHostedStore } from '@/stores/hosted'
 
-const props = defineProps<{ view: OwnerMarketView; busy: boolean }>()
-const emit = defineEmits<{ updated: [view: OwnerMarketView]; reload: []; busy: [on: boolean] }>()
+const props = defineProps<{ view: OwnerMarketView }>()
+const emit = defineEmits<{ updated: [view: OwnerMarketView]; reload: [] }>()
+const hosted = useHostedStore()
+/**
+ * One listing action at a time on the page, shared with pause / resume /
+ * take-down: hosted.ownerBusy, taken and released right here (the release
+ * must not depend on this component still being mounted when the answer comes).
+ */
+const busy = computed(() => hosted.ownerBusy !== null)
 const { t, te } = useI18n()
 const app = useAppStore()
 
@@ -52,11 +60,12 @@ function stateLabel(): string {
 }
 
 async function send(listedNext: boolean): Promise<void> {
-  if (props.busy) return
+  if (hosted.ownerBusy !== null) return
   error.value = ''
   const body = listedNext ? { listed: true as const, group_id: choice.value as number } : { listed: false as const }
   const doneKey = listedNext ? (switching.value ? 'market.switchedDone' : 'market.listedDone') : 'market.unlistedDone'
-  emit('busy', true)
+  hosted.ownerBusy = props.view.account_id
+  const session = hosted.session()
   try {
     const view = await marketApi.setListing(props.view.account_id, body)
     emit('updated', view)
@@ -70,7 +79,7 @@ async function send(listedNext: boolean): Promise<void> {
     // The server state may differ from what is shown (revoked, tier gone…): read it again.
     emit('reload')
   } finally {
-    emit('busy', false)
+    if (hosted.session() === session) hosted.ownerBusy = null
   }
 }
 

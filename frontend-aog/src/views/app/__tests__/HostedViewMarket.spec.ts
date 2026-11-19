@@ -195,6 +195,29 @@ describe('HostedView sharing market', () => {
     expect(w.get('[data-testid=market-list]').attributes('disabled')).toBeDefined()
   })
 
+  it('the shared action lock is released even when the page was left before the answer', async () => {
+    const opts = { global: { plugins: [i18n] }, attachTo: document.body }
+    const w = await mountView({ views: { 11: view({ allowed_tiers: [view().allowed_tiers[0]] }) } })
+    let resolve!: (v: unknown) => void
+    market.setListing.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    await w.get('[data-testid=market-list]').trigger('click')
+    w.unmount()
+    resolve(view({ status: 'listed', selected_group_id: 3, version: 3 }))
+    await flushPromises()
+    market.getListing.mockResolvedValue(view({ status: 'listed', selected_group_id: 3, version: 3, allowed_tiers: [view().allowed_tiers[0]] }))
+    const again = mount(HostedView, opts)
+    await flushPromises()
+    expect(again.get('[data-testid=market-unlist]').attributes('disabled')).toBeUndefined()
+    expect(again.get('[data-testid=hosted-pause]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('a failed ledger probe (all balances zero) keeps the section and a retry', async () => {
+    market.entries.mockRejectedValue({ status: 500, message: 'boom' })
+    const w = await mountView({ earnings: ZERO })
+    expect(w.find('[data-testid=earnings]').exists()).toBe(true)
+    expect(w.find('[data-testid=earnings-error]').exists()).toBe(true)
+  })
+
   it('a listing answer older than the view on screen is dropped and the state read again', async () => {
     const w = await mountView({ views: { 11: view({ version: 5, allowed_tiers: [view().allowed_tiers[0]] }) } })
     market.setListing.mockResolvedValueOnce(view({ status: 'listed', selected_group_id: 3, version: 4 }))
@@ -464,6 +487,65 @@ describe('HostedView sharing market', () => {
       }
       const ids = new Set(market.convert.mock.calls.map((c) => c[1]))
       expect(ids.size).toBe(1)
+      expect(localStorage.getItem(`ccyou.market.pendingConvert.${OWNER_ID}`)).not.toBeNull()
+    })
+
+    it('two tabs: B cannot start a new conversion while A has one unsettled; B retries A\'s id; settling never deletes another id', async () => {
+      const key = `ccyou.market.pendingConvert.${OWNER_ID}`
+      const opts = { global: { plugins: [i18n] }, attachTo: document.body }
+      hosted.listOwnedAccounts.mockResolvedValue([account()])
+      market.getListing.mockResolvedValue(view())
+      market.earnings.mockResolvedValue(SOME)
+      // Tab B is open first (nothing pending yet) and starts typing.
+      freshPinia()
+      const tabB = mount(HostedView, opts)
+      await flushPromises()
+      await tabB.get('[data-testid=earnings-convert]').trigger('click')
+      await tabB.get('[data-testid=earnings-amount]').setValue('1')
+      // Tab A (another store, same storage) records a conversion whose answer is lost.
+      const aId = '11111111-1111-4111-8111-111111111111'
+      localStorage.setItem(key, JSON.stringify({ requestId: aId, amount: '3' }))
+      // B's new conversion is refused: it shows A's and sends nothing.
+      await tabB.get('[data-testid=earnings] form').trigger('submit')
+      await flushPromises()
+      expect(market.convert).not.toHaveBeenCalled()
+      expect(tabB.get('[data-testid=earnings-pending]').text()).toContain('$3.00')
+      expect(tabB.get('[data-testid=earnings-convert-error]').text()).toContain('结果未确认，可重试')
+      // Confirming again retries A's id and amount.
+      let resolve!: (v: unknown) => void
+      market.convert.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+      await tabB.get('[data-testid=earnings] form').trigger('submit')
+      expect(market.convert.mock.calls[0]).toEqual(['3', aId])
+      // Meanwhile another conversion replaced the record (e.g. A settled and started a new one).
+      const otherId = '22222222-2222-4222-8222-222222222222'
+      localStorage.setItem(key, JSON.stringify({ requestId: otherId, amount: '1' }))
+      resolve({ entry_id: 1, request_id: aId, amount: '3', created_at: 'x', replayed: true })
+      await flushPromises()
+      // Compare-and-delete: the other conversion is still recorded.
+      expect(JSON.parse(localStorage.getItem(key) ?? 'null')).toEqual({ requestId: otherId, amount: '1' })
+      tabB.unmount()
+    })
+
+    it('no record, no request: a storage that refuses the write blocks the conversion', async () => {
+      const { w } = await openDialog()
+      const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new Error('QuotaExceededError')
+      })
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      await confirm(w)
+      await flushPromises()
+      spy.mockRestore()
+      expect(market.convert).not.toHaveBeenCalled()
+      expect(w.get('[data-testid=earnings-convert-error]').text()).toContain('无法保存转换记录')
+    })
+
+    it('BALANCE_OUT_OF_RANGE is not terminal: the id and amount are kept', async () => {
+      const { w } = await openDialog()
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      market.convert.mockRejectedValueOnce({ status: 400, reason: 'BALANCE_OUT_OF_RANGE', message: 'x' })
+      await confirm(w)
+      await flushPromises()
+      expect(w.get('[data-testid=earnings-pending]').text()).toContain('$1.00')
       expect(localStorage.getItem(`ccyou.market.pendingConvert.${OWNER_ID}`)).not.toBeNull()
     })
 

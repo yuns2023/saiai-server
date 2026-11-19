@@ -240,19 +240,22 @@ async function loadEarnings(): Promise<void> {
   try {
     const e = await marketApi.earnings()
     if (mine !== earningsSeq) return
+    let probeFailed = false
     if (!hasEarnings(e)) {
       // All zero: one ledger line is enough to know there is history (e.g. reversals) to show.
       try {
         const page = await marketApi.entries(null, 1)
         if (mine !== earningsSeq) return
         hasLedger.value = page.items.length > 0
-      } catch {
+      } catch (err) {
         if (mine !== earningsSeq) return
-        hasLedger.value = false
+        // Unknown is not "no history": keep the section (and a retry) rather than hiding it.
+        hasLedger.value = !isNotFound(err)
+        probeFailed = !isNotFound(err)
       }
     }
     earnings.value = e
-    earningsFailed.value = false
+    earningsFailed.value = probeFailed
   } catch (e) {
     if (mine !== earningsSeq) return
     // A server without earnings (404) has nothing to show, not even the last answer.
@@ -586,10 +589,8 @@ onUnmounted(() => {
                 <HostedMarket
                   v-if="showMarket && marketViews[a.account_id]"
                   :view="marketViews[a.account_id]"
-                  :busy="hosted.ownerBusy !== null"
                   @updated="setMarketView"
                   @reload="loadMarketView(a.account_id)"
-                  @busy="(on) => (hosted.ownerBusy = on ? a.account_id : null)"
                 />
                 <p v-else-if="marketFailed[a.account_id]" class="mb-4 ml-10 text-sm text-seal" role="alert" :data-testid="`market-error-${a.account_id}`">
                   {{ t('market.loadFailed') }}
