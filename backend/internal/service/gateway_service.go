@@ -90,9 +90,9 @@ func ClaudeOAuthCarpoolDevicesFullModelLimitedMessage(model string, wait time.Du
 	}
 	reset := ""
 	if wait > 0 {
-		reset = " (earliest reset in about " + formatApproxWait(wait) + ")"
+		reset = " (earliest known reset in about " + formatApproxWait(wait) + ")"
 	}
-	return fmt.Sprintf("No available Claude OAuth carpool account can serve %s right now: its usage limit is reached on the other accounts%s, and the accounts that still have quota have no free device slots for this device. Please switch to another model or retry later.", model, reset)
+	return fmt.Sprintf("No available Claude OAuth carpool account can serve %s right now. Its usage limit is reached on some accounts%s, and the last account tried could not admit this device. Please switch to another model or retry later.", model, reset)
 }
 
 // formatApproxWait renders a wait as "5d 10h", "3h 20m" or "12m", rounding up.
@@ -448,6 +448,9 @@ type SelectionFailureError struct {
 	// those limits resets (0 when unknown).
 	ModelRateLimitMinRemaining time.Duration
 	summary                    string
+	// plain keeps the bare "no available accounts" text for exits that
+	// returned the sentinel itself before this type existed.
+	plain bool
 }
 
 func newSelectionFailureError(requestedModel string, stats selectionFailureStats) *SelectionFailureError {
@@ -459,11 +462,22 @@ func newSelectionFailureError(requestedModel string, stats selectionFailureStats
 	}
 }
 
+// newPlainSelectionFailureError carries the stats but keeps the sentinel's text.
+func newPlainSelectionFailureError(requestedModel string, stats selectionFailureStats) *SelectionFailureError {
+	e := newSelectionFailureError(requestedModel, stats)
+	e.plain = true
+	return e
+}
+
 func (e *SelectionFailureError) Error() string {
+	if e.plain {
+		return ErrNoAvailableAccounts.Error()
+	}
 	return fmt.Sprintf("%s supporting model: %s (%s)", ErrNoAvailableAccounts.Error(), e.RequestedModel, e.summary)
 }
 
-func (*SelectionFailureError) Is(target error) bool { return target == ErrNoAvailableAccounts }
+// Unwrap keeps the chain the former fmt.Errorf("%w ...") wrapper had.
+func (*SelectionFailureError) Unwrap() error { return ErrNoAvailableAccounts }
 
 // ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
@@ -3031,7 +3045,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 		candidateIDs,
 		summarizeSelectionFailureStats(stats),
 	)
-	return nil, ErrNoAvailableAccounts
+	return nil, newPlainSelectionFailureError(requestedModel, stats)
 }
 
 func sampleAccountIDs(accounts []*Account, limit int) []int64 {
@@ -4733,8 +4747,8 @@ func (s *GatewayService) collectSelectionFailureStats(
 			stats.SampleMappingIDs = appendSelectionFailureSampleID(stats.SampleMappingIDs, acc.ID)
 		case "model_rate_limited":
 			stats.ModelRateLimited++
-			remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel).Truncate(time.Second)
-			stats.SampleRateLimitIDs = appendSelectionFailureRateSample(stats.SampleRateLimitIDs, acc.ID, remaining)
+			remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel)
+			stats.SampleRateLimitIDs = appendSelectionFailureRateSample(stats.SampleRateLimitIDs, acc.ID, remaining.Truncate(time.Second))
 			if remaining > 0 && (stats.ModelRateLimitMinRemaining == 0 || remaining < stats.ModelRateLimitMinRemaining) {
 				stats.ModelRateLimitMinRemaining = remaining
 			}

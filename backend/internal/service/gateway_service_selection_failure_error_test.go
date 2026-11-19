@@ -54,11 +54,41 @@ func TestSelectionFailureErrorKeepsTextAndSentinel(t *testing.T) {
 	if !errors.As(wrapped, &got) || got.ModelRateLimited != 2 || got.ModelRateLimitMinRemaining != 3*time.Hour {
 		t.Fatalf("errors.As = %+v", got)
 	}
+	if errors.Unwrap(err) != ErrNoAvailableAccounts {
+		t.Fatal("must unwrap to ErrNoAvailableAccounts like the former wrapper")
+	}
+
+	plain := error(newPlainSelectionFailureError("claude-fable-5-2", stats))
+	if plain.Error() != ErrNoAvailableAccounts.Error() || !errors.Is(plain, ErrNoAvailableAccounts) {
+		t.Fatalf("plain variant must keep the sentinel text, got %q", plain.Error())
+	}
+	if !errors.As(plain, &got) || got.ModelRateLimited != 2 {
+		t.Fatal("plain variant must still carry the stats")
+	}
+}
+
+func TestCollectSelectionFailureStatsKeepsSubSecondMinimum(t *testing.T) {
+	svc := &GatewayService{}
+	acc := func(id int64, in time.Duration) Account {
+		return Account{
+			ID: id, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+			Extra: map[string]any{"model_rate_limits": map[string]any{
+				anthropicFableRateLimitKey: map[string]any{"rate_limit_reset_at": time.Now().Add(in).UTC().Format(time.RFC3339Nano)},
+			}},
+		}
+	}
+	stats := svc.collectSelectionFailureStats(context.Background(), []Account{acc(1, 130*time.Hour), acc(2, 900*time.Millisecond)}, "claude-fable-5-2", PlatformAnthropic, nil, false)
+	if stats.ModelRateLimited != 2 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if stats.ModelRateLimitMinRemaining <= 0 || stats.ModelRateLimitMinRemaining >= time.Second {
+		t.Fatalf("shortest wait = %s, want the sub-second one", stats.ModelRateLimitMinRemaining)
+	}
 }
 
 func TestClaudeOAuthCarpoolDevicesFullModelLimitedMessage(t *testing.T) {
 	msg := ClaudeOAuthCarpoolDevicesFullModelLimitedMessage("claude-fable-5-2", 129*time.Hour+53*time.Minute)
-	for _, part := range []string{"No available Claude OAuth carpool account", "claude-fable-5-2", "usage limit", "about 5d 10h", "no free device slots", "switch to another model"} {
+	for _, part := range []string{"No available Claude OAuth carpool account", "claude-fable-5-2", "usage limit is reached on some accounts", "earliest known reset in about 5d 10h", "could not admit this device", "switch to another model"} {
 		if !strings.Contains(msg, part) {
 			t.Fatalf("message %q lacks %q", msg, part)
 		}
