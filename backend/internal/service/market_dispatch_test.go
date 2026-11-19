@@ -1274,7 +1274,7 @@ func TestMarketOwnerPathDeviceErrorFailsOpenAsOwner(t *testing.T) {
 		a.Extra = map[string]any{"claude_oauth_mode": ClaudeOAuthModeCarpool, "claude_oauth_carpool_device_limit": 5}
 		return &MarketAuthoritativeFacts{AccountFound: true, Account: &a, MembershipSource: AccountGroupSourceAdmin,
 			GroupFound: true, GroupActive: true, GroupPlatform: PlatformAnthropic, GroupHosted: true, GroupExclusive: true,
-			OwnerUserStatus: StatusActive, HostedOwnerGroupID: hosted}
+			OwnerUserStatus: StatusActive, OwnerGroupQualified: true}
 	}
 	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
 	ctx := WithAccountUserID(c.Request.Context(), mktOwner)
