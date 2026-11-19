@@ -52,34 +52,41 @@ func TestGetByKeyForAuthLoadsMarketTier(t *testing.T) {
 	ctx := context.Background()
 	f := newMarketFixture(t)
 	buyer := f.user(t)
-	tier, plain, target := f.group(t, true), f.group(t, false), f.group(t, false)
+	tier, plain, target, hosted := f.group(t, true), f.group(t, false), f.group(t, false), f.group(t, false)
 	// Non-zero values, so a column dropped from the projection shows up in
-	// the full-row comparison below.
+	// the assertions and the full-row comparison below.
 	_, err := integrationDB.ExecContext(ctx, `UPDATE groups SET claude_code_only = TRUE,
 		model_rate_multipliers = '{"claude-fable-5": 0.5}'::jsonb WHERE id = $1`, tier)
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE groups SET fallback_group_id = $2,
-		fallback_group_id_on_invalid_request = $2, hosted_usage_enabled = TRUE, is_exclusive = TRUE WHERE id = $1`, plain, target)
+		fallback_group_id_on_invalid_request = $2 WHERE id = $1`, plain, target)
+	require.NoError(t, err)
+	// An owner (hosted, exclusive) group has no fallback (ValidateHostedUsage).
+	_, err = integrationDB.ExecContext(ctx, `UPDATE groups SET hosted_usage_enabled = TRUE, is_exclusive = TRUE WHERE id = $1`, hosted)
 	require.NoError(t, err)
 	repo := newAPIKeyRepositoryWithSQL(integrationEntClient, integrationDB)
-	tierKey := marketAuthKey(t, repo, buyer, tier)
-	plainKey := marketAuthKey(t, repo, buyer, plain)
 
 	for _, tc := range []struct {
-		key     *service.APIKey
-		groupID int64
-		tier    bool
-	}{{tierKey, tier, true}, {plainKey, plain, false}} {
-		got, err := repo.GetByKeyForAuth(ctx, tc.key.Key)
+		groupID          int64
+		tier, ccOnly     bool
+		hosted, fallback bool
+	}{
+		{groupID: tier, tier: true, ccOnly: true},
+		{groupID: plain, fallback: true},
+		{groupID: hosted, hosted: true},
+	} {
+		key := marketAuthKey(t, repo, buyer, tc.groupID)
+		got, err := repo.GetByKeyForAuth(ctx, key.Key)
 		require.NoError(t, err)
 		require.NotNil(t, got.Group)
 		require.True(t, got.Group.Hydrated)
 		require.Equal(t, tc.groupID, got.Group.ID)
 		require.Equal(t, tc.tier, got.Group.MarketTier, "group %d market_tier from the auth projection", tc.groupID)
-		require.Equal(t, tc.tier, got.Group.ClaudeCodeOnly)
-		require.Equal(t, !tc.tier, got.Group.HostedUsageEnabled)
-		require.Equal(t, !tc.tier, got.Group.IsExclusive)
-		require.Equal(t, !tc.tier, got.Group.FallbackGroupID != nil)
+		require.Equal(t, tc.ccOnly, got.Group.ClaudeCodeOnly)
+		require.Equal(t, tc.hosted, got.Group.HostedUsageEnabled)
+		require.Equal(t, tc.hosted, got.Group.IsExclusive)
+		require.Equal(t, tc.fallback, got.Group.FallbackGroupID != nil)
+		require.Equal(t, tc.fallback, got.Group.FallbackGroupIDOnInvalidRequest != nil)
 
 		// Every other field the auth path loads matches a full row load.
 		full, err := f.groups.GetByIDLite(ctx, tc.groupID)
