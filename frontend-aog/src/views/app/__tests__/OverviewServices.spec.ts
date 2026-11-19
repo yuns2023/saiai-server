@@ -157,7 +157,7 @@ describe('OverviewView account service lines', () => {
   it('sends users who have not topped up to /billing', async () => {
     api.invites.overview.mockResolvedValue(invites({ eligible: false, can_create: false }))
     const w = await mountOverview()
-    expect(w.find('[data-testid=overview-invites]').text()).toContain('充值或兑换一次后即可邀请好友')
+    expect(w.find('[data-testid=overview-invites]').text()).toContain('充值一次后即可邀请好友（用余额买的兑换码不计入）')
     expect(links(w, 'overview-invites')).toEqual(['/billing'])
   })
 

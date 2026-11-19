@@ -47,13 +47,14 @@ const steps = computed(() => {
 
 /**
  * Ways to add balance, one statement line each: the method, an optional note
- * under it, and when it lands. Only methods live on the site; a new method is
+ * (and an optional second note) under it, and when it lands. Only methods live on the site; a new method is
  * one more entry here plus its copy.
  */
-const payMethods: Array<{ title: string; body?: string; time: string }> = [
+const payMethods: Array<{ title: string; body?: string; note?: string; time: string }> = [
   { title: 'landing.paySolanaTitle', time: 'landing.paySolanaTime' },
   { title: 'landing.payArbitrumTitle', time: 'landing.payArbitrumTime' },
-  { title: 'landing.payRedeemTitle', body: 'landing.payRedeemBody', time: 'landing.payRedeemTime' }
+  // Buying codes is behind redeem_purchase_enabled, which public settings do not carry: shown as-is.
+  { title: 'landing.payRedeemTitle', body: 'landing.payRedeemBody', note: 'landing.payRedeemGift', time: 'landing.payRedeemTime' }
 ]
 
 /** Hosting as ruled key-value lines; the last one (how to start) carries the site contact. */
@@ -148,6 +149,7 @@ const sample = [
                 <td>
                   <span class="font-medium text-ink">{{ t(m.title) }}</span>
                   <span v-if="m.body" class="mt-0.5 block text-ink-2">{{ t(m.body) }}</span>
+                  <span v-if="m.note" class="mt-0.5 block text-ink-2">{{ t(m.note) }}</span>
                 </td>
                 <td class="amount">{{ t(m.time) }}</td>
               </tr>

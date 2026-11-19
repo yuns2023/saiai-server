@@ -219,7 +219,7 @@ export default {
     inviteView: '查看邀请',
     inviteOpen: '可以生成邀请码',
     inviteGo: '去邀请',
-    inviteLocked: '充值或兑换一次后即可邀请好友',
+    inviteLocked: '充值一次后即可邀请好友（用余额买的兑换码不计入）',
     inviteTopUp: '去充值'
   },
   connect: {
@@ -789,7 +789,7 @@ export default {
     lead: '生成邀请码发给朋友，对方注册时填写即可。每个码只能用一次。',
     new: '生成邀请码',
     disabled: '本站暂未开放用户邀请。已发出的邀请码仍然有效。',
-    notEligible: '充值或兑换过一次后即可生成邀请码。',
+    notEligible: '充值一次后即可生成邀请码。用余额买的兑换码不计入。',
     goTopUp: '去充值',
     unusedOf: '未使用 {n} / {max}',
     invited: '已邀请 {n} 人',
@@ -859,6 +859,7 @@ export default {
     payRedeemTitle: '兑换码',
     payRedeemBody: '在控制台的充值页输入',
     payRedeemTime: '立即生效',
+    payRedeemGift: '也可以用余额买兑换码，送人或代充',
     payRateLabel: '折算',
     payRate: '1 USDT / USDC = $1 余额',
     payNote: '稳定币在链上最终确认后入账，按实际到账金额计。请用所选网络转账，不支持跨链。',

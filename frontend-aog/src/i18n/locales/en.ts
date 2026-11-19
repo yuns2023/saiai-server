@@ -221,7 +221,7 @@ const en: typeof zh = {
     inviteView: 'View invitations',
     inviteOpen: 'You can generate invitation codes',
     inviteGo: 'Invite',
-    inviteLocked: 'Top up or redeem a code once to invite friends',
+    inviteLocked: 'Top up once to invite friends (codes bought with balance do not count)',
     inviteTopUp: 'Top up'
   },
   connect: {
@@ -791,7 +791,7 @@ const en: typeof zh = {
     lead: 'Generate a code and send it to a friend; they enter it when signing up. Each code works once.',
     new: 'Generate code',
     disabled: 'Inviting is not open on this site. Codes you already sent still work.',
-    notEligible: 'Top up or redeem a code once to start inviting.',
+    notEligible: 'Top up once to start inviting. Redeem codes bought with balance do not count.',
     goTopUp: 'Top up',
     unusedOf: '{n} / {max} unused',
     invited: '{n} invited',
@@ -861,6 +861,7 @@ const en: typeof zh = {
     payRedeemTitle: 'Redeem code',
     payRedeemBody: 'Enter it on the Top up page of the console',
     payRedeemTime: 'Instant',
+    payRedeemGift: 'You can also buy one with your balance, to give away or to top up someone else',
     payRateLabel: 'Conversion',
     payRate: '1 USDT / USDC = $1 of balance',
     payNote: 'Stablecoins are credited once the block is final, at the amount actually received. Send on the network you chose; cross-chain transfers are not supported.',
