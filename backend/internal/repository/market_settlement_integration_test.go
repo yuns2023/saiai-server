@@ -1506,11 +1506,20 @@ func TestMarketSettlementPriceChangedAfterAdmission(t *testing.T) {
 	_, err = audit.SaleAudit(ctx, 1<<60)
 	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
 
-	// Shadow rows never carry a price snapshot.
-	_, err = integrationDB.ExecContext(ctx, `
-		INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version, buyer_user_id, account_id, owner_user_id,
-			owner_source, self_purchase, standard_cost, charge_input, charge_source, admission_price)
-		VALUES ($1, $2, 'owned_other', 1, $3, $4, $5, 'settlement', FALSE, 1, 1, 'balance', '{}'::jsonb)`,
-		"shadow-price-"+uuid.NewString(), s.key, s.buyer, s.account, s.owner)
-	requirePQCode(t, err, "23514", "admission_price only on shared_sale rows")
+	// Only the shared_sale insert writes admission_price: a shadow event of
+	// the same key (owned account, non-hosted group → owned_other) and a
+	// market sale without a snapshot stay NULL.
+	group := int64(77)
+	shadow := &service.UsageBillingCommand{RequestID: "shadow-" + uuid.NewString(), APIKeyID: s.key, UserID: s.buyer, AccountID: s.account,
+		AccountType: service.AccountTypeSetupToken, Model: "TEST_ONLY_model", BalanceCost: 1,
+		Settlement: &service.UsageSettlementInput{GroupID: &group, StandardCost: 1, ChargeInput: 1, ChargeSource: service.SettlementChargeSourceBalance}}
+	_, err = repo.Apply(ctx, shadow)
+	require.NoError(t, err)
+	_, err = repo.Apply(ctx, mktCommand(f.admit(s), 1))
+	require.NoError(t, err)
+	var shadowRows, withPrice int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FILTER (WHERE category <> 'shared_sale'),
+		count(*) FILTER (WHERE admission_price IS NOT NULL) FROM usage_settlement_events WHERE api_key_id = $1`, s.key).Scan(&shadowRows, &withPrice))
+	require.Equal(t, 1, shadowRows)
+	require.Equal(t, 2, withPrice, "only the two sales that carried a snapshot")
 }
