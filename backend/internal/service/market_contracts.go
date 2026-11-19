@@ -86,7 +86,16 @@ type MarketAdmissionState struct {
 // ErrMarketAdmissionAttemptExists. A commit error leaves the outcome
 // unknown: confirm with GetMarketAdmissionByAttempt or do not dispatch. A
 // listing row changed after the snapshot (40001) reruns the transaction once,
-// so check may run twice; it must not have side effects.
+// so check may run twice (each time on a fresh copy of in, judged on the new
+// snapshot); it must not have side effects.
+//
+// Promise scope: eligibility is decided on the consistent snapshot of the
+// admission transaction that finally commits; a disable committed after that
+// snapshot counts as after the admission (the request continues as in
+// flight and settles normally). AdmittedAt is the insert's database time and
+// can be later than such a disable, so audits must not judge by timestamp
+// order alone. The window has no hard bound: every concurrent request that
+// obtained an eligible snapshot and commits may continue.
 type MarketAdmissionRepository interface {
 	AdmitMarket(ctx context.Context, in *MarketAdmission, check func(state *MarketAdmissionState, in *MarketAdmission) error) (*MarketAdmission, error)
 	// GetMarketAdmission / GetMarketAdmissionByAttempt return

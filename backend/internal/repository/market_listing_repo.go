@@ -49,6 +49,9 @@ func translateMarketTierGuardError(err error) error {
 type marketListingRepository struct {
 	db       *sql.DB
 	accounts *accountRepository
+	// afterAdmissionAccountRead is a test hook (nil in production) run
+	// between the account read and the remaining reads of AdmitMarket.
+	afterAdmissionAccountRead func()
 }
 
 // NewMarketListingRepository serves the listing lifecycle: one transaction
@@ -845,22 +848,33 @@ func insertMarketAdmissionTx(ctx context.Context, q sqlQueryer, in *service.Mark
 	return &out, nil
 }
 
-// admitMarketAfterAccountRead is a test hook (nil in production) run
-// between the account read and the remaining reads of AdmitMarket.
-var admitMarketAfterAccountRead func()
-
 // AdmitMarket runs at REPEATABLE READ so every eligibility fact comes from
 // one snapshot. A listing row updated concurrently after that snapshot makes
 // the share lock fail with 40001: that attempt inserts nothing and the whole
-// transaction is rerun once.
+// transaction is rerun once, judged again on its new snapshot.
+//
+// Promise: eligibility is decided on the consistent snapshot of the
+// admission transaction that finally commits. A disable (owner, account,
+// listing outside the listing row) committed after that snapshot counts as
+// happening after the admission: the request continues as in flight and
+// settles normally. admitted_at is the database time of the insert, so it
+// can be later than such a disable — audits must not flag an admission only
+// because its timestamp follows a disable. The window has no hard bound:
+// every concurrent request that obtained an eligible snapshot and commits
+// may continue.
+//
+// Each attempt works on its own copy of in, so fields the first check
+// filled in never leak into the retry.
 func (r *marketListingRepository) AdmitMarket(ctx context.Context, in *service.MarketAdmission,
 	check func(state *service.MarketAdmissionState, in *service.MarketAdmission) error) (*service.MarketAdmission, error) {
 	if in == nil || check == nil {
 		return nil, errors.New("market admission: missing input or check")
 	}
-	out, err := r.admitMarketOnce(ctx, in, check)
+	attempt := *in
+	out, err := r.admitMarketOnce(ctx, &attempt, check)
 	if isSerializationFailure(err) {
-		out, err = r.admitMarketOnce(ctx, in, check)
+		attempt = *in
+		out, err = r.admitMarketOnce(ctx, &attempt, check)
 	}
 	return out, err
 }
@@ -894,8 +908,8 @@ func (r *marketListingRepository) admitMarketOnce(ctx context.Context, in *servi
 	default:
 		state.Account = account
 	}
-	if admitMarketAfterAccountRead != nil {
-		admitMarketAfterAccountRead()
+	if r.afterAdmissionAccountRead != nil {
+		r.afterAdmissionAccountRead()
 	}
 	var lastID, lastOwner sql.NullInt64
 	if err := scanSingleRow(ctx, tx, `SELECT id, new_owner_user_id FROM account_owner_events

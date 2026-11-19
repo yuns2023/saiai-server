@@ -1298,13 +1298,13 @@ func TestAdmitMarketUsesOneSnapshot(t *testing.T) {
 	// Between the account read and the owner read, an admin turns the
 	// account's scheduling off and then re-enables the owner. Both facts
 	// "admissible" never held at the same time.
-	admitMarketAfterAccountRead = func() {
+	f.market.afterAdmissionAccountRead = func() {
 		_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET schedulable = FALSE WHERE id = $1", acc)
 		require.NoError(t, err)
 		_, err = integrationDB.ExecContext(ctx, "UPDATE users SET status = 'active' WHERE id = $1", owner)
 		require.NoError(t, err)
 	}
-	t.Cleanup(func() { admitMarketAfterAccountRead = nil })
+	t.Cleanup(func() { f.market.afterAdmissionAccountRead = nil })
 	in := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-z", AccountID: acc, GroupID: tier, BuyerUserID: buyer, APIKeyID: 3}
 	_, err = f.market.AdmitMarket(ctx, in, func(st *service.MarketAdmissionState, in *service.MarketAdmission) error {
 		if st.Account == nil || !st.Account.Schedulable || st.OwnerUserStatus != service.StatusActive {
