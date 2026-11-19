@@ -1463,6 +1463,16 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 	return "class"
 }
 
+// marketDispatchCancelled is checked right before every send of a market
+// attempt (main and passthrough paths): a request cancelled after its
+// admission (lease possibly released on cancellation) never sends.
+func marketDispatchCancelled(ctx context.Context) error {
+	if a := marketAttemptFromContext(ctx); a != nil && a.Selection != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
+}
+
 // marketAdmissionError maps a final-admission failure: a cancelled request
 // ends (no reselection); anything else fails over.
 func marketAdmissionError(ctx context.Context, err error) error {

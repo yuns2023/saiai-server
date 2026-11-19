@@ -412,3 +412,21 @@ func TestMarketDeviceBudgetUnlistRelistSameCycle(t *testing.T) {
 	require.ErrorIs(t, marketDevice(t, cache, ctx, 66, "b1", 10, &p, buyer), full)
 	require.NoError(t, marketDevice(t, cache, ctx, 66, "o0", 10, &p, service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}))
 }
+
+func TestMarketUsageReplayedHas5hClearsUltraDespiteOldWindow(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMarketUsageCache(testRedis(t))
+	now := time.Now().Unix()
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 74, service.MarketUsageObservations{
+		SevenDay:       &service.MarketUsageObservation{Utilization: 0.3, ResetAt: now + 6*24*3600, ObservedAt: now},
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now},
+	}))
+	// A replayed old-week 7d merged with a fresh "has a 5h window" signal.
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 74, service.MarketUsageObservations{
+		SevenDay:       &service.MarketUsageObservation{Utilization: 0.2, ResetAt: now - 3600, ObservedAt: now - 7200},
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: false, ObservedAt: now + 3},
+	}))
+	got, err := cache.GetMarketUsageObservations(ctx, []int64{74})
+	require.NoError(t, err)
+	require.False(t, got[74].FiveHourAbsent.Absent, "the conservative flag is never blocked by an old window")
+}

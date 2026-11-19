@@ -49,7 +49,7 @@ var recordMarketUsageScript = redis.NewScript(`
 			-- Later observation wins; at the same second "has a 5h window"
 			-- (absent=false) wins. A response whose 7d belongs to an older
 			-- window than the stored one is late: it never sets the flag.
-			if stale then
+			if stale and new['absent'] == true then
 				out = nil
 			elseif old == nil then
 				out = raw

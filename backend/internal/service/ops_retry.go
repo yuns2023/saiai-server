@@ -366,6 +366,14 @@ func (s *OpsService) executeRetry(ctx context.Context, errorLog *OpsErrorLogDeta
 		// No-op
 	}
 
+	// Sharing-market tiers: only Anthropic /v1/messages retries (both modes).
+	if errorLog.GroupID != nil && *errorLog.GroupID > 0 && s.gatewayService != nil {
+		group, err := s.gatewayService.ResolveGroupByID(ctx, *errorLog.GroupID)
+		if err == nil && group.MarketTier && (reqType != opsRetryTypeMessages || strings.Contains(strings.ToLower(errorLog.RequestPath), "count_tokens")) {
+			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "sharing-market tiers only retry Anthropic messages"}
+		}
+	}
+
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case OpsRetryModeUpstream:
 		if pinnedAccountID == nil || *pinnedAccountID <= 0 {

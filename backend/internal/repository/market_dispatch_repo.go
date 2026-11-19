@@ -39,12 +39,12 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	var value sql.NullString
-	if err := scanSingleRow(ctx, r.db, "SELECT value FROM settings WHERE key = $1",
-		[]any{service.SettingKeyMarketEnabled}, &value); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+	// The switch only gates new buyer admissions (re-read in the admission
+	// snapshot); a failed read must not drop the listed set: treat as off.
+	enabled, err := r.marketEnabled(ctx, r.db)
+	if err == nil {
+		state.Enabled = enabled
 	}
-	state.Enabled = value.Valid && value.String == "true"
 	return state, nil
 }
 

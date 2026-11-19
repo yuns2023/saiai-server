@@ -5553,7 +5553,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// below, after the device admission and before the first upstream send.
 	marketAttempt, marketErr := s.marketGate(ctx, account)
 	if marketErr != nil {
-		return nil, marketAdmissionFailoverError(marketErr)
+		return nil, marketAdmissionError(ctx, marketErr)
 	}
 	if marketAttempt != nil && (account.IsAnthropicAPIKeyPassthroughEnabled() || account.IsBedrock()) {
 		if err := s.finalizeMarketAdmission(ctx, account, marketAttempt, parsed.Model); err != nil {
@@ -5681,11 +5681,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, err
 	}
 
-	if marketAttempt != nil && ctx.Err() != nil {
-		// Cancelled after the admission: the lease may already be released.
-		return nil, ctx.Err()
-	}
-
 	// 调试日志：记录即将转发的账号信息（只记代理 ID，代理 URL 可能含账号密码）
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v ProxyID=%s",
 		account.ID, account.Name, account.Platform, account.Type, account.IsTLSFingerprintEnabled(), formatProxyIDForLog(account.ProxyID))
@@ -5702,6 +5697,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, oauthIdentity)
 		releaseUpstreamCtx()
 		if err != nil {
+			return nil, err
+		}
+		if err := marketDispatchCancelled(ctx); err != nil {
 			return nil, err
 		}
 
@@ -6302,6 +6300,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
 		if err != nil {
+			return nil, err
+		}
+		if err := marketDispatchCancelled(ctx); err != nil {
 			return nil, err
 		}
 
