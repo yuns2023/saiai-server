@@ -555,6 +555,7 @@ func registerSettlementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		market.GET("/earnings", h.Admin.MarketEarnings.Owners)
 		market.GET("/earnings/entries", h.Admin.MarketEarnings.Entries)
 		market.POST("/earnings/reverse", h.Admin.MarketEarnings.Reverse)
+		market.GET("/admissions/:id", h.Admin.MarketEarnings.SaleAudit)
 	}
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -174,9 +175,56 @@ type OwnerEarningRepository interface {
 	Convert(ctx context.Context, in OwnerEarningConvertInput) (*OwnerEarningConvertRecord, error)
 	// Reverse runs the admin reverse in one transaction (see above).
 	Reverse(ctx context.Context, in OwnerEarningReverseInput) (*OwnerEarningReverseResult, error)
+	// SaleAudit reads one admission with its settlement (if any):
+	// ErrMarketAdmissionNotFound when the admission does not exist.
+	SaleAudit(ctx context.Context, admissionID int64) (*MarketSaleAudit, error)
 	// AdminSummaries lists owners with ledger rows (ownerUserID filters to
 	// one), ordered by owner id.
 	AdminSummaries(ctx context.Context, ownerUserID *int64, offset, limit int) ([]AdminOwnerEarningSummary, int64, time.Time, error)
+}
+
+// MarketSaleAudit is GET /api/v1/admin/market/admissions/:id: the
+// admission, its admission-time price snapshot and the final settlement
+// (model, charge input, actual charge, split). A snapshot price different
+// from the final price is normal (the charge follows the ordinary recording
+// price); only charged_amount ≠ owner_earning + platform_amount is an
+// anomaly.
+type MarketSaleAudit struct {
+	Admission      MarketSaleAuditAdmission   `json:"admission"`
+	AdmissionPrice *MarketPriceAudit          `json:"admission_price"`
+	Settlement     *MarketSaleAuditSettlement `json:"settlement"`
+}
+
+type MarketSaleAuditAdmission struct {
+	ID             int64     `json:"id"`
+	AttemptID      string    `json:"attempt_id"`
+	RequestRef     string    `json:"request_ref"`
+	AccountID      int64     `json:"account_id"`
+	GroupID        int64     `json:"group_id"`
+	OwnerUserID    int64     `json:"owner_user_id"`
+	OwnerEventID   int64     `json:"owner_event_id"`
+	ListingVersion int64     `json:"listing_version"`
+	BuyerUserID    int64     `json:"buyer_user_id"`
+	APIKeyID       int64     `json:"api_key_id"`
+	AdmittedAt     time.Time `json:"admitted_at"`
+}
+
+// MarketSaleAuditSettlement: Model is the usage log's model (null when the
+// log is missing or expired). Amounts are exact decimal strings.
+type MarketSaleAuditSettlement struct {
+	EventID            int64     `json:"event_id"`
+	RequestID          string    `json:"request_id"`
+	Model              *string   `json:"model"`
+	StandardCost       string    `json:"standard_cost"`
+	ChargeInput        string    `json:"charge_input"`
+	ChargedAmount      string    `json:"charged_amount"`
+	OwnerEarning       string    `json:"owner_earning"`
+	PlatformAmount     string    `json:"platform_amount"`
+	PlatformCutRate    string    `json:"platform_cut_rate"`
+	EarningZeroReason  *string   `json:"earning_zero_reason"`
+	EarningAvailableAt time.Time `json:"earning_available_at"`
+	SplitConserved     bool      `json:"split_conserved"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // OwnerEarningsView is GET /api/v1/hosted/earnings. Amounts are exact
@@ -523,3 +571,21 @@ func (s *OwnerEarningService) AdminReverse(ctx context.Context, in OwnerEarningR
 	)
 	return res, nil
 }
+
+// AdminSaleAudit reads one market admission with its settlement.
+func (s *OwnerEarningService) AdminSaleAudit(ctx context.Context, admissionID int64) (*MarketSaleAudit, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	if admissionID <= 0 {
+		return nil, ErrOwnerEarningInvalidQuery
+	}
+	out, err := s.repo.SaleAudit(ctx, admissionID)
+	if errors.Is(err, ErrMarketAdmissionNotFound) {
+		return nil, ErrMarketSaleAuditNotFound
+	}
+	return out, err
+}
+
+// ErrMarketSaleAuditNotFound: no admission with that id.
+var ErrMarketSaleAuditNotFound = infraerrors.NotFound("MARKET_ADMISSION_NOT_FOUND", "market admission not found")

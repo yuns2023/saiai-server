@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -272,6 +273,14 @@ func insertSharedSaleEventTx(ctx context.Context, tx *sql.Tx, ev *service.Shared
 	if len(ev.InvalidFields) > 0 {
 		invalid = pq.Array(ev.InvalidFields)
 	}
+	var admissionPrice any
+	if ev.AdmissionPrice != nil {
+		raw, err := json.Marshal(ev.AdmissionPrice)
+		if err != nil {
+			return 0, time.Time{}, fmt.Errorf("encode admission price: %w", err)
+		}
+		admissionPrice = string(raw)
+	}
 	var id int64
 	var availableAt time.Time
 	err := tx.QueryRowContext(ctx, `
@@ -281,9 +290,9 @@ func insertSharedSaleEventTx(ctx context.Context, tx *sql.Tx, ev *service.Shared
 			group_id, original_group_id, fee_rate, standard_cost, charge_input,
 			charge_source, subscription_id, zero_reason, invalid_fields,
 			owner_earning, admission_id, charged_amount, platform_amount, platform_cut_rate,
-			earning_zero_reason, earning_available_at
+			earning_zero_reason, earning_available_at, admission_price
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, $13, $14, $15, NULL, $16, $17,
-			$18::numeric, $19, $20::numeric, $21::numeric, $22::numeric, $23, NOW() + make_interval(hours => $24::int * 24))
+			$18::numeric, $19, $20::numeric, $21::numeric, $22::numeric, $23, NOW() + make_interval(hours => $24::int * 24), $25::jsonb)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, earning_available_at
 	`,
@@ -292,7 +301,7 @@ func insertSharedSaleEventTx(ctx context.Context, tx *sql.Tx, ev *service.Shared
 		nullableInt64(ev.GroupID), nullableInt64(ev.OriginalGroupID), ev.StandardCost, ev.ChargeInput,
 		ev.ChargeSource, nullableString(ev.ZeroReason), invalid,
 		ev.OwnerEarning.String(), ev.AdmissionID, ev.ChargedAmount.String(), ev.PlatformAmount.String(), ev.PlatformCutRate.String(),
-		nullableString(ev.EarningZeroReason), ev.FreezeDays,
+		nullableString(ev.EarningZeroReason), ev.FreezeDays, admissionPrice,
 	).Scan(&id, &availableAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		// The claim accepted the identity, so its dedup/archive record is

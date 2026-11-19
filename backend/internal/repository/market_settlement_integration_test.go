@@ -1449,3 +1449,68 @@ func TestOwnerEarningReverseOwnerAndAccountScope(t *testing.T) {
 	require.True(t, reversed(prevEntry), "account scope covers its previous owner")
 	require.False(t, reversed(otherAccount))
 }
+
+// Pilot price promise: the admission snapshot is kept for audit, the charge
+// follows the price at recording time (here: changed after the admission,
+// then changed to 0), and the split is conserved on the actual charge.
+func TestMarketSettlementPriceChangedAfterAdmission(t *testing.T) {
+	ctx := context.Background()
+	setMarketCut(t, "0.2", 7)
+	f := newMktFixture(t)
+	s := basicSale(f, 100)
+	repo := NewUsageBillingRepository(nil, integrationDB)
+	audit := newEarningRepo()
+	snapshot := &service.MarketPriceSnapshot{Model: "claude-sonnet-4", PriceVersion: "v-admission", GroupRate: 1.2, ModelRate: 1,
+		UserDiscount: 1, InputPerToken: 0.000003, OutputPerToken: 0.000015}
+
+	// Admitted at 3e-6/token; the price doubled before the usage was
+	// recorded: 1000 input tokens × 6e-6 × 1.2.
+	a := f.admit(s)
+	cmd := mktCommand(a, 0.0072)
+	cmd.Settlement.MarketPrice = snapshot
+	_, err := repo.Apply(ctx, cmd)
+	require.NoError(t, err)
+	got, err := audit.SaleAudit(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, a.ID, got.Admission.ID)
+	require.Equal(t, service.MarketPriceAuditFrom(snapshot), got.AdmissionPrice, "snapshot persisted unchanged")
+	require.NotNil(t, got.Settlement)
+	charged := dec(t, got.Settlement.ChargedAmount)
+	require.True(t, charged.Equal(dec(t, "0.0072")), "charge follows the new price: %s", charged)
+	require.Equal(t, "0.0072", got.Settlement.ChargeInput)
+	earning, platform := dec(t, got.Settlement.OwnerEarning), dec(t, got.Settlement.PlatformAmount)
+	require.True(t, earning.Equal(charged.Mul(dec(t, "0.8")).Truncate(10)))
+	require.True(t, charged.Equal(earning.Add(platform)))
+	require.True(t, got.Settlement.SplitConserved)
+
+	// Price changed to 0 after the admission: the sale is kept as a
+	// zero-earning event with its snapshot.
+	z := f.admit(s)
+	zcmd := mktCommand(z, 0)
+	zcmd.Settlement.MarketPrice = snapshot
+	_, err = repo.Apply(ctx, zcmd)
+	require.NoError(t, err)
+	got, err = audit.SaleAudit(ctx, z.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.Settlement)
+	require.Equal(t, service.SettlementEarningZeroReasonZeroCharge, *got.Settlement.EarningZeroReason)
+	require.Equal(t, "0", got.Settlement.ChargedAmount)
+	require.Equal(t, service.MarketPriceAuditFrom(snapshot), got.AdmissionPrice)
+
+	// An admission without a settlement, and a missing one.
+	pending := f.admit(s)
+	got, err = audit.SaleAudit(ctx, pending.ID)
+	require.NoError(t, err)
+	require.Nil(t, got.Settlement)
+	require.Nil(t, got.AdmissionPrice)
+	_, err = audit.SaleAudit(ctx, 1<<60)
+	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
+
+	// Shadow rows never carry a price snapshot.
+	_, err = integrationDB.ExecContext(ctx, `
+		INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version, buyer_user_id, account_id, owner_user_id,
+			owner_source, self_purchase, standard_cost, charge_input, charge_source, admission_price)
+		VALUES ($1, $2, 'owned_other', 1, $3, $4, $5, 'settlement', FALSE, 1, 1, 'balance', '{}'::jsonb)`,
+		"shadow-price-"+uuid.NewString(), s.key, s.buyer, s.account, s.owner)
+	requirePQCode(t, err, "23514", "admission_price only on shared_sale rows")
+}

@@ -38,6 +38,16 @@ import (
 // the platform bears the in-flight bad debt of every concurrent request the
 // same balance admitted.
 //
+// Price (pilot promise): the admission-time price snapshot
+// (Settlement.MarketPrice) decides sellability before dispatch and is kept
+// on the event for audit (admission_price); it is not a buyer quote. The
+// actual charge follows the ordinary RecordUsage pricing, so a price change
+// between the final admission and the billing (streaming plus the worker
+// queue) applies to the sale; a change to 0 settles as zero_charge. The
+// split is always conserved on charged_amount. Reconcile rule: a snapshot
+// price different from the final price is normal; only charged_amount ≠
+// owner_earning + platform_amount is a split anomaly.
+//
 // The billing transaction never locks anything of the seller (no wallet row,
 // no users row, no foreign key to users), so two users buying from each
 // other's accounts cannot form a lock cycle.
@@ -219,6 +229,40 @@ type SharedSaleEvent struct {
 	// FreezeDays is the freeze setting snapshot: earning_available_at =
 	// event time + FreezeDays.
 	FreezeDays int
+	// AdmissionPrice is the admission-time price snapshot (audit only; nil
+	// when the attempt carried none).
+	AdmissionPrice *MarketPriceAudit
+}
+
+// MarketPriceAudit is the stored form (usage_settlement_events.
+// admission_price, JSON) of the admission-time MarketPriceSnapshot.
+type MarketPriceAudit struct {
+	Model          string  `json:"model"`
+	PriceVersion   string  `json:"price_version"`
+	GroupRate      float64 `json:"group_rate"`
+	ModelRate      float64 `json:"model_rate"`
+	UserDiscount   float64 `json:"user_discount"`
+	InputPerToken  float64 `json:"input_per_token"`
+	OutputPerToken float64 `json:"output_per_token"`
+}
+
+// MarketPriceAuditFrom copies a snapshot for storage; non-finite numbers are
+// stored as 0 so the audit column can never fail the charge.
+func MarketPriceAuditFrom(p *MarketPriceSnapshot) *MarketPriceAudit {
+	if p == nil {
+		return nil
+	}
+	finite := func(v float64) float64 {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0
+		}
+		return v
+	}
+	return &MarketPriceAudit{
+		Model: p.Model, PriceVersion: p.PriceVersion,
+		GroupRate: finite(p.GroupRate), ModelRate: finite(p.ModelRate), UserDiscount: finite(p.UserDiscount),
+		InputPerToken: finite(p.InputPerToken), OutputPerToken: finite(p.OutputPerToken),
+	}
 }
 
 // BuildSharedSaleEvent builds the event of a validated market command. The
@@ -248,6 +292,7 @@ func BuildSharedSaleEvent(cmd *UsageBillingCommand, adm *MarketAdmission, split 
 		PlatformCutRate: split.CutRate,
 		OwnerEarning:    split.OwnerEarning,
 		FreezeDays:      freezeDays,
+		AdmissionPrice:  MarketPriceAuditFrom(in.MarketPrice),
 	}
 	if split.ZeroReason != "" {
 		reason := split.ZeroReason

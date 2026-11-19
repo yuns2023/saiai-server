@@ -27,7 +27,9 @@
 --
 -- usage_settlement_events: adds the 'shared_sale' category, the market
 -- money columns and earning_available_at (freeze snapshot, required on
--- shared_sale rows, NULL on the P2b shadow rows). Only shared_sale rows may carry a positive owner earning;
+-- shared_sale rows, NULL on the P2b shadow rows) and admission_price (the
+-- admission-time price snapshot of a market sale, audit only; NULL on every
+-- other row). Only shared_sale rows may carry a positive owner earning;
 -- the P2b shadow categories stay pinned to 0. Existing rows satisfy every
 -- new constraint (owner_earning = 0, new columns NULL).
 --
@@ -293,6 +295,10 @@ ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS earning_zero_reason
 -- Freeze snapshot: when the earning of this sale becomes available (event
 -- time + freeze days at settlement), recorded for zero earnings too.
 ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS earning_available_at TIMESTAMPTZ;
+-- Admission-time price snapshot (model, price version, multipliers, unit
+-- prices) of a market sale: audit only, the charge follows the ordinary
+-- recording price. NULL when the attempt carried none.
+ALTER TABLE usage_settlement_events ADD COLUMN IF NOT EXISTS admission_price JSONB;
 
 -- One ALTER (one validation scan) for every new CHECK on this table.
 ALTER TABLE usage_settlement_events
@@ -309,6 +315,7 @@ ALTER TABLE usage_settlement_events
         (category = 'shared_sale' OR (
             admission_id IS NULL AND charged_amount IS NULL AND platform_amount IS NULL
             AND platform_cut_rate IS NULL AND earning_zero_reason IS NULL AND earning_available_at IS NULL
+            AND admission_price IS NULL
         ))
         -- A shared_sale row always comes from an admission and splits the
         -- actual charge exactly: charged = owner earning + platform amount.

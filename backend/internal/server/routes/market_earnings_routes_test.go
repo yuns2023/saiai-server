@@ -25,10 +25,11 @@ func TestMarketEarningsAdminRoutesUseAdminAuth(t *testing.T) {
 		httptest.NewRequest(http.MethodGet, "/api/v1/admin/market/earnings", nil),
 		httptest.NewRequest(http.MethodGet, "/api/v1/admin/market/earnings/entries", nil),
 		httptest.NewRequest(http.MethodPost, "/api/v1/admin/market/earnings/reverse", nil),
+		httptest.NewRequest(http.MethodGet, "/api/v1/admin/market/admissions/1", nil),
 	} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusUnauthorized, w.Code, req.URL.Path)
 	}
-	require.Equal(t, 3, denied)
+	require.Equal(t, 4, denied)
 }

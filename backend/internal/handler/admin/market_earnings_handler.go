@@ -126,3 +126,19 @@ func (h *MarketEarningsHandler) Reverse(c *gin.Context) {
 	}
 	response.Success(c, out)
 }
+
+// SaleAudit handles GET /api/v1/admin/market/admissions/:id: the admission,
+// its admission-time price snapshot and the final settlement (if any).
+func (h *MarketEarningsHandler) SaleAudit(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.ErrorFrom(c, service.ErrOwnerEarningInvalidQuery)
+		return
+	}
+	out, err := h.service.AdminSaleAudit(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, out)
+}

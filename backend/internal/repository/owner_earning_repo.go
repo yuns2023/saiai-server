@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -560,4 +561,68 @@ func (r *ownerEarningRepository) AdminSummaries(ctx context.Context, ownerUserID
 func isNumericOutOfRange(err error) bool {
 	var pqErr *pq.Error
 	return errors.As(err, &pqErr) && pqErr.Code == "22003"
+}
+
+// SaleAudit reads the admission, the admission-time price snapshot and the
+// settlement event (if any) of one admission in one read-only snapshot.
+func (r *ownerEarningRepository) SaleAudit(ctx context.Context, admissionID int64) (*service.MarketSaleAudit, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	out := &service.MarketSaleAudit{}
+	a := &out.Admission
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, attempt_id, request_ref, account_id, group_id, owner_user_id, owner_event_id, listing_version,
+			buyer_user_id, api_key_id, admitted_at
+		FROM market_admissions WHERE id = $1`, admissionID).
+		Scan(&a.ID, &a.AttemptID, &a.RequestRef, &a.AccountID, &a.GroupID, &a.OwnerUserID, &a.OwnerEventID, &a.ListingVersion,
+			&a.BuyerUserID, &a.APIKeyID, &a.AdmittedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrMarketAdmissionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	st := &service.MarketSaleAuditSettlement{}
+	var price []byte
+	var model, reason sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT e.id, e.request_id, l.model, e.standard_cost::text, e.charge_input::text, e.charged_amount::text,
+			e.owner_earning::text, e.platform_amount::text, e.platform_cut_rate::text, e.earning_zero_reason,
+			e.earning_available_at, e.charged_amount = e.owner_earning + e.platform_amount, e.created_at, e.admission_price
+		FROM usage_settlement_events e
+		LEFT JOIN LATERAL (
+			SELECT ul.model FROM usage_logs ul
+			WHERE ul.request_id = e.request_id AND ul.api_key_id = e.api_key_id
+			ORDER BY ul.id LIMIT 1
+		) l ON TRUE
+		WHERE e.admission_id = $1`, admissionID).
+		Scan(&st.EventID, &st.RequestID, &model, &st.StandardCost, &st.ChargeInput, &st.ChargedAmount,
+			&st.OwnerEarning, &st.PlatformAmount, &st.PlatformCutRate, &reason,
+			&st.EarningAvailableAt, &st.SplitConserved, &st.CreatedAt, &price)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil // admission without a settlement (pending / undetermined)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range []*string{&st.StandardCost, &st.ChargeInput, &st.ChargedAmount, &st.OwnerEarning, &st.PlatformAmount, &st.PlatformCutRate} {
+		d, err := decimal.NewFromString(*p)
+		if err != nil {
+			return nil, fmt.Errorf("parse settlement amount: %w", err)
+		}
+		*p = d.String()
+	}
+	st.Model = nullStringPtr(model)
+	st.EarningZeroReason = nullStringPtr(reason)
+	out.Settlement = st
+	if len(price) > 0 {
+		out.AdmissionPrice = &service.MarketPriceAudit{}
+		if err := json.Unmarshal(price, out.AdmissionPrice); err != nil {
+			return nil, fmt.Errorf("decode admission price: %w", err)
+		}
+	}
+	return out, nil
 }
