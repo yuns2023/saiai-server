@@ -682,6 +682,59 @@ describe('HostedView sharing market', () => {
       }
     })
 
+    it('success but the record cannot be read back while settling: success with "本地记录未清理"', async () => {
+      const { w } = await openDialog()
+      const notify = vi.spyOn((await import('@/stores/app')).useAppStore(), 'notify')
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      let calls = 0
+      let getItemSpy: { mockRestore: () => void } | null = null
+      const request = vi.fn((_n: string, fn: () => unknown) => {
+        if (++calls === 2) {
+          getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+            throw new Error('denied')
+          })
+        }
+        return Promise.resolve(fn())
+      })
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true })
+      try {
+        market.convert.mockResolvedValueOnce({ entry_id: 1, request_id: 'x', amount: '1', created_at: 'x', replayed: false })
+        await confirm(w)
+        await flushPromises()
+        expect(notify).toHaveBeenCalledWith('ok', expect.stringContaining('本地记录未清理'))
+      } finally {
+        getItemSpy?.mockRestore()
+        Reflect.deleteProperty(navigator, 'locks')
+      }
+    })
+
+    it('session switch while waiting for the settle lock: no toast, no balance refresh for the old user', async () => {
+      const { w, auth } = await openDialog()
+      const notify = vi.spyOn((await import('@/stores/app')).useAppStore(), 'notify')
+      const { useHostedStore } = await import('@/stores/hosted')
+      await w.get('[data-testid=earnings-amount]').setValue('1')
+      let calls = 0
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const request = vi.fn(async (_n: string, fn: () => unknown) => {
+        if (++calls === 2) await gate
+        return fn()
+      })
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true })
+      try {
+        market.convert.mockResolvedValueOnce({ entry_id: 1, request_id: 'x', amount: '1', created_at: 'x', replayed: false })
+        await confirm(w)
+        await flushPromises()
+        useHostedStore().reset()
+        release()
+        await flushPromises()
+        expect(notify).not.toHaveBeenCalledWith('ok', expect.anything())
+        expect(auth.refreshUser).not.toHaveBeenCalled()
+      } finally {
+        Reflect.deleteProperty(navigator, 'locks')
+      }
+    })
+
     it('the explicit clear fails: an error is shown and the record stays', async () => {
       const key = `ccyou.market.pendingConvert.${OWNER_ID}`
       localStorage.setItem(key, '{broken')

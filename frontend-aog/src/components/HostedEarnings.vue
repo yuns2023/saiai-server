@@ -188,6 +188,8 @@ async function send(current: { requestId: string; amount: string }, session: num
   }
   if (hosted.session() !== session) return
   const cleaned = await settle()
+  // Signed out or switched user while waiting for the lock: nothing for the old user.
+  if (hosted.session() !== session) return
   open.value = false
   app.notify('ok', t('earnings.converted', { amount: usdExact(res.amount) }) + (cleaned ? '' : t('earnings.notCleaned')))
   // The balance shown everywhere (also when this page was left meanwhile).

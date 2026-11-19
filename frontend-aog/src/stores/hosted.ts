@@ -330,14 +330,16 @@ export const useHostedStore = defineStore('hosted', () => {
       ok = await withConvertLock(userId, () => {
         if (pendingOwner !== userId || generation !== gen) return false
         const stored = readPendingConvert(userId)
+        // Unreadable (before or after the delete) = clean-up not confirmed.
+        if (stored.state === 'unreadable') return false
         if (stored.state !== 'valid' || stored.value.requestId !== requestId) return true
         try {
           localStorage.removeItem(pendingConvertKey(userId))
-          const after = readPendingConvert(userId)
-          return !(after.state === 'valid' && after.value.requestId === requestId)
         } catch {
           return false
         }
+        const after = readPendingConvert(userId)
+        return after.state === 'absent' || (after.state === 'valid' && after.value.requestId !== requestId)
       })
     } catch {
       ok = false
