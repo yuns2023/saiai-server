@@ -186,7 +186,7 @@ func (r *userGroupRateRepository) SyncUserGroupRates(ctx context.Context, userID
 				updated_at = EXCLUDED.updated_at
 		`, userID, now, pq.Array(upsertGroupIDs), pq.Array(upsertRates))
 		if err != nil {
-			return err
+			return translateMarketTierGuardError(err)
 		}
 	}
 
@@ -215,7 +215,7 @@ func (r *userGroupRateRepository) SyncGroupRateMultipliers(ctx context.Context, 
 		ON CONFLICT (user_id, group_id)
 		DO UPDATE SET rate_multiplier = EXCLUDED.rate_multiplier, updated_at = EXCLUDED.updated_at
 	`, groupID, now, pq.Array(userIDs), pq.Array(rates))
-	return err
+	return translateMarketTierGuardError(err)
 }
 
 // DeleteByGroupID 删除指定分组的所有用户专属倍率

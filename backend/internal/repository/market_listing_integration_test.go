@@ -371,8 +371,19 @@ func TestMarketLedgerConstraints(t *testing.T) {
 	require.Error(t, step("unknown kind", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount) VALUES (9, 'bonus', 1)`))
 	require.Error(t, step("update", `UPDATE owner_earning_entries SET note = 'x' WHERE id = $1`, accrueID), "entries are insert-only")
 	require.Error(t, step("delete", `DELETE FROM owner_earning_entries WHERE kind = 'convert' AND owner_user_id = 10`), "entries are insert-only")
-	require.Error(t, step("NaN accrue", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount, settlement_event_id, available_at)
-		VALUES (11, 'accrue', 'NaN', $1, NOW())`, eventID))
+	var freshEventID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version,
+		buyer_user_id, account_id, owner_source, self_purchase, standard_cost, charge_input, charge_source, owner_earning,
+		admission_id, charged_amount, platform_amount, platform_cut_rate)
+		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 0.8, $2, 1, 0.2, 0.2) RETURNING id`,
+		"ledger-"+uuid.NewString(), time.Now().UnixNano()+1).Scan(&freshEventID))
+	requirePQCode(t, step("NaN accrue", `INSERT INTO owner_earning_entries (owner_user_id, kind, amount, settlement_event_id, available_at)
+		VALUES (11, 'accrue', 'NaN', $1, NOW())`, freshEventID), "23514", "NaN is not a positive amount")
+	requirePQCode(t, step("NaN split", `INSERT INTO usage_settlement_events (request_id, api_key_id, category, rule_version,
+		buyer_user_id, account_id, owner_source, self_purchase, standard_cost, charge_input, charge_source, owner_earning,
+		admission_id, charged_amount, platform_amount, platform_cut_rate)
+		VALUES ($1, 1, 'shared_sale', 1, 7, 8, 'admission', FALSE, 1, 1, 'balance', 'NaN', $2, 'NaN', 'NaN', 0.2)`,
+		"ledger-"+uuid.NewString(), time.Now().UnixNano()+2), "23514", "NaN split rejected")
 	require.NoError(t, step("wallet", `INSERT INTO owner_earning_wallets (user_id) VALUES (9)`))
 	requirePQCode(t, step("wallet twice", `INSERT INTO owner_earning_wallets (user_id) VALUES (9)`), "23505", "one wallet per user")
 }
@@ -382,7 +393,7 @@ func TestMarketAdmissionStore(t *testing.T) {
 	f := newMarketFixture(t)
 	owner := f.user(t)
 	acc := f.account(t, owner)
-	in := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), AccountID: acc, GroupID: 1, OwnerUserID: owner,
+	in := &service.MarketAdmission{AttemptID: "att-" + uuid.NewString(), RequestRef: "req-" + uuid.NewString(), AccountID: acc, GroupID: 1, OwnerUserID: owner,
 		OwnerEventID: 1, ListingVersion: 1, BuyerUserID: owner + 1, APIKeyID: 3}
 	got, err := f.market.InsertMarketAdmission(ctx, in)
 	require.NoError(t, err)
@@ -393,6 +404,7 @@ func TestMarketAdmissionStore(t *testing.T) {
 	read, err := f.market.GetMarketAdmission(ctx, got.ID)
 	require.NoError(t, err)
 	require.Equal(t, in.AttemptID, read.AttemptID)
+	require.Equal(t, in.RequestRef, read.RequestRef)
 	require.Equal(t, owner, read.OwnerUserID)
 	_, err = f.market.GetMarketAdmission(ctx, -1)
 	require.ErrorIs(t, err, service.ErrMarketAdmissionNotFound)
@@ -946,4 +958,39 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	users, err := rates.ListNonPositiveRateUsers(ctx, plain)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{u1, u2}, users, "0.00001 is stored as 0.0000")
+
+	// Database guards (the backstop for concurrent admin saves).
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", plain)
+	require.Equal(t, service.ErrMarketTierFallback, translateMarketTierGuardError(err), "referrers block promotion")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = NULL, fallback_group_id_on_invalid_request = NULL WHERE id = ANY($1)", pq.Array([]int64{referrer, invalidReferrer}))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", plain)
+	require.Equal(t, service.ErrMarketTierRateOverride, translateMarketTierGuardError(err), "zero overrides block promotion")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = $2 WHERE id = $1", referrer, tier)
+	require.Equal(t, service.ErrMarketTierFallback, translateMarketTierGuardError(err))
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id_on_invalid_request = $2 WHERE id = $1", referrer, tier)
+	require.Equal(t, service.ErrMarketTierFallback, translateMarketTierGuardError(err))
+	require.ErrorIs(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{tier: &small}), service.ErrMarketTierRateOverride)
+	require.ErrorIs(t, rates.SyncGroupRateMultipliers(ctx, tier, []service.GroupRateMultiplierInput{{UserID: u1, RateMultiplier: 0}}), service.ErrMarketTierRateOverride)
+	ok := 1.5
+	require.NoError(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{tier: &ok}))
+
+	// Concurrent promotion vs zero override: the override waits for the
+	// promotion's row lock, then sees the tier and fails.
+	fresh := f.group(t, false)
+	promote, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = promote.Rollback() }()
+	_, err = promote.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", fresh)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- rates.SyncUserGroupRates(ctx, u2, map[int64]*float64{fresh: &zero}) }()
+	waitForLockWait(t)
+	require.NoError(t, promote.Commit())
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, service.ErrMarketTierRateOverride)
+	case <-time.After(10 * time.Second):
+		t.Fatal("override save did not finish")
+	}
 }

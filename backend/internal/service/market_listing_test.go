@@ -187,6 +187,8 @@ func TestMarketAccountIneligibleReason(t *testing.T) {
 }
 
 func TestValidateMarketProtectionForAccount(t *testing.T) {
+	unlimited := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Concurrency: 0, Extra: map[string]any{}}
+	requireMarketReason(t, validateMarketProtectionForAccount(unlimited, MarketProtectionParams{Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}), "MARKET_INVALID_PARAMS")
 	acc := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Concurrency: 3,
 		Extra: map[string]any{"claude_oauth_carpool_device_limit": 5, "claude_oauth_carpool_maintenance_admissions_per_cycle": 2}}
 	p := MarketProtectionParams{ReservedConcurrency: 2, ReservedDevices: 4, ReservedAdmissions: 2, Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}
@@ -398,6 +400,50 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	requireMarketReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE")
 	_, err = svc.OwnerSet(ctx, 7, 11, 0, false)
 	require.NoError(t, err)
+}
+
+func TestWithoutMarketMembershipFiltersStaleBuckets(t *testing.T) {
+	tier, other := int64(5), int64(6)
+	listedOnly := Account{ID: 1, MarketGroupIDs: []int64{tier}}
+	listedWithAdmin := Account{ID: 2, MarketGroupIDs: []int64{tier}, AccountGroups: []AccountGroup{{GroupID: other}}, GroupIDs: []int64{other}}
+	plain := Account{ID: 3}
+	ids := func(accounts []Account) []int64 {
+		var out []int64
+		for _, a := range accounts {
+			out = append(out, a.ID)
+		}
+		return out
+	}
+	all := []Account{listedOnly, listedWithAdmin, plain}
+	require.Equal(t, []int64{2, 3}, ids(withoutMarketMembership(all, nil)), "market-only accounts leave the ungrouped pool")
+	require.Equal(t, []int64{3}, ids(withoutMarketMembership(all, &tier)), "the tier never dispatches market rows")
+	require.Equal(t, []int64{1, 2, 3}, ids(withoutMarketMembership(all, &other)))
+	require.Len(t, all, 3, "input untouched")
+}
+
+func TestResolveGatewayGroupNeverEntersMarketTier(t *testing.T) {
+	groups, _ := newMarketTierRepos()
+	tier := int64(1)
+	// Group 4 (stale config) falls back into the tier: refused at runtime.
+	groups.groups[4] = &Group{ID: 4, Platform: PlatformAnthropic, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1, Status: StatusActive,
+		ClaudeCodeOnly: true, FallbackGroupID: &tier}
+	svc := &GatewayService{groupRepo: groups}
+	id := int64(4)
+	_, _, err := svc.resolveGatewayGroup(context.Background(), &id)
+	require.ErrorIs(t, err, ErrClaudeCodeOnly)
+	plain := int64(2)
+	groups.groups[4].FallbackGroupID = &plain
+	g, _, err := svc.resolveGatewayGroup(context.Background(), &id)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), g.ID)
+}
+
+func TestMarketSettingUpdatesOnlyProvidedKeys(t *testing.T) {
+	s := ParseMarketSettings(nil)
+	s.Enabled = true
+	updates := map[string]string{}
+	marketSettingUpdates(&SystemSettings{Market: &s, MarketFields: []string{SettingKeyMarketEarningFreezeDays}}, updates)
+	require.Equal(t, map[string]string{SettingKeyMarketEarningFreezeDays: "7"}, updates, "the stale switch is not written back")
 }
 
 func TestIsAccountInGroupIgnoresMarketMemberships(t *testing.T) {

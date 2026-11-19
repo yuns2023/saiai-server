@@ -190,6 +190,13 @@ func TestResolveMarketSettings(t *testing.T) {
 
 	require.False(t, (&marketSettingsRequest{}).present(), "unrelated saves do not write the market block")
 	require.True(t, (&marketSettingsRequest{MarketDefaultCap7dPct: i(50)}).present())
+	require.Equal(t, []string{service.SettingKeyMarketDefaultCap7dPct}, (&marketSettingsRequest{MarketDefaultCap7dPct: i(50)}).providedKeys())
+	// Audit: an unrelated save (no market block written) reports no market change.
+	enabled := service.ParseMarketSettings(map[string]string{service.SettingKeyMarketEnabled: "true"})
+	require.Empty(t, diffMarketSettings(&service.SystemSettings{Market: &enabled}, &service.SystemSettings{}))
+	off := enabled
+	off.Enabled = false
+	require.Equal(t, []string{"market_enabled"}, diffMarketSettings(&service.SystemSettings{Market: &enabled}, &service.SystemSettings{Market: &off}))
 
 	// The embedded request block decodes from the flat settings body.
 	var req UpdateSettingsRequest

@@ -2,6 +2,7 @@ package service
 
 import (
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -133,6 +134,7 @@ func marketSettingUpdates(settings *SystemSettings, updates map[string]string) {
 	if settings.Market == nil {
 		return
 	}
+	defer restrictMarketUpdates(settings.MarketFields, updates)
 	in := *settings.Market
 	stored := map[string]string{
 		SettingKeyMarketEnabled:                    strconv.FormatBool(in.Enabled),
@@ -157,4 +159,18 @@ func marketSettingUpdates(settings *SystemSettings, updates map[string]string) {
 	updates[SettingKeyMarketDefaultCap5hPct] = strconv.Itoa(parsed.DefaultProtection.Cap5hPct)
 	updates[SettingKeyMarketDefaultCap7dPct] = strconv.Itoa(parsed.DefaultProtection.Cap7dPct)
 	updates[SettingKeyMarketDefaultSampleMaxAgeMinutes] = strconv.Itoa(parsed.DefaultProtection.SampleMaxAgeMinutes)
+}
+
+// restrictMarketUpdates keeps only the market keys the caller provided
+// (MarketFields; nil = every key), so a PUT that changes one market field
+// cannot write back a stale value of another (e.g. the switch).
+func restrictMarketUpdates(fields []string, updates map[string]string) {
+	if fields == nil {
+		return
+	}
+	for _, key := range MarketSettingKeys() {
+		if !slices.Contains(fields, key) {
+			delete(updates, key)
+		}
+	}
 }

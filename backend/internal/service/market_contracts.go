@@ -19,7 +19,12 @@ import (
 type MarketAdmission struct {
 	ID int64
 	// AttemptID is server-generated per candidate attempt (unique).
-	AttemptID   string
+	AttemptID string
+	// RequestRef binds the admission to one client request: the
+	// server-generated request id set before any upstream call
+	// (ctxkey.ClientRequestID). Settlement compares it with the request
+	// being billed.
+	RequestRef  string
 	AccountID   int64
 	GroupID     int64
 	OwnerUserID int64
@@ -54,18 +59,20 @@ type MarketAdmissionRepository interface {
 var ErrMarketAdmissionNotFound = errors.New("market admission not found")
 
 // MarketSettlementProof is frozen on the successful attempt and carried in
-// UsageSettlementInput.Market. When MustSettleAsMarket is set, the billing
-// transaction settles the sale as shared_sale against AdmissionID; a missing
-// or mismatching proof is an integrity error (whole charge rolls back). It is
-// NOT part of the billing fingerprint.
+// UsageSettlementInput.Market; UsageSettlementInput.MarketPath (outside the
+// proof) says the sale must settle as shared_sale. MarketPath with a missing
+// proof, or a proof whose fields differ from the stored admission (including
+// RequestRef = the server-generated request id of the request being
+// settled), is an integrity error: the whole charge rolls back. Not part of
+// the billing fingerprint.
 type MarketSettlementProof struct {
-	AdmissionID        int64
-	AttemptID          string
-	AccountID          int64
-	GroupID            int64
-	BuyerUserID        int64
-	APIKeyID           int64
-	MustSettleAsMarket bool
+	AdmissionID int64
+	AttemptID   string
+	RequestRef  string
+	AccountID   int64
+	GroupID     int64
+	BuyerUserID int64
+	APIKeyID    int64
 }
 
 // Settlement category and zero-earning reasons of shared_sale events

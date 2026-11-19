@@ -28,6 +28,8 @@ type SystemSettings struct {
 	// Sharing market (setting_market.go). nil = not loaded; UpdateSettings
 	// then leaves the stored values alone.
 	Market *MarketSettings
+	// MarketFields: the market setting keys to write (nil = all of them).
+	MarketFields []string
 
 	SMTPHost               string
 	SMTPPort               int

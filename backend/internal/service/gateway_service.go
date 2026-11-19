@@ -15,6 +15,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3105,8 +3106,37 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 	// candidates there, whatever the source (snapshot, stale bucket, DB).
 	if s.isRunModeSimple() {
 		accounts = withoutSelfOnboarded(accounts)
+	} else {
+		// A snapshot bucket can lag a market listing (rebuilds are
+		// throttled); the cached account copy already carries it.
+		accounts = withoutMarketMembership(accounts, groupID)
 	}
 	return accounts, useMixed, err
+}
+
+// withoutMarketMembership drops candidates that reach this group context
+// only through a market listing (P3a part 1: market memberships are never
+// dispatchable; a market-only account is not ungrouped). The market
+// selection part replaces this with the admission classification.
+func withoutMarketMembership(accounts []Account, groupID *int64) []Account {
+	out := accounts[:0:0]
+	for i := range accounts {
+		if marketMembershipOnly(&accounts[i], groupID) {
+			continue
+		}
+		out = append(out, accounts[i])
+	}
+	return out
+}
+
+func marketMembershipOnly(account *Account, groupID *int64) bool {
+	if account == nil || len(account.MarketGroupIDs) == 0 {
+		return false
+	}
+	if groupID == nil {
+		return len(account.AccountGroups) == 0
+	}
+	return slices.Contains(account.MarketGroupIDs, *groupID)
 }
 
 func (s *GatewayService) isRunModeSimple() bool {

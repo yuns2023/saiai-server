@@ -28,6 +28,24 @@ func isDispatchableAccountGroupSource(source string) bool {
 	return source == service.AccountGroupSourceAdmin
 }
 
+// translateMarketTierGuardError maps the migration 134 tier guards (CHECK
+// and triggers) to the service errors; other errors pass through.
+func translateMarketTierGuardError(err error) error {
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) || pqErr.Code != "23514" {
+		return err
+	}
+	switch pqErr.Constraint {
+	case "market_tier_fallback":
+		return service.ErrMarketTierFallback
+	case "market_tier_rate_override":
+		return service.ErrMarketTierRateOverride
+	case "groups_market_tier_check":
+		return service.ErrMarketTierInvalid
+	}
+	return err
+}
+
 type marketListingRepository struct {
 	db       *sql.DB
 	accounts *accountRepository
@@ -786,7 +804,7 @@ func equalOptionalInt64(a, b *int64) bool {
 
 // --- market admissions (contract for the selection part) ---
 
-const marketAdmissionColumns = `id, attempt_id, account_id, group_id, owner_user_id, owner_event_id,
+const marketAdmissionColumns = `id, attempt_id, request_ref, account_id, group_id, owner_user_id, owner_event_id,
 	listing_version, buyer_user_id, api_key_id, admitted_at, created_at`
 
 // insertMarketAdmissionTx inserts one admission (caller's transaction or the
@@ -797,11 +815,11 @@ func insertMarketAdmissionTx(ctx context.Context, q sqlQueryer, in *service.Mark
 	}
 	out := *in
 	err := scanSingleRow(ctx, q, `
-		INSERT INTO market_admissions (attempt_id, account_id, group_id, owner_user_id, owner_event_id,
+		INSERT INTO market_admissions (attempt_id, request_ref, account_id, group_id, owner_user_id, owner_event_id,
 			listing_version, buyer_user_id, api_key_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, admitted_at, created_at`,
-		[]any{in.AttemptID, in.AccountID, in.GroupID, in.OwnerUserID, in.OwnerEventID,
+		[]any{in.AttemptID, in.RequestRef, in.AccountID, in.GroupID, in.OwnerUserID, in.OwnerEventID,
 			in.ListingVersion, in.BuyerUserID, in.APIKeyID},
 		&out.ID, &out.AdmittedAt, &out.CreatedAt)
 	if err != nil {
@@ -830,7 +848,7 @@ func (r *marketListingRepository) getMarketAdmission(ctx context.Context, where 
 	var a service.MarketAdmission
 	var admittedAt, createdAt time.Time
 	err := scanSingleRow(ctx, r.db, "SELECT "+marketAdmissionColumns+" FROM market_admissions WHERE "+where, []any{arg},
-		&a.ID, &a.AttemptID, &a.AccountID, &a.GroupID, &a.OwnerUserID, &a.OwnerEventID,
+		&a.ID, &a.AttemptID, &a.RequestRef, &a.AccountID, &a.GroupID, &a.OwnerUserID, &a.OwnerEventID,
 		&a.ListingVersion, &a.BuyerUserID, &a.APIKeyID, &admittedAt, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrMarketAdmissionNotFound

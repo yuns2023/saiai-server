@@ -865,6 +865,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	// an unrelated settings save (stale read) cannot flip the switch back.
 	if req.marketSettingsRequest.present() {
 		settings.Market = &market
+		settings.MarketFields = req.marketSettingsRequest.providedKeys()
 	}
 
 	if h.pricingService != nil && req.PricingModelAliases != nil {

@@ -73,6 +73,82 @@ BEGIN
     END IF;
 END $$;
 
+-- Cross-row tier rules, enforced under row locks so concurrent admin saves
+-- cannot race each other (the service checks the same rules first for clear
+-- errors):
+--   * a group's claude_code_only / invalid-request fallback may not point
+--     into a market tier (the referrer share-locks the target row, which
+--     conflicts with the target's own UPDATE);
+--   * a market tier has no claude_code_only fallback, no live group falls
+--     back into it, and no user rate override on it is <= 0 / NaN;
+--   * a user rate override on a market tier is > 0 (share-locks the group).
+CREATE OR REPLACE FUNCTION market_tier_group_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    target_tier BOOLEAN;
+BEGIN
+    IF NEW.deleted_at IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.fallback_group_id IS NOT NULL THEN
+        SELECT market_tier INTO target_tier FROM groups
+         WHERE id = NEW.fallback_group_id AND id <> NEW.id FOR SHARE;
+        IF COALESCE(target_tier, FALSE) THEN
+            RAISE EXCEPTION 'fallback group % is a market tier', NEW.fallback_group_id
+                USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_fallback';
+        END IF;
+    END IF;
+    IF NEW.fallback_group_id_on_invalid_request IS NOT NULL THEN
+        SELECT market_tier INTO target_tier FROM groups
+         WHERE id = NEW.fallback_group_id_on_invalid_request AND id <> NEW.id FOR SHARE;
+        IF COALESCE(target_tier, FALSE) THEN
+            RAISE EXCEPTION 'invalid-request fallback group % is a market tier', NEW.fallback_group_id_on_invalid_request
+                USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_fallback';
+        END IF;
+    END IF;
+    IF NEW.market_tier THEN
+        IF NEW.fallback_group_id IS NOT NULL OR EXISTS (
+            SELECT 1 FROM groups g
+             WHERE g.deleted_at IS NULL AND g.id <> NEW.id
+               AND (g.fallback_group_id = NEW.id OR g.fallback_group_id_on_invalid_request = NEW.id)
+        ) THEN
+            RAISE EXCEPTION 'market tier % is part of a fallback chain', NEW.id
+                USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_fallback';
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM user_group_rate_multipliers r
+             WHERE r.group_id = NEW.id AND (r.rate_multiplier <= 0 OR r.rate_multiplier = 'NaN')
+        ) THEN
+            RAISE EXCEPTION 'market tier % has a user rate override <= 0', NEW.id
+                USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_rate_override';
+        END IF;
+    END IF;
+    RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS groups_market_tier_guard ON groups;
+CREATE TRIGGER groups_market_tier_guard
+    BEFORE INSERT OR UPDATE ON groups
+    FOR EACH ROW EXECUTE FUNCTION market_tier_group_guard();
+
+CREATE OR REPLACE FUNCTION market_tier_rate_guard() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    tier BOOLEAN;
+BEGIN
+    SELECT market_tier INTO tier FROM groups WHERE id = NEW.group_id FOR SHARE;
+    IF COALESCE(tier, FALSE) AND NOT (NEW.rate_multiplier > 0 AND NEW.rate_multiplier <> 'NaN') THEN
+        RAISE EXCEPTION 'user rate override on market tier % must be > 0', NEW.group_id
+            USING ERRCODE = 'check_violation', CONSTRAINT = 'market_tier_rate_override';
+    END IF;
+    RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS user_group_rate_multipliers_market_tier_guard ON user_group_rate_multipliers;
+CREATE TRIGGER user_group_rate_multipliers_market_tier_guard
+    BEFORE INSERT OR UPDATE ON user_group_rate_multipliers
+    FOR EACH ROW EXECUTE FUNCTION market_tier_rate_guard();
+
 CREATE TABLE IF NOT EXISTS account_market_listings (
     account_id             BIGINT PRIMARY KEY,
     owner_user_id          BIGINT NOT NULL,
@@ -148,6 +224,7 @@ CREATE TABLE IF NOT EXISTS account_market_listing_events (
 CREATE TABLE IF NOT EXISTS market_admissions (
     id              BIGSERIAL PRIMARY KEY,
     attempt_id      TEXT NOT NULL,
+    request_ref     TEXT NOT NULL,
     account_id      BIGINT NOT NULL,
     group_id        BIGINT NOT NULL,
     owner_user_id   BIGINT NOT NULL,
@@ -159,6 +236,7 @@ CREATE TABLE IF NOT EXISTS market_admissions (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT market_admissions_attempt_key UNIQUE (attempt_id),
     CONSTRAINT market_admissions_attempt_check CHECK (attempt_id <> '' AND length(attempt_id) <= 128),
+    CONSTRAINT market_admissions_request_ref_check CHECK (request_ref <> '' AND length(request_ref) <= 128),
     CONSTRAINT market_admissions_refs_check CHECK (
         account_id > 0 AND group_id > 0 AND owner_user_id > 0 AND owner_event_id > 0
         AND listing_version >= 1 AND buyer_user_id > 0 AND api_key_id > 0

@@ -21,10 +21,28 @@ type marketSettingsRequest struct {
 }
 
 func (r *marketSettingsRequest) present() bool {
-	return r.MarketEnabled != nil || r.MarketPlatformCutRate != nil || r.MarketEarningFreezeDays != nil ||
-		r.MarketMinConvertUSD != nil || r.MarketDefaultReservedConcurrency != nil || r.MarketDefaultReservedDevices != nil ||
-		r.MarketDefaultReservedAdmissions != nil || r.MarketDefaultCap5hPct != nil || r.MarketDefaultCap7dPct != nil ||
-		r.MarketDefaultSampleMaxAgeMinutes != nil
+	return len(r.providedKeys()) > 0
+}
+
+// providedKeys lists the setting keys present in the request.
+func (r *marketSettingsRequest) providedKeys() []string {
+	var keys []string
+	add := func(set bool, key string) {
+		if set {
+			keys = append(keys, key)
+		}
+	}
+	add(r.MarketEnabled != nil, service.SettingKeyMarketEnabled)
+	add(r.MarketPlatformCutRate != nil, service.SettingKeyMarketPlatformCutRate)
+	add(r.MarketEarningFreezeDays != nil, service.SettingKeyMarketEarningFreezeDays)
+	add(r.MarketMinConvertUSD != nil, service.SettingKeyMarketMinConvertUSD)
+	add(r.MarketDefaultReservedConcurrency != nil, service.SettingKeyMarketDefaultReservedConcurrency)
+	add(r.MarketDefaultReservedDevices != nil, service.SettingKeyMarketDefaultReservedDevices)
+	add(r.MarketDefaultReservedAdmissions != nil, service.SettingKeyMarketDefaultReservedAdmissions)
+	add(r.MarketDefaultCap5hPct != nil, service.SettingKeyMarketDefaultCap5hPct)
+	add(r.MarketDefaultCap7dPct != nil, service.SettingKeyMarketDefaultCap7dPct)
+	add(r.MarketDefaultSampleMaxAgeMinutes != nil, service.SettingKeyMarketDefaultSampleMaxAgeMinutes)
+	return keys
 }
 
 // resolveMarketSettings merges the request into the stored values and
@@ -80,13 +98,11 @@ func resolveMarketSettings(req *marketSettingsRequest, prev *service.SystemSetti
 }
 
 func diffMarketSettings(before, after *service.SystemSettings) []string {
-	b, a := service.ParseMarketSettings(nil), service.ParseMarketSettings(nil)
-	if before != nil && before.Market != nil {
-		b = *before.Market
+	// after is the written object: no market block = nothing written.
+	if before == nil || before.Market == nil || after == nil || after.Market == nil {
+		return nil
 	}
-	if after != nil && after.Market != nil {
-		a = *after.Market
-	}
+	b, a := *before.Market, *after.Market
 	var changed []string
 	if b.Enabled != a.Enabled {
 		changed = append(changed, "market_enabled")

@@ -142,6 +142,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 	builder = builder.SetInputModerationCategories(groupIn.InputModerationCategories)
 
 	created, err := builder.Save(ctx)
+	err = translateMarketTierGuardError(err)
 	if err == nil {
 		groupIn.ID = created.ID
 		groupIn.CreatedAt = created.CreatedAt
@@ -328,6 +329,9 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 
 	updated, err := builder.Save(ctx)
 	if err != nil {
+		if mapped := translateMarketTierGuardError(err); mapped != err {
+			return mapped
+		}
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	if wasMarketTier && !groupIn.MarketTier {

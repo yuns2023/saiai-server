@@ -260,7 +260,11 @@ func validateMarketProtectionForAccount(a *Account, p MarketProtectionParams) er
 	if !p.ValidRange() {
 		return ErrMarketInvalidParams
 	}
-	if a.Concurrency > 0 && p.ReservedConcurrency > a.Concurrency-1 {
+	if a.Concurrency <= 0 {
+		// 0 means "no limit" for slots; a buyer cap C − R needs a finite C.
+		return infraerrors.BadRequest("MARKET_INVALID_PARAMS", "the account needs a finite concurrency to be shared")
+	}
+	if p.ReservedConcurrency > a.Concurrency-1 {
 		return infraerrors.BadRequest("MARKET_INVALID_PARAMS", "reserved_concurrency must be at most the account concurrency - 1")
 	}
 	if limit := a.GetClaudeOAuthCarpoolDeviceLimit(); limit > 0 && p.ReservedDevices > limit-1 {
