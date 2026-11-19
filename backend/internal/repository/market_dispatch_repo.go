@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -49,149 +48,160 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 	return state, nil
 }
 
-// AdmitMarketCandidate runs one candidate's final admission in a short
-// transaction: share-lock the listing row (serialises with every listing
-// lifecycle change, including owner clear / pause / withdraw / delete, which
-// all rewrite it under the account lock), read the authoritative facts in one
-// statement, let evaluate decide, and for the buyer path insert the
-// immutable admission (admitted_at = clock_timestamp() after the lock).
+// AdmitMarketCandidate runs one candidate's final admission.
+//
+// Buyer path: the admission contract AdmitMarket (REPEATABLE READ, listing
+// row share-locked, one snapshot, check then insert, one rerun on 40001);
+// evaluate runs inside its check (pure, may run twice). The market switch is
+// read just before (it only gates new admissions).
+//
+// Owner / platform paths: the same reads in a read-only REPEATABLE READ
+// transaction, plus the owner's hosted_owner_groups mapping and the group's
+// hosted/exclusive flags; nothing is written.
 func (r *marketListingRepository) AdmitMarketCandidate(ctx context.Context, req *service.MarketAdmissionRequest, evaluate func(*service.MarketAuthoritativeFacts) string) (*service.MarketAdmissionVerdict, error) {
 	if req == nil || evaluate == nil {
 		return nil, errors.New("invalid market admission request")
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	if req.Class != service.MarketClassBuyer {
+		return r.checkMarketCandidate(ctx, req, evaluate)
+	}
+	enabled, err := r.marketEnabled(ctx, r.db)
 	if err != nil {
 		return nil, err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	facts := &service.MarketAuthoritativeFacts{}
-	listing, err := queryMarketListing(ctx, tx, "SELECT "+marketListingColumns+
-		" FROM account_market_listings WHERE account_id = $1 FOR SHARE", req.AccountID)
-	if err != nil {
-		return nil, err
-	}
-	facts.Listing = listing
-
 	var (
-		found                                   bool
-		deleted, schedulable, paused, withdraw  sql.NullBool
-		status, platform, accountType           sql.NullString
-		owner, latestEventID, latestEventOwner  sql.NullInt64
-		hostedGroupID                           sql.NullInt64
-		concurrency                             sql.NullInt64
-		extra                                   []byte
-		membership                              sql.NullString
-		groupFound                              bool
-		tier, groupDeleted, hosted, exclusive   sql.NullBool
-		groupStatus, groupPlatform, ownerStatus sql.NullString
-		ownerDeleted                            sql.NullBool
-		marketEnabled                           sql.NullString
+		facts  *service.MarketAuthoritativeFacts
+		reason string
+	)
+	admission, err := r.AdmitMarket(ctx, &service.MarketAdmission{
+		AttemptID:   req.AttemptID,
+		RequestRef:  req.RequestRef,
+		AccountID:   req.AccountID,
+		GroupID:     req.GroupID,
+		BuyerUserID: req.AuthUserID,
+		APIKeyID:    req.APIKeyID,
+	}, func(state *service.MarketAdmissionState, in *service.MarketAdmission) error {
+		facts = marketFactsFromState(state, enabled)
+		reason = evaluate(facts)
+		if reason != "" {
+			return errMarketCandidateRefused
+		}
+		in.OwnerUserID = *state.Account.OwnerUserID
+		in.OwnerEventID = state.OwnerEventID
+		in.ListingVersion = state.Listing.Version
+		return nil
+	})
+	if errors.Is(err, errMarketCandidateRefused) {
+		return &service.MarketAdmissionVerdict{Reason: reason, Facts: facts}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &service.MarketAdmissionVerdict{Admitted: true, Admission: admission, Facts: facts}, nil
+}
+
+var errMarketCandidateRefused = errors.New("market candidate refused")
+
+func marketFactsFromState(state *service.MarketAdmissionState, enabled bool) *service.MarketAuthoritativeFacts {
+	f := &service.MarketAuthoritativeFacts{
+		AccountFound:       state.Account != nil,
+		Account:            state.Account,
+		GroupFound:         state.GroupFound,
+		GroupMarketTier:    state.GroupMarketTier,
+		GroupActive:        state.GroupStatus == service.StatusActive,
+		GroupPlatform:      state.GroupPlatform,
+		OwnerUserStatus:    state.OwnerUserStatus,
+		LatestOwnerEventID: state.OwnerEventID,
+		MarketEnabled:      enabled,
+		Listing:            state.Listing,
+	}
+	if state.OwnerEventUserID != nil {
+		v := *state.OwnerEventUserID
+		f.LatestOwnerEventOwner = &v
+	}
+	if state.Account != nil {
+		f.OwnerPaused = state.Account.OwnerPausedAt != nil
+		f.OwnerWithdrawRequested = state.Account.OwnerWithdrawRequestedAt != nil
+	}
+	switch {
+	case state.MarketMember:
+		f.MembershipSource = service.AccountGroupSourceMarket
+	case state.AdminMember:
+		f.MembershipSource = service.AccountGroupSourceAdmin
+	}
+	return f
+}
+
+func (r *marketListingRepository) marketEnabled(ctx context.Context, q sqlQueryer) (bool, error) {
+	var value sql.NullString
+	if err := scanSingleRow(ctx, q, "SELECT value FROM settings WHERE key = $1",
+		[]any{service.SettingKeyMarketEnabled}, &value); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	return value.Valid && value.String == "true", nil
+}
+
+// checkMarketCandidate is the read-only authoritative check (owner and
+// platform paths), one REPEATABLE READ snapshot.
+func (r *marketListingRepository) checkMarketCandidate(ctx context.Context, req *service.MarketAdmissionRequest, evaluate func(*service.MarketAuthoritativeFacts) string) (*service.MarketAdmissionVerdict, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	f := &service.MarketAuthoritativeFacts{}
+	if f.Listing, err = queryMarketListing(ctx, tx, "SELECT "+marketListingColumns+
+		" FROM account_market_listings WHERE account_id = $1", req.AccountID); err != nil {
+		return nil, err
+	}
+	account, err := scanMarketAccount(ctx, tx,
+		"SELECT "+marketAccountColumns+" FROM accounts WHERE id = $1 AND deleted_at IS NULL", req.AccountID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return nil, err
+	default:
+		f.AccountFound, f.Account = true, account
+		f.OwnerPaused = account.OwnerPausedAt != nil
+		f.OwnerWithdrawRequested = account.OwnerWithdrawRequestedAt != nil
+	}
+	var (
+		membership, groupStatus, ownerStatus sql.NullString
+		hostedGroup                          sql.NullInt64
 	)
 	err = scanSingleRow(ctx, tx, `
-		SELECT a.id IS NOT NULL, a.deleted_at IS NOT NULL, a.status, a.schedulable, a.owner_user_id, a.concurrency,
-			a.platform, a.type, a.extra, a.owner_paused_at IS NOT NULL, a.owner_withdraw_requested_at IS NOT NULL,
-			(SELECT ag.source FROM account_groups ag WHERE ag.account_id = $1 AND ag.group_id = $2),
-			g.id IS NOT NULL, g.market_tier, g.deleted_at IS NOT NULL, g.status, g.platform, g.hosted_usage_enabled, g.is_exclusive,
-			ou.status, ou.deleted_at IS NOT NULL,
-			ev.id, ev.new_owner_user_id,
-			(SELECT h.group_id FROM hosted_owner_groups h WHERE h.user_id = $3),
-			(SELECT s.value FROM settings s WHERE s.key = $4)
-		FROM (SELECT 1) one
-		LEFT JOIN accounts a ON a.id = $1
-		LEFT JOIN groups g ON g.id = $2
-		LEFT JOIN users ou ON ou.id = a.owner_user_id
-		LEFT JOIN LATERAL (
-			SELECT e.id, e.new_owner_user_id FROM account_owner_events e
-			WHERE e.account_id = $1 ORDER BY e.id DESC LIMIT 1
-		) ev ON TRUE`,
-		[]any{req.AccountID, req.GroupID, req.AuthUserID, service.SettingKeyMarketEnabled},
-		&found, &deleted, &status, &schedulable, &owner, &concurrency,
-		&platform, &accountType, &extra, &paused, &withdraw,
-		&membership,
-		&groupFound, &tier, &groupDeleted, &groupStatus, &groupPlatform, &hosted, &exclusive,
-		&ownerStatus, &ownerDeleted,
-		&latestEventID, &latestEventOwner,
-		&hostedGroupID,
-		&marketEnabled)
-	if err != nil {
+		SELECT g.market_tier, g.status, g.platform, g.hosted_usage_enabled, g.is_exclusive
+		FROM groups g WHERE g.id = $1 AND g.deleted_at IS NULL`, []any{req.GroupID},
+		&f.GroupMarketTier, &groupStatus, &f.GroupPlatform, &f.GroupHosted, &f.GroupExclusive)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return nil, err
+	default:
+		f.GroupFound = true
+		f.GroupActive = groupStatus.String == service.StatusActive
+	}
+	if err := scanSingleRow(ctx, tx, `
+		SELECT (SELECT source FROM account_groups WHERE account_id = $1 AND group_id = $2),
+			(SELECT group_id FROM hosted_owner_groups WHERE user_id = $3)`,
+		[]any{req.AccountID, req.GroupID, req.AuthUserID}, &membership, &hostedGroup); err != nil {
 		return nil, err
 	}
-	facts.AccountFound = found && !deleted.Bool
-	if facts.AccountFound {
-		acc := &service.Account{
-			ID:          req.AccountID,
-			Platform:    platform.String,
-			Type:        accountType.String,
-			Status:      status.String,
-			Schedulable: schedulable.Bool,
-			Concurrency: int(concurrency.Int64),
-		}
-		if len(extra) > 0 {
-			if err := json.Unmarshal(extra, &acc.Extra); err != nil {
-				return nil, err
-			}
-		}
-		if owner.Valid {
-			v := owner.Int64
-			acc.OwnerUserID = &v
-		}
-		facts.Account = acc
-		facts.OwnerPaused = paused.Bool
-		facts.OwnerWithdrawRequested = withdraw.Bool
-	}
-	facts.MembershipSource = membership.String
-	facts.GroupFound = groupFound && !groupDeleted.Bool
-	facts.GroupMarketTier = tier.Bool
-	facts.GroupActive = groupStatus.String == service.StatusActive
-	facts.GroupPlatform = groupPlatform.String
-	facts.GroupHosted = hosted.Bool
-	facts.GroupExclusive = exclusive.Bool
-	if ownerStatus.Valid && !ownerDeleted.Bool {
-		facts.OwnerUserStatus = ownerStatus.String
-	}
-	if latestEventID.Valid {
-		facts.LatestOwnerEventID = latestEventID.Int64
-		if latestEventOwner.Valid {
-			v := latestEventOwner.Int64
-			facts.LatestOwnerEventOwner = &v
-		}
-	}
-	facts.HostedOwnerGroupID = hostedGroupID.Int64
-	facts.MarketEnabled = marketEnabled.Valid && marketEnabled.String == "true"
-
-	verdict := &service.MarketAdmissionVerdict{Facts: facts}
-	if reason := evaluate(facts); reason != "" {
-		verdict.Reason = reason
-		return verdict, nil
-	}
-	if req.Class == service.MarketClassBuyer {
-		admission, err := insertMarketAdmissionTx(ctx, tx, &service.MarketAdmission{
-			AttemptID:      req.AttemptID,
-			RequestRef:     req.RequestRef,
-			AccountID:      req.AccountID,
-			GroupID:        req.GroupID,
-			OwnerUserID:    *facts.Account.OwnerUserID,
-			OwnerEventID:   facts.LatestOwnerEventID,
-			ListingVersion: facts.Listing.Version,
-			BuyerUserID:    req.AuthUserID,
-			APIKeyID:       req.APIKeyID,
-		})
-		if err != nil {
+	f.MembershipSource = membership.String
+	f.HostedOwnerGroupID = hostedGroup.Int64
+	if f.Account != nil && f.Account.OwnerUserID != nil {
+		if err := scanSingleRow(ctx, tx, "SELECT status FROM users WHERE id = $1 AND deleted_at IS NULL",
+			[]any{*f.Account.OwnerUserID}, &ownerStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		verdict.Admission = admission
+		f.OwnerUserStatus = ownerStatus.String
 	}
-	if err := tx.Commit(); err != nil {
+	if f.MarketEnabled, err = r.marketEnabled(ctx, tx); err != nil {
 		return nil, err
 	}
-	committed = true
-	verdict.Admitted = true
+	verdict := &service.MarketAdmissionVerdict{Facts: f, Reason: evaluate(f)}
+	verdict.Admitted = verdict.Reason == ""
 	return verdict, nil
 }
 

@@ -9663,6 +9663,8 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.SmartSwitchPaygCost = cmd.BalanceCost
 	}
 	cmd.Settlement = buildUsageSettlementInput(cmd, usageLog, p)
+	// Market buyer sale: frozen from the served attempt (BE3 settles it).
+	cmd.MarketPath = p.MarketPath
 	cmd.Normalize()
 	return cmd
 }
@@ -9698,7 +9700,6 @@ func buildUsageSettlementInput(cmd *UsageBillingCommand, usageLog *UsageLog, p *
 		in.ChargeSource = SettlementChargeSourceBalance
 	}
 	in.FreeGroup = group.HostedChargeFree()
-	in.MarketPath = p.MarketPath
 	if p.Market != nil {
 		proof := *p.Market
 		in.Market = &proof

@@ -867,16 +867,19 @@ func TestMarketProofReachesSettlementInputOnlyWhenSet(t *testing.T) {
 	gid := mktTier
 	key := &APIKey{ID: mktKey, GroupID: &gid, Group: mktGroups()[mktTier]}
 	p := &postUsageBillingParams{Cost: &CostBreakdown{TotalCost: 1, ActualCost: 1.2}, APIKey: key, User: &User{ID: mktBuyer}, Account: &Account{ID: 1}}
-	in := buildUsageSettlementInput(&UsageBillingCommand{BalanceCost: 1.2}, nil, p)
-	require.False(t, in.MarketPath)
-	require.Nil(t, in.Market)
+	cmd := buildUsageBillingCommand("req-1", nil, p)
+	require.False(t, cmd.MarketPath)
+	require.Nil(t, cmd.Settlement.Market)
+	require.Nil(t, cmd.Settlement.MarketPrice)
 
 	proof := &MarketSettlementProof{AdmissionID: 5, AttemptID: "a", RequestRef: "r", AccountID: 1, GroupID: mktTier, BuyerUserID: mktBuyer, APIKeyID: mktKey}
-	p.MarketPath, p.Market = true, proof
-	in = buildUsageSettlementInput(&UsageBillingCommand{BalanceCost: 1.2}, nil, p)
-	require.True(t, in.MarketPath)
-	require.Equal(t, *proof, *in.Market)
-	require.NotSame(t, proof, in.Market)
+	price := &MarketPriceSnapshot{Model: "claude-fable-5", PriceVersion: "v1", GroupRate: 1.2, ModelRate: 1, UserDiscount: 1}
+	p.MarketPath, p.Market, p.MarketPrice = true, proof, price
+	cmd = buildUsageBillingCommand("req-1", nil, p)
+	require.True(t, cmd.MarketPath, "the market flag is on the top-level command")
+	require.Equal(t, *proof, *cmd.Settlement.Market)
+	require.NotSame(t, proof, cmd.Settlement.Market)
+	require.Equal(t, *price, *cmd.Settlement.MarketPrice)
 
 	// A rejected attempt has no proof; a fresh attempt is created per candidate.
 	_, rejected := WithMarketAttempt(context.Background(), &MarketSelection{Class: MarketClassBuyer, AccountID: 1})

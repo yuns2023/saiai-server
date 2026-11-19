@@ -1283,7 +1283,7 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 		return "account_missing"
 	}
 	acc := f.Account
-	if acc.Status != StatusActive || !acc.Schedulable || f.OwnerPaused || f.OwnerWithdrawRequested {
+	if acc.Status != StatusActive || !acc.Schedulable || f.OwnerPaused || f.OwnerWithdrawRequested || acc.IsOwnerOrProxyBlocked() {
 		return "account_inactive"
 	}
 	if !f.GroupFound || !f.GroupActive || f.GroupPlatform != acc.Platform {
