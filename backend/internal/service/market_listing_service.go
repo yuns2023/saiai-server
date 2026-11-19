@@ -20,6 +20,8 @@ type MarketListingService struct {
 // MarketListingObserver is implemented by MarketRuntime.
 type MarketListingObserver interface {
 	BeginListing(accountID int64)
+	// AbortListing: the listing transaction rolled back before its commit.
+	AbortListing(accountID int64)
 	EndListing(accountID int64)
 }
 
@@ -219,24 +221,28 @@ func (s *MarketListingService) OwnerGet(ctx context.Context, ownerUserID, accoun
 // OwnerSet lists the account into one allowed tier (listed=true; requires
 // market_enabled) or stops sharing (listed=false; always allowed).
 func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accountID, groupID int64, listed bool) (*OwnerMarketView, error) {
+	var beforeWrite, rolledBack func()
 	if listed && s.listings != nil {
-		// Only the current owner's own listing marks the account locally
-		// (someone else's request is refused below and must not change
-		// scheduling); the transaction re-checks ownership under the lock.
-		_, err := s.repo.GetOwnedAccountFacts(ctx, ownerUserID, accountID)
-		if err != nil {
-			// Not the owner (or the check failed): nothing is listed; never
-			// let a listing commit without its local mark.
-			return nil, err
-		}
-		s.listings.BeginListing(accountID)
-		defer s.listings.EndListing(accountID)
+		// Marked locally only once every check passed (inside the locked
+		// transaction, right before the writes); cleared at once on a
+		// rollback; otherwise kept until a registry poll that started after
+		// the transaction ended.
+		marked := false
+		beforeWrite = func() { marked = true; s.listings.BeginListing(accountID) }
+		rolledBack = func() { s.listings.AbortListing(accountID) }
+		defer func() {
+			if marked {
+				s.listings.EndListing(accountID)
+			}
+		}()
 	}
 	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
-		OwnerUserID: ownerUserID,
-		AccountID:   accountID,
-		GroupID:     groupID,
-		Listed:      listed,
+		BeforeListWrite:   beforeWrite,
+		ListingRolledBack: rolledBack,
+		OwnerUserID:       ownerUserID,
+		AccountID:         accountID,
+		GroupID:           groupID,
+		Listed:            listed,
 		Validate: func(account *Account, protection MarketProtectionParams) error {
 			if reason := marketListBlockedReason(account); reason != "" {
 				return NewMarketAccountNotEligibleError(reason)

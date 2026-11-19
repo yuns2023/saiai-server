@@ -1395,12 +1395,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			clientEntrypoint := entrypointPolicy.clientEntrypointFlag()
 			marketPath, marketProof := marketAttempt.SettlementFields()
 			marketPrice := marketAttempt.PriceSnapshot()
+			var marketBillingRequestID string
+			if marketPath {
+				// Frozen now, from the original request (the worker's context
+				// has no client request id).
+				marketBillingRequestID = service.ResolveUsageBillingRequestID(c.Request.Context(), "")
+			}
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					MarketPath:         marketPath,
 					Market:             marketProof,
 					MarketPrice:        marketPrice,
+					BillingRequestID:   marketBillingRequestID,
 					ClientAttestation:  clientAttestation,
 					ClientEntrypoint:   clientEntrypoint,
 					ModerationRef:      moderationRef,

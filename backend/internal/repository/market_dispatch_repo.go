@@ -206,7 +206,11 @@ func (r *marketListingRepository) CountMarketTierPlatformMembers(ctx context.Con
 	var n int
 	err := scanSingleRow(ctx, r.db, `
 		SELECT COUNT(*) FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
-		WHERE ag.group_id = $1 AND ag.source = 'admin' AND a.deleted_at IS NULL AND a.owner_user_id IS NULL`,
+		WHERE ag.group_id = $1 AND ag.source = 'admin' AND a.deleted_at IS NULL AND a.owner_user_id IS NULL
+			-- the accounts that can serve count_tokens in a tier
+			-- (MarketCountTokensCapable): anthropic, not Bedrock, not pinned
+			AND a.platform = 'anthropic' AND a.type <> 'bedrock'
+			AND NOT (a.type IN ('oauth', 'setup-token') AND COALESCE(lower(trim(a.extra->>'claude_oauth_mode')), '') = 'pinned')`,
 		[]any{groupID}, &n)
 	return n, err
 }

@@ -126,6 +126,23 @@ func TestMarketAdmitBuyerRefusesChangedState(t *testing.T) {
 	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET schedulable=true WHERE id=$1", acc)
 	require.NoError(t, err)
 
+	// Temporarily unschedulable while the request waited (same predicate as
+	// scheduling: Account.IsSchedulable).
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET temp_unschedulable_until = NOW() + interval '1 hour' WHERE id=$1", acc)
+	require.NoError(t, err)
+	require.Equal(t, "account_inactive", admit(t, f, sel, buyerRequest(acc, tier, buyer)).Reason)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE accounts SET temp_unschedulable_until = NULL WHERE id=$1", acc)
+	require.NoError(t, err)
+	// The carpool allowlists are part of the facts (re-checked against the
+	// request identity by the gateway).
+	_, err = integrationDB.ExecContext(ctx, "INSERT INTO claude_oauth_account_users (account_id, user_id) VALUES ($1, $2)", acc, owner)
+	require.NoError(t, err)
+	v = admit(t, f, sel, buyerRequest(acc, tier, buyer))
+	require.True(t, v.Admitted, v.Reason)
+	require.Equal(t, []int64{owner}, v.Facts.Account.CarpoolUserIDs)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM claude_oauth_account_users WHERE account_id = $1", acc)
+	require.NoError(t, err)
+
 	// Later-ineligible configuration (max_sessions set by an admin).
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra = extra || '{"max_sessions": 3}'::jsonb WHERE id=$1`, acc)
 	require.NoError(t, err)

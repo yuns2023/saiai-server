@@ -181,6 +181,12 @@ type MarketOwnerSetParams struct {
 	// Validate runs on the locked account with the stored protection before
 	// listing (not on unlist).
 	Validate func(account *Account, protection MarketProtectionParams) error
+	// BeforeListWrite runs once every check passed, right before the listing
+	// writes; ListingRolledBack runs when the transaction is then rolled
+	// back without reaching its commit (the dispatch registry marks / clears
+	// the account locally).
+	BeforeListWrite   func()
+	ListingRolledBack func()
 }
 
 // MarketListingRepository: every write is one transaction that locks the

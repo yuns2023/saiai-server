@@ -73,20 +73,38 @@ var (
 	// renewBuyerScript refreshes an existing buyer lease in both sets (XX:
 	// never re-adds a member that already expired or was released).
 	// Returns 1 when both members were still present.
+	// Only a lease present (and unexpired) in BOTH sets is refreshed; a
+	// half lease is never refreshed (its remaining member just expires).
 	renewBuyerScript = redis.NewScript(`
 		local ttl = tonumber(ARGV[1])
 		local requestID = ARGV[2]
 		local timeResult = redis.call('TIME')
 		local now = tonumber(timeResult[1])
-		local a = redis.call('ZADD', KEYS[1], 'XX', 'CH', now, requestID)
-		local b = redis.call('ZADD', KEYS[2], 'XX', 'CH', now, requestID)
-		local present = 0
-		if redis.call('ZSCORE', KEYS[1], requestID) ~= false and redis.call('ZSCORE', KEYS[2], requestID) ~= false then
-			present = 1
-			redis.call('EXPIRE', KEYS[1], ttl)
-			redis.call('EXPIRE', KEYS[2], ttl)
+		local expireBefore = now - ttl
+		local a = redis.call('ZSCORE', KEYS[1], requestID)
+		local b = redis.call('ZSCORE', KEYS[2], requestID)
+		if a == false or b == false or tonumber(a) <= expireBefore or tonumber(b) <= expireBefore then
+			return 0
 		end
-		return present
+		redis.call('ZADD', KEYS[1], 'XX', now, requestID)
+		redis.call('ZADD', KEYS[2], 'XX', now, requestID)
+		redis.call('EXPIRE', KEYS[1], ttl)
+		redis.call('EXPIRE', KEYS[2], ttl)
+		return 1
+	`)
+
+	// heldBuyerScript: 1 iff the lease is a live member of both sets.
+	heldBuyerScript = redis.NewScript(`
+		local ttl = tonumber(ARGV[1])
+		local requestID = ARGV[2]
+		local timeResult = redis.call('TIME')
+		local expireBefore = tonumber(timeResult[1]) - ttl
+		local a = redis.call('ZSCORE', KEYS[1], requestID)
+		local b = redis.call('ZSCORE', KEYS[2], requestID)
+		if a == false or b == false or tonumber(a) <= expireBefore or tonumber(b) <= expireBefore then
+			return 0
+		end
+		return 1
 	`)
 )
 
@@ -109,6 +127,15 @@ func (c *concurrencyCache) ReleaseAccountBuyerSlot(ctx context.Context, accountI
 		return nil
 	})
 	return err
+}
+
+func (c *concurrencyCache) AccountBuyerLeaseHeld(ctx context.Context, accountID int64, requestID string) (bool, error) {
+	keys := []string{accountSlotKey(accountID), accountBuyerSlotKey(accountID)}
+	result, err := heldBuyerScript.Run(ctx, c.rdb, keys, c.slotTTLSeconds, requestID).Int()
+	if err != nil {
+		return false, err
+	}
+	return result == 1, nil
 }
 
 func (c *concurrencyCache) RenewAccountBuyerSlot(ctx context.Context, accountID int64, requestID string) (bool, error) {

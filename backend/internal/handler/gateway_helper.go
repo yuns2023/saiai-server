@@ -446,7 +446,12 @@ func (h *ConcurrencyHelper) AcquireAccountSlotForWaitPlan(c *gin.Context, plan *
 	}
 	market := plan.Market
 	return h.waitForAcquire(c, "account", func(ctx context.Context) (*service.AcquireResult, error) {
-		return h.concurrencyService.AcquireAccountBuyerSlot(ctx, plan.AccountID, market.Concurrency, market.BuyerMaxConcurrency)
+		res, err := h.concurrencyService.AcquireAccountBuyerSlot(ctx, plan.AccountID, market.Concurrency, market.BuyerMaxConcurrency)
+		if err == nil && res != nil && res.Acquired {
+			// The final admission checks this exact lease is still held.
+			market.LeaseID = res.LeaseID
+		}
+		return res, err
 	}, plan.Timeout, isStream, streamStarted, true)
 }
 

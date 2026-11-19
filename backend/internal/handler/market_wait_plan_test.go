@@ -52,6 +52,10 @@ func (s *buyerSlotCacheStub) GetAccountBuyerConcurrencyBatch(context.Context, []
 	return map[int64]int{}, nil
 }
 
+func (s *buyerSlotCacheStub) AccountBuyerLeaseHeld(context.Context, int64, string) (bool, error) {
+	return true, nil
+}
+
 func (s *buyerSlotCacheStub) SlotTTLSeconds() int { return 900 }
 
 func marketWaitContext(ctx context.Context) *gin.Context {
@@ -77,6 +81,7 @@ func TestMarketBuyerWaitReacquiresBuyerLease(t *testing.T) {
 	require.Zero(t, cache.accountAcquireCalls, "a buyer never waits for an owner/platform lease")
 	require.Equal(t, 4, cache.lastTotal)
 	require.Equal(t, 3, cache.lastBuyerMax)
+	require.NotEmpty(t, plan.Market.LeaseID, "the re-acquired lease is what the final admission checks")
 	release()
 	require.Equal(t, 1, cache.buyerReleases)
 

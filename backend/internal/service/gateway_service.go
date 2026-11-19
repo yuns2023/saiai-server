@@ -1893,8 +1893,10 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		matchedBillingCCHSeed = realClaudeCodeDiag.CCHSeed
 		matchedBillingCCHMode = claudebilling.CCHInputMode(realClaudeCodeDiag.CCHMode)
 	}
-	if forCountTokens && marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) && !s.marketOwnerContext(ctx, account) {
-		// A listed account serves count_tokens only on its owner path.
+	if marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) {
+		// A listed account is used only by a market attempt (Messages final
+		// admission); count_tokens and other paths never send through it,
+		// not even the auxiliary count_tokens shape below.
 		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, ErrMarketAdmissionRejected)
 	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {
@@ -2082,15 +2084,6 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		}
 		var deviceErr error
 		marketDevice := marketDeviceAdmissionFor(ctx, account)
-		if marketDevice == nil && s.marketAccountListed(account) {
-			// A listed account without a market attempt (count_tokens): only
-			// its owner in the owner's hosted group, registered as an owner
-			// device, never as an unclassified one.
-			if !s.marketOwnerContext(ctx, account) {
-				return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, ErrMarketAdmissionRejected)
-			}
-			marketDevice = &MarketDeviceAdmission{Class: MarketDeviceClassOwner}
-		}
 		if marketDevice != nil {
 			_, deviceErr = s.identityService.EnsureCarpoolDeviceAllowedMarket(ctx, account, originalUserID, clientHeaders, *marketDevice, deviceAPIKey)
 			// The buyer path never dispatches without a device admission:
@@ -2102,6 +2095,14 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 			if deviceErr == nil {
 				markMarketDeviceAdmitted(ctx, account)
 			}
+			// Owner path: a registry error (Redis down, WATCH retries
+			// exhausted, unidentified device) fails OPEN exactly like the
+			// plain carpool path below (log, dispatch without a recorded
+			// device). Deliberate: the owner's own use must not depend on
+			// Redis more than before listing. The attempt stays an owner
+			// attempt (never buyer, no admission row, no market settlement)
+			// and no device record is written, so no owner-class record can
+			// appear without a successful registration.
 		} else {
 			_, deviceErr = s.identityService.EnsureCarpoolDeviceAllowed(ctx, account, originalUserID, clientHeaders, deviceAPIKey)
 		}
@@ -9479,6 +9480,11 @@ type RecordUsageInput struct {
 	MarketPath  bool
 	Market      *MarketSettlementProof
 	MarketPrice *MarketPriceSnapshot
+	// BillingRequestID is, for a market command (MarketPath) only, the
+	// billing identity of the usage log and the billing command, captured
+	// before the async enqueue (ResolveUsageBillingRequestID on the original
+	// request). Ignored otherwise (main's identity), even when set.
+	BillingRequestID string
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9977,6 +9983,11 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	accountRateMultiplier := account.BillingRateMultiplier()
 	meteredCost := applyHostedUsage(apiKey.Group, cost, &accountRateMultiplier)
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	// Only a market command (MarketPath) uses the identity frozen before the
+	// enqueue; every other sale keeps main's identity even if it is set.
+	if id := strings.TrimSpace(input.BillingRequestID); id != "" && input.MarketPath {
+		requestID = id
+	}
 	usageLog := &UsageLog{
 		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,
@@ -10098,6 +10109,10 @@ type RecordUsageLongContextInput struct {
 	ForceCacheBilling     bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
 	APIKeyService         APIKeyQuotaUpdater // API Key 配额服务（可选）
 	ClientAttestation     *int16             // SAIAI 客户端校验状态（请求级）
+	// MarketPath / BillingRequestID: same semantics as RecordUsageInput
+	// (the frozen id applies only to a market command; never set today).
+	MarketPath       bool
+	BillingRequestID string
 }
 
 // RecordUsageWithLongContext 记录使用量并扣费，支持长上下文双倍计费（用于 Gemini）
@@ -10185,6 +10200,11 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 	}
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	// Same rule as RecordUsage: only a market command uses the frozen id;
+	// this entry never carries one (market traffic is Messages only).
+	if id := strings.TrimSpace(input.BillingRequestID); id != "" && input.MarketPath {
+		requestID = id
+	}
 	usageLog := &UsageLog{
 		ModerationRef:              input.ModerationRef,
 		UserID:                     user.ID,

@@ -102,6 +102,8 @@ type AcquireResult struct {
 	// APIKeyFull is set when Acquired is false because the API key, not the
 	// user, has no free slot.
 	APIKeyFull bool
+	// LeaseID is the request id of a market buyer lease (empty otherwise).
+	LeaseID string
 }
 
 // SlotAcquireOutcome is the result of a combined user + API key acquire.
@@ -447,6 +449,7 @@ func (s *ConcurrencyService) AcquireAccountBuyerSlot(ctx context.Context, accoun
 	go renewBuyerLease(cache, accountID, requestID, stop)
 	return &AcquireResult{
 		Acquired: true,
+		LeaseID:  requestID,
 		ReleaseFunc: func() {
 			once.Do(func() {
 				close(stop)
@@ -502,6 +505,19 @@ func renewBuyerLease(cache MarketSlotCache, accountID int64, requestID string, s
 			}
 		}
 	}
+}
+
+// BuyerLeaseHeld reports whether a buyer lease is still a live member of
+// both slot sets (one Redis call). An empty lease id is never held.
+func (s *ConcurrencyService) BuyerLeaseHeld(ctx context.Context, accountID int64, leaseID string) (bool, error) {
+	if s == nil || leaseID == "" {
+		return false, nil
+	}
+	cache, ok := s.cache.(MarketSlotCache)
+	if !ok {
+		return false, errors.New("buyer slot cache unavailable")
+	}
+	return cache.AccountBuyerLeaseHeld(ctx, accountID, leaseID)
 }
 
 // GetAccountBuyerConcurrencyBatch returns live buyer leases per account.

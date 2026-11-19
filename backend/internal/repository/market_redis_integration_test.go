@@ -101,10 +101,11 @@ func TestMarketBuyerSlotRetryRenewAndExpiry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, counts[account])
 
-	// A long stream: age both members past the TTL, renew, they stay.
-	old := float64(time.Now().Add(-testSlotTTL - time.Minute).Unix())
-	require.NoError(t, cache.rdb.ZAddXX(ctx, accountSlotKey(account), redisZ(old, "buyer-1")).Err())
-	require.NoError(t, cache.rdb.ZAddXX(ctx, accountBuyerSlotKey(account), redisZ(old, "buyer-1")).Err())
+	// A long stream: both members close to the TTL; renewal refreshes them,
+	// so they survive past the original deadline.
+	aging := float64(time.Now().Add(-testSlotTTL + time.Minute).Unix())
+	require.NoError(t, cache.rdb.ZAddXX(ctx, accountSlotKey(account), redisZ(aging, "buyer-1")).Err())
+	require.NoError(t, cache.rdb.ZAddXX(ctx, accountBuyerSlotKey(account), redisZ(aging, "buyer-1")).Err())
 	present, err := cache.RenewAccountBuyerSlot(ctx, account, "buyer-1")
 	require.NoError(t, err)
 	require.True(t, present)
@@ -113,6 +114,7 @@ func TestMarketBuyerSlotRetryRenewAndExpiry(t *testing.T) {
 	require.False(t, ok, "the renewed lease still counts after the original TTL")
 
 	// Without renewal both members expire together.
+	old := float64(time.Now().Add(-testSlotTTL - time.Minute).Unix())
 	require.NoError(t, cache.rdb.ZAddXX(ctx, accountSlotKey(account), redisZ(old, "buyer-1")).Err())
 	require.NoError(t, cache.rdb.ZAddXX(ctx, accountBuyerSlotKey(account), redisZ(old, "buyer-1")).Err())
 	ok, err = cache.AcquireAccountBuyerSlot(ctx, account, 2, 1, "buyer-2")
@@ -124,6 +126,28 @@ func TestMarketBuyerSlotRetryRenewAndExpiry(t *testing.T) {
 	present, err = cache.RenewAccountBuyerSlot(ctx, account, "buyer-1")
 	require.NoError(t, err)
 	require.False(t, present, "renew never re-adds an expired lease")
+
+	// Lease lost: an expired member taken over by someone else is not held;
+	// a half lease is never refreshed by renewal.
+	held, err := cache.AccountBuyerLeaseHeld(ctx, account, "buyer-2")
+	require.NoError(t, err)
+	require.True(t, held)
+	held, err = cache.AccountBuyerLeaseHeld(ctx, account, "buyer-1")
+	require.NoError(t, err)
+	require.False(t, held, "the expired lease is gone, buyer-2 took the capacity")
+	require.NoError(t, cache.rdb.ZRem(ctx, accountBuyerSlotKey(account), "buyer-2").Err())
+	before, err := cache.rdb.ZScore(ctx, accountSlotKey(account), "buyer-2").Result()
+	require.NoError(t, err)
+	time.Sleep(1100 * time.Millisecond)
+	present, err = cache.RenewAccountBuyerSlot(ctx, account, "buyer-2")
+	require.NoError(t, err)
+	require.False(t, present)
+	after, err := cache.rdb.ZScore(ctx, accountSlotKey(account), "buyer-2").Result()
+	require.NoError(t, err)
+	require.Equal(t, before, after, "the remaining member of a half lease is not refreshed")
+	held, err = cache.AccountBuyerLeaseHeld(ctx, account, "buyer-2")
+	require.NoError(t, err)
+	require.False(t, held)
 
 	// Cancel / release removes from both sets.
 	require.NoError(t, cache.ReleaseAccountBuyerSlot(ctx, account, "buyer-2"))

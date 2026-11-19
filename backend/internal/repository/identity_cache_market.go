@@ -61,11 +61,11 @@ func (c *identityCache) GetOrCreateCarpoolDeviceMarket(ctx context.Context, acco
 	for attempt := 0; attempt < carpoolDeviceWriteMaxRetries; attempt++ {
 		var out *service.CarpoolDeviceRecord
 		err := c.rdb.Watch(ctx, func(tx *redis.Tx) error {
-			all, err := tx.HGetAll(ctx, recordedKey).Result()
+			raw, err := tx.HGet(ctx, recordedKey, field).Result()
 			if err != nil && err != redis.Nil {
 				return err
 			}
-			if raw, ok := all[field]; ok {
+			if err == nil {
 				var record service.CarpoolDeviceRecord
 				if err := json.Unmarshal([]byte(raw), &record); err != nil {
 					return err
@@ -93,6 +93,12 @@ func (c *identityCache) GetOrCreateCarpoolDeviceMarket(ctx context.Context, acco
 				return err
 			}
 
+			// New device: count the classes (records are few, bounded by the
+			// device limit).
+			all, err := tx.HGetAll(ctx, recordedKey).Result()
+			if err != nil && err != redis.Nil {
+				return err
+			}
 			buyerDevices := 0
 			for _, raw := range all {
 				var record service.CarpoolDeviceRecord

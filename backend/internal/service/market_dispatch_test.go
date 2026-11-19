@@ -118,6 +118,7 @@ type dualSlotCache struct {
 	total, buyer  map[int64]map[string]bool
 	plainAcquires int
 	buyerAcquires int
+	onAcquire     func(id int64)
 }
 
 func newDualSlotCache() *dualSlotCache {
@@ -140,6 +141,9 @@ func (c *dualSlotCache) AcquireAccountSlot(_ context.Context, id int64, max int,
 		return false, nil
 	}
 	t[req] = true
+	if c.onAcquire != nil {
+		c.onAcquire(id)
+	}
 	return true, nil
 }
 
@@ -184,6 +188,12 @@ func (c *dualSlotCache) GetAccountBuyerConcurrencyBatch(_ context.Context, ids [
 		out[id] = len(c.buyer[id])
 	}
 	return out, nil
+}
+
+func (c *dualSlotCache) AccountBuyerLeaseHeld(_ context.Context, id int64, req string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.total[id][req] && c.buyer[id][req], nil
 }
 
 func (c *dualSlotCache) SlotTTLSeconds() int { return 900 }
@@ -238,8 +248,9 @@ func mktListedAccount(id int64) Account {
 
 func mktPlatformAccount(id int64, groups ...int64) Account {
 	ags := make([]AccountGroup, 0, len(groups))
+	all := mktGroups()
 	for _, g := range groups {
-		ags = append(ags, AccountGroup{GroupID: g})
+		ags = append(ags, AccountGroup{GroupID: g, Group: all[g]})
 	}
 	return Account{ID: id, Name: "platform", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
 		Concurrency: 4, GroupIDs: groups, AccountGroups: ags, Credentials: map[string]any{"api_key": "k"}}
@@ -371,11 +382,14 @@ func TestMarketClassification(t *testing.T) {
 	require.Equal(t, MarketClassNone, class(ungrouped, mktPlatformAccount(11)))
 
 	// Owner path: the owner's own exclusive hosted group only.
-	ownerCtx := at(WithAccountUserID(context.Background(), mktOwner), mktHosted)
+	ownerKey := &APIKey{ID: 6, UserID: mktOwner, GroupID: ptr64(mktHosted), Group: groups[mktHosted], User: &User{ID: mktOwner}}
+	ownerCtx := at(WithMarketDispatch(WithAccountUserID(context.Background(), mktOwner), ownerKey), mktHosted)
 	c, sel := svc.classifyMarketCandidate(ownerCtx, &listedInHosted)
 	require.Equal(t, MarketClassOwner, c)
 	require.Equal(t, mktOwner, sel.OwnerUserID)
-	otherUser := at(WithAccountUserID(context.Background(), 99), mktHosted)
+	require.Equal(t, MarketClassExcluded, class(at(WithAccountUserID(context.Background(), mktOwner), mktHosted), listedInHosted),
+		"no final admission on the path (count_tokens, Ops): a listed account is never used, not even by its owner")
+	otherUser := at(WithMarketDispatch(WithAccountUserID(context.Background(), 99), ownerKey), mktHosted)
 	require.Equal(t, MarketClassExcluded, class(otherUser, listedInHosted), "a trusted co-user of the hosted group is not the owner")
 
 	// Self purchase stays on the buyer path (no reservation).
@@ -643,6 +657,10 @@ func marketForwardEnv(t *testing.T) (*marketEnv, *queuedClaudeCodeUpstream, *Acc
 	upstream := &queuedClaudeCodeUpstream{responses: []func() *http.Response{okClaudeStreamResponse}}
 	base := claudeCodeCacheSafeRetryService(upstream)
 	base.market = env.rt
+	base.concurrencyService = env.svc.concurrencyService
+	ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 3, "lease-1")
+	require.NoError(t, err)
+	require.True(t, ok)
 	base.billingService = env.svc.billingService
 	base.groupRepo = env.svc.groupRepo
 	base.identityService = NewIdentityService(&marketDeviceStub{}, strings.Repeat("x", 32))
@@ -685,7 +703,8 @@ func buyerForwardCtx(t *testing.T, base context.Context) (context.Context, *Mark
 	ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: mktTier, Platform: PlatformAnthropic, Status: StatusActive, RateMultiplier: 1.2, MarketTier: true, Hydrated: true, ClaudeOAuthRequestGateDisabled: false})
 	ctx = WithMarketDispatch(ctx, key)
 	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3,
-		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, Protection: mktProtection(), DeviceLimit: 5}
+		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, Protection: mktProtection(), DeviceLimit: 5,
+		LeaseID: "lease-1"}
 	return WithMarketAttempt(ctx, sel)
 }
 
@@ -759,6 +778,30 @@ func TestMarketForwardNeverDispatchesWithoutAdmission(t *testing.T) {
 			obs := freshObservations()
 			obs.SevenDay.Utilization = 0.95
 			env.usage.obs[1] = obs
+		}},
+		{"temp-unschedulable set while waiting", func(env *marketEnv, _ *marketDeviceStub) {
+			inner := env.store.facts
+			env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+				f := inner(req)
+				until := time.Now().Add(time.Hour)
+				f.Account.TempUnschedulableUntil = &until
+				return f
+			}
+		}},
+		{"allowlist tightened while waiting", func(env *marketEnv, _ *marketDeviceStub) {
+			inner := env.store.facts
+			env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+				f := inner(req)
+				f.Account.Extra["claude_oauth_carpool_users_only"] = true
+				f.Account.CarpoolUserIDs = []int64{12345}
+				return f
+			}
+		}},
+		{"lease expired and taken by someone else", func(env *marketEnv, _ *marketDeviceStub) {
+			require.NoError(t, env.slots.ReleaseAccountBuyerSlot(context.Background(), 1, "lease-1"))
+			ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 3, "someone-else")
+			require.NoError(t, err)
+			require.True(t, ok)
 		}},
 		{"device registry error", func(_ *marketEnv, dev *marketDeviceStub) {
 			dev.err = errors.New("redis down")
@@ -1063,20 +1106,52 @@ func TestMarketRegistryColdStartIsConservative(t *testing.T) {
 	require.False(t, rt.marketAccountListed(&owned))
 }
 
-type listingObserverStub struct{ begun []int64 }
+// hookedMarketRepo runs the listing hooks like the repository does.
+type hookedMarketRepo struct {
+	*fakeMarketRepo
+	failAfterWrite bool
+}
 
-func (o *listingObserverStub) BeginListing(id int64) { o.begun = append(o.begun, id) }
-func (o *listingObserverStub) EndListing(int64)      {}
+func (r *hookedMarketRepo) OwnerSet(ctx context.Context, p MarketOwnerSetParams) (*MarketListing, error) {
+	if _, err := r.GetOwnedAccountFacts(ctx, p.OwnerUserID, p.AccountID); err != nil {
+		return nil, err
+	}
+	if p.Listed && p.Validate != nil {
+		if err := p.Validate(r.account, MarketProtectionParams{Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}); err != nil {
+			return nil, err
+		}
+	}
+	if p.Listed && p.BeforeListWrite != nil {
+		p.BeforeListWrite()
+		if r.failAfterWrite {
+			p.ListingRolledBack()
+			return nil, errors.New("outbox insert failed")
+		}
+	}
+	return r.listing, nil
+}
 
-func TestMarketListingMarksOnlyOwnListings(t *testing.T) {
-	repo := &fakeMarketRepo{account: marketTestAccount(7)}
+func TestMarketListingMarksOnlyCheckedListings(t *testing.T) {
+	rt := NewMarketRuntime(&fakeMarketStore{state: &MarketDispatchState{}}, nil)
+	rt.SetState(&MarketDispatchState{})
+	repo := &hookedMarketRepo{fakeMarketRepo: &fakeMarketRepo{account: marketTestAccount(7)}}
 	svc := NewMarketListingService(repo, &marketSettingRepo{values: map[string]string{}})
-	obs := &listingObserverStub{}
-	svc.SetListingObserver(obs)
+	svc.SetListingObserver(rt)
+
 	_, _ = svc.OwnerSet(context.Background(), 8, 11, 3, true)
-	require.Empty(t, obs.begun, "someone else's listing request never changes scheduling")
+	require.False(t, rt.IsListed(11), "someone else's request never changes scheduling")
+
+	repo.failAfterWrite = true
+	_, err := svc.OwnerSet(context.Background(), 7, 11, 3, true)
+	require.Error(t, err)
+	require.False(t, rt.IsListed(11), "a rolled-back listing is cleared at once")
+
+	repo.failAfterWrite = false
 	_, _ = svc.OwnerSet(context.Background(), 7, 11, 3, true)
-	require.Equal(t, []int64{11}, obs.begun)
+	require.True(t, rt.IsListed(11), "a committed listing stays marked until a later poll")
+	time.Sleep(2 * time.Millisecond)
+	require.True(t, rt.Refresh(context.Background()))
+	require.False(t, rt.IsListed(11), "the poll (not listed in this fake) is authoritative afterwards")
 }
 
 func TestMarketForwardCancelledDuringAdmissionNeverDispatches(t *testing.T) {
@@ -1157,4 +1232,135 @@ func TestMarketPriceUsesTheBilledKeyGroup(t *testing.T) {
 	zeroRate := WithMarketDispatch(WithAccountUserID(context.Background(), mktBuyer), &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, Group: &zero, User: &User{ID: mktBuyer}})
 	_, err = env.svc.SelectAccountWithLoadAwareness(zeroRate, ptr64(mktTier), "", "claude-fable-5", nil, "")
 	require.ErrorIs(t, err, ErrNoAvailableAccounts, "zero model rate: not sellable")
+}
+
+// ---- independent review round 1 ----
+
+func TestMarketOpsPinnedRetryOrdinaryGroupUnchanged(t *testing.T) {
+	// The group is unknown to the group repository (deleted / read error):
+	// the pinned retry behaves as before (no group lookup).
+	acc := mktPlatformAccount(2, 99)
+	env := newMarketEnv(t, []Account{acc})
+	groups, ok := env.svc.groupRepo.(*mockGroupRepoForGateway)
+	require.True(t, ok)
+	upstream := &scriptedGatewayHTTPUpstream{results: []scriptedGatewayHTTPResult{{response: gatewayHTTPSuccessResponse}}}
+	env.svc.httpUpstream = upstream
+	env.svc.responseHeaderFilter = compileResponseHeaderFilter(env.svc.cfg)
+	env.svc.rateLimitService = &RateLimitService{}
+	env.svc.deferredService = &DeferredService{}
+	ops := &OpsService{gatewayService: env.svc, accountRepo: env.svc.accountRepo}
+	errorLog := &OpsErrorLogDetail{OpsErrorLog: OpsErrorLog{GroupID: ptr64(99), RequestPath: "/v1/chat/completions"}}
+	body := []byte(`{"model":"claude-fable-5","stream":false,"max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	exec := ops.executePinnedRetry(context.Background(), opsRetryTypeMessages, errorLog, body, 2)
+	require.Equal(t, opsRetryStatusSucceeded, exec.status, exec.errorMessage)
+	require.Equal(t, 1, upstream.calls)
+	require.Zero(t, groups.getByIDLiteCalls+groups.getByIDCalls, "no extra group read for ordinary groups")
+	require.Empty(t, env.store.requests)
+}
+
+func TestMarketOwnerPathDeviceErrorFailsOpenAsOwner(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	dev, ok := env.svc.identityService.cache.(*marketDeviceStub)
+	require.True(t, ok)
+	dev.err = errors.New("redis down")
+	hosted := mktHosted
+	acc.GroupIDs = []int64{mktHosted}
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		a := *acc
+		a.Extra = map[string]any{"claude_oauth_mode": ClaudeOAuthModeCarpool, "claude_oauth_carpool_device_limit": 5}
+		return &MarketAuthoritativeFacts{AccountFound: true, Account: &a, MembershipSource: AccountGroupSourceAdmin,
+			GroupFound: true, GroupActive: true, GroupPlatform: PlatformAnthropic, GroupHosted: true, GroupExclusive: true,
+			OwnerUserStatus: StatusActive, HostedOwnerGroupID: hosted}
+	}
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx := WithAccountUserID(c.Request.Context(), mktOwner)
+	ctx = WithMarketDispatch(ctx, &APIKey{ID: 6, UserID: mktOwner, GroupID: &hosted, User: &User{ID: mktOwner}})
+	ctx, attempt := WithMarketAttempt(ctx, &MarketSelection{Class: MarketClassOwner, AccountID: acc.ID, GroupID: hosted, OwnerUserID: mktOwner, Concurrency: 4})
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	require.NoError(t, err, "owner path fails open on a registry error, like plain carpool")
+	require.Equal(t, 1, upstream.calls)
+	require.Equal(t, []string{MarketDeviceClassOwner}, dev.classes, "never registered as a buyer")
+	marketPath, proof := attempt.SettlementFields()
+	require.False(t, marketPath)
+	require.Nil(t, proof)
+	require.Empty(t, env.store.inserted, "no admission row on the owner path")
+}
+
+func TestMarketListedAccountNeverServesCountTokens(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx := WithAccountUserID(c.Request.Context(), mktOwner) // its owner, no market attempt
+	err := env.svc.ForwardCountTokens(ctx, c, acc, parsed)
+	require.Error(t, err)
+	require.Zero(t, upstream.calls)
+}
+
+func TestMarketRecordUsageFreezesBillingRequestID(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	gid := mktTier
+	proof := &MarketSettlementProof{AdmissionID: 5, AttemptID: "a", RequestRef: "client-req-1", AccountID: 1, GroupID: gid, BuyerUserID: mktBuyer, APIKeyID: mktKey}
+	usageRepo.lastLog = nil
+	input := func(market bool, frozen string) *RecordUsageInput {
+		in := &RecordUsageInput{
+			Result:        &ForwardResult{RequestID: "msg_upstream_id", Model: "claude-sonnet-4", Duration: time.Second, Usage: ClaudeUsage{InputTokens: 10, OutputTokens: 5}},
+			APIKey:        &APIKey{ID: mktKey, GroupID: &gid, Group: mktGroups()[mktTier]},
+			User:          &User{ID: mktBuyer},
+			Account:       &Account{ID: 1},
+			APIKeyService: &openAIRecordUsageAPIKeyQuotaStub{},
+		}
+		if market {
+			in.MarketPath, in.Market, in.BillingRequestID = true, proof, frozen
+		}
+		return in
+	}
+	// Worker context without the client request id: the frozen id wins.
+	require.NoError(t, svc.RecordUsage(context.Background(), input(true, "client:client-req-1")))
+	require.Equal(t, "client:"+proof.RequestRef, billingRepo.lastCmd.RequestID)
+	require.True(t, billingRepo.lastCmd.MarketPath)
+	require.Equal(t, "client:"+proof.RequestRef, usageRepo.lastLog.RequestID, "same identity on the usage log")
+	// A tier sale served by a platform account is not a market command: a
+	// captured id (set by mistake) never replaces main's identity.
+	platformSale := input(false, "")
+	platformSale.BillingRequestID = "client:client-req-1"
+	require.NoError(t, svc.RecordUsage(context.Background(), platformSale))
+	require.Equal(t, "msg_upstream_id", billingRepo.lastCmd.RequestID)
+	require.Equal(t, "msg_upstream_id", usageRepo.lastLog.RequestID)
+	require.False(t, billingRepo.lastCmd.MarketPath)
+	// Empty = the original derivation (ordinary sales never set it).
+	require.NoError(t, svc.RecordUsage(context.Background(), input(false, "")))
+	require.Equal(t, "msg_upstream_id", billingRepo.lastCmd.RequestID)
+}
+
+func TestMarketUltraFlagNeverOverridesALiveFiveHourWindow(t *testing.T) {
+	now := time.Now()
+	obs := &MarketUsageObservations{
+		SevenDay:       &MarketUsageObservation{Utilization: 0.3, ResetAt: now.Add(72 * time.Hour).Unix(), ObservedAt: now.Add(-time.Minute).Unix()},
+		FiveHour:       &MarketUsageObservation{Utilization: 0.9, ResetAt: now.Add(2 * time.Hour).Unix(), ObservedAt: now.Add(-2 * time.Minute).Unix()},
+		FiveHourAbsent: &MarketFiveHourAbsence{Absent: true, ObservedAt: now.Add(-time.Minute).Unix()},
+	}
+	require.Equal(t, "5h_cap", evaluateMarketShareCaps(obs, mktProtection(), now))
+	obs.FiveHour.ResetAt = now.Add(-time.Minute).Unix() // that window ended
+	require.Equal(t, "", evaluateMarketShareCaps(obs, mktProtection(), now))
+}
+
+func TestMarketSelectionChangeRetriesTheGroup(t *testing.T) {
+	first := mktPlatformAccount(2, mktTier)
+	first.Priority = 0
+	second := mktPlatformAccount(3, mktTier)
+	second.Priority = 50
+	env := newMarketEnv(t, []Account{first, second})
+	// Account 2 gets listed between its lease and the end of the selection.
+	env.slots.onAcquire = func(id int64) {
+		if id == 2 {
+			env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{2}})
+		}
+	}
+	res, err := env.svc.SelectAccountWithLoadAwareness(buyerCtx(mktTier), ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.NoError(t, err)
+	require.Equal(t, int64(3), res.Account.ID, "the group is retried without the changed account")
+	res.ReleaseFunc()
+	total, _ := env.slots.counts(2)
+	require.Zero(t, total, "the changed account's lease was released")
 }
