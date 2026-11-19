@@ -2,6 +2,40 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { hostedApi, type OwnedAccount, type OwnerState, type SelfOnboardConfig } from '@/api'
 
+export interface PendingConvert {
+  requestId: string
+  amount: string
+}
+
+export function pendingConvertKey(userId: number): string {
+  return `ccyou.market.pendingConvert.${userId}`
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function readPendingConvert(userId: number): PendingConvert | null {
+  try {
+    const raw = localStorage.getItem(pendingConvertKey(userId))
+    if (!raw) return null
+    const v = JSON.parse(raw) as Partial<PendingConvert>
+    if (typeof v.requestId === 'string' && UUID_RE.test(v.requestId) && typeof v.amount === 'string' && /^\d+(\.\d{1,2})?$/.test(v.amount)) {
+      return { requestId: v.requestId, amount: v.amount }
+    }
+  } catch {
+    // Unreadable storage: nothing to resume.
+  }
+  return null
+}
+
+function writePendingConvert(userId: number, v: PendingConvert | null): void {
+  try {
+    if (v) localStorage.setItem(pendingConvertKey(userId), JSON.stringify(v))
+    else localStorage.removeItem(pendingConvertKey(userId))
+  } catch {
+    // Storage unavailable: the in-memory copy still covers this page session.
+  }
+}
+
 /** A successful list is trusted this long before a navigation or focus checks again. */
 export const HOSTED_TTL_MS = 5 * 60_000
 /** After a failed attempt, wait at least this long before trying again. */
@@ -30,6 +64,18 @@ export const useHostedStore = defineStore('hosted', () => {
   const ownerBusy = ref<number | null>(null)
   /** I have at least one self-onboarding application (any status); null = unknown. */
   const hasApplications = ref<boolean | null>(null)
+  /**
+   * An earnings conversion sent but not definitely answered yet (in flight,
+   * timeout, network, 429/401/403/5xx). The next attempt replays it with the
+   * same request id and amount — after leaving the page, and after a reload:
+   * it is also kept in localStorage per signed-in user (loadPendingConvert).
+   * Change it only through setPendingConvert.
+   */
+  const pendingConvert = ref<PendingConvert | null>(null)
+  /** The user whose stored conversion pendingConvert mirrors (null: not loaded). */
+  let pendingOwner: number | null = null
+  /** A conversion request is in flight (kept across page remounts). */
+  const convertBusy = ref(false)
   /**
    * The /hosted entry: owners, anyone while self-onboarding is open, and anyone
    * with an application (switch off: they can still see and cancel it).
@@ -170,6 +216,24 @@ export const useHostedStore = defineStore('hosted', () => {
     return true
   }
 
+  /** Reads the stored unsettled conversion of this user (once per user and session). */
+  function loadPendingConvert(userId: number | null | undefined): void {
+    if (!userId) {
+      pendingOwner = null
+      pendingConvert.value = null
+      return
+    }
+    if (pendingOwner === userId) return
+    pendingOwner = userId
+    pendingConvert.value = readPendingConvert(userId)
+  }
+
+  /** Records (or clears) the unsettled conversion, in memory and in storage. */
+  function setPendingConvert(v: PendingConvert | null): void {
+    pendingConvert.value = v
+    if (pendingOwner !== null) writePendingConvert(pendingOwner, v)
+  }
+
   function reset(): void {
     generation++
     inflight = null
@@ -185,7 +249,11 @@ export const useHostedStore = defineStore('hosted', () => {
     hasApplications.value = null
     ownerOverrides.clear()
     ownerBusy.value = null
+    // Memory only: the stored conversion stays for when this user signs in again.
+    pendingConvert.value = null
+    pendingOwner = null
+    convertBusy.value = false
   }
 
-  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
+  return { accounts, loaded, failed, hasAny, onboard, hasApplications, showEntry, ownerBusy, pendingConvert, convertBusy, loadPendingConvert, setPendingConvert, load, reload, ensureLoaded, loadConfig, ensureConfig, session, applyOwnerState, reset }
 })

@@ -136,6 +136,21 @@ export interface SystemSettings {
   hosted_self_onboard_default_device_limit: number
   hosted_self_onboard_default_admissions_per_cycle: number
   hosted_self_onboard_default_interval_hours: number
+  // Sharing market (P3a). The PUT writes only the market keys present; an explicit 0 is kept.
+  /** Master switch: off stops new listings and sales; earnings stay visible and convertible. */
+  market_enabled: boolean
+  /** Platform cut of what buyers pay, 0..1 with at most 4 decimals (0 = no cut). */
+  market_platform_cut_rate: number
+  /** Days an earning stays frozen (0..90). */
+  market_earning_freeze_days: number
+  /** Smallest conversion into balance, USD 0.01..10000 with at most 2 decimals. */
+  market_min_convert_usd: number
+  market_default_reserved_concurrency: number
+  market_default_reserved_devices: number
+  market_default_reserved_admissions: number
+  market_default_cap_5h_pct: number
+  market_default_cap_7d_pct: number
+  market_default_sample_max_age_minutes: number
 }
 
 export interface UpdateSettingsRequest {
@@ -223,6 +238,16 @@ export interface UpdateSettingsRequest {
   hosted_self_onboard_default_device_limit?: number
   hosted_self_onboard_default_admissions_per_cycle?: number
   hosted_self_onboard_default_interval_hours?: number
+  market_enabled?: boolean
+  market_platform_cut_rate?: number
+  market_earning_freeze_days?: number
+  market_min_convert_usd?: number
+  market_default_reserved_concurrency?: number
+  market_default_reserved_devices?: number
+  market_default_reserved_admissions?: number
+  market_default_cap_5h_pct?: number
+  market_default_cap_7d_pct?: number
+  market_default_sample_max_age_minutes?: number
 }
 
 /**

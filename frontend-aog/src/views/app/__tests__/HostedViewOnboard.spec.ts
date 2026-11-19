@@ -19,6 +19,12 @@ vi.mock('@/api', async (importOriginal) => {
   return { ...actual, hostedApi: hosted }
 })
 
+// No sharing market on this server (404): the page must look exactly as before.
+vi.mock('@/api/market', () => {
+  const notFound = () => Promise.reject({ status: 404, message: 'not found' })
+  return { marketApi: { getListing: notFound, setListing: notFound, earnings: notFound, entries: notFound, convert: notFound } }
+})
+
 import HostedView from '../HostedView.vue'
 
 function account(over: Partial<OwnedAccount> = {}): OwnedAccount {

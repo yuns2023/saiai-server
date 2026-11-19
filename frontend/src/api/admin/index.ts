@@ -26,6 +26,7 @@ import paymentAPI from './payment'
 import accessLevelsAPI from './accessLevels'
 import cryptoPayAPI from './cryptoPay'
 import hostedApplicationsAPI from './hostedApplications'
+import marketAPI from './market'
 
 /**
  * Unified admin API object for convenient access
@@ -53,7 +54,8 @@ export const adminAPI = {
   payment: paymentAPI,
   accessLevels: accessLevelsAPI,
   cryptoPay: cryptoPayAPI,
-  hostedApplications: hostedApplicationsAPI
+  hostedApplications: hostedApplicationsAPI,
+  market: marketAPI
 }
 
 export {
@@ -79,7 +81,8 @@ export {
   paymentAPI,
   accessLevelsAPI,
   cryptoPayAPI,
-  hostedApplicationsAPI
+  hostedApplicationsAPI,
+  marketAPI
 }
 
 export type { PaymentProvider, PaymentProviderInput, PaymentConfigUpdate, AdminPaymentOrder } from './payment'
