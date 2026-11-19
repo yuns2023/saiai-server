@@ -291,6 +291,11 @@ func (c *identityCache) getOrCreateAdmissionDevice(ctx context.Context, accountI
 				_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 					if budget != nil {
 						budget.Used++
+						if budget.MarketClassified {
+							// Listed earlier this cycle: an unclassified
+							// admission counts against the buyers.
+							budget.BuyerUsed++
+						}
 						encoded, err := json.Marshal(budget)
 						if err != nil {
 							return err

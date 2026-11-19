@@ -1893,6 +1893,10 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		matchedBillingCCHSeed = realClaudeCodeDiag.CCHSeed
 		matchedBillingCCHMode = claudebilling.CCHInputMode(realClaudeCodeDiag.CCHMode)
 	}
+	if forCountTokens && marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) && !s.marketOwnerContext(ctx, account) {
+		// A listed account serves count_tokens only on its owner path.
+		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, ErrMarketAdmissionRejected)
+	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {
 		if forCountTokens && isClaudeOAuthCountTokensAuxRequest(c, parsed) {
 			logger.LegacyPrintf(
@@ -5675,6 +5679,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	proxyURL, err := account.EgressProxyURL()
 	if err != nil {
 		return nil, err
+	}
+
+	if marketAttempt != nil && ctx.Err() != nil {
+		// Cancelled after the admission: the lease may already be released.
+		return nil, ctx.Err()
 	}
 
 	// 调试日志：记录即将转发的账号信息（只记代理 ID，代理 URL 可能含账号密码）

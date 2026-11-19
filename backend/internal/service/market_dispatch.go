@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
@@ -289,6 +290,10 @@ type marketDirtyUsage struct {
 	gen uint64
 }
 
+// marketDirtyGen is monotonic across entries (a cleared and re-created
+// entry never reuses a generation an in-flight write captured).
+var marketDirtyGen atomic.Uint64
+
 // takeUsageForWrite merges the failed observations of the account into obs
 // and returns the dirty generation included.
 func (r *MarketRuntime) takeUsageForWrite(accountID int64, obs MarketUsageObservations) (MarketUsageObservations, uint64) {
@@ -314,7 +319,7 @@ func (r *MarketRuntime) usageWriteDone(accountID int64, obs MarketUsageObservati
 			r.usageDirty[accountID] = d
 		}
 		d.obs = mergeMarketObservations(d.obs, obs)
-		d.gen++
+		d.gen = marketDirtyGen.Add(1)
 		return
 	}
 	if d != nil && d.gen == includedGen {
@@ -342,9 +347,13 @@ func mergeMarketObservations(a, b MarketUsageObservations) MarketUsageObservatio
 		out.ObservedAt = max64(x.ObservedAt, y.ObservedAt)
 		return &out
 	}
-	out := MarketUsageObservations{FiveHour: pick(a.FiveHour, b.FiveHour), SevenDay: pick(a.SevenDay, b.SevenDay), FiveHourAbsent: a.FiveHourAbsent}
-	if b.FiveHourAbsent != nil && (out.FiveHourAbsent == nil || b.FiveHourAbsent.ObservedAt >= out.FiveHourAbsent.ObservedAt) {
-		out.FiveHourAbsent = b.FiveHourAbsent
+	out := MarketUsageObservations{FiveHour: pick(a.FiveHour, b.FiveHour), SevenDay: pick(a.SevenDay, b.SevenDay)}
+	// The merged 7d may come from another response than an "absent" flag;
+	// only the conservative "has a 5h window" survives a merge.
+	for _, f := range []*MarketFiveHourAbsence{a.FiveHourAbsent, b.FiveHourAbsent} {
+		if f != nil && !f.Absent && (out.FiveHourAbsent == nil || f.ObservedAt > out.FiveHourAbsent.ObservedAt) {
+			out.FiveHourAbsent = f
+		}
 	}
 	return out
 }
@@ -481,21 +490,23 @@ func (r *MarketRuntime) marketAccountListed(account *Account) bool {
 	if account == nil {
 		return false
 	}
-	if len(account.MarketGroupIDs) > 0 || account.MarketListing != nil || r.IsListed(account.ID) {
+	if len(account.MarketGroupIDs) > 0 || account.MarketListing != nil {
 		return true
 	}
-	// Until the registry has loaded once, any account with an owner may be
-	// listed: treat it as listed (conservative; only after a failed start).
-	return r != nil && !r.isLoaded() && account.OwnerUserID != nil
-}
-
-func (r *MarketRuntime) isLoaded() bool {
 	if r == nil {
 		return false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.loaded
+	if _, ok := r.listed[account.ID]; ok {
+		return true
+	}
+	if _, ok := r.pending[account.ID]; ok {
+		return true
+	}
+	// Until the registry has loaded once, any account with an owner may be
+	// listed: treat it as listed (conservative; only after a failed start).
+	return !r.loaded && account.OwnerUserID != nil
 }
 
 // ShouldRecordUsage: observations are kept only for listed accounts.
@@ -1022,9 +1033,15 @@ func (s *GatewayService) marketPrice(ctx context.Context, d *MarketDispatch, gro
 }
 
 func (s *GatewayService) computeMarketPrice(ctx context.Context, d *MarketDispatch, group *Group, model string) (*MarketPriceSnapshot, bool) {
-	if model == "" || s.billingService == nil {
+	if model == "" || s.billingService == nil || group == nil {
 		return nil, false
 	}
+	// Price with the group object RecordUsage bills with (the Key's group);
+	// a Key without it, or for another group, is not a sale.
+	if d.APIKey.Group == nil || d.APIKey.Group.ID != group.ID {
+		return nil, false
+	}
+	group = d.APIKey.Group
 	pricing, err := s.billingService.GetModelPricing(model)
 	if err != nil || pricing == nil || !(pricing.InputPricePerToken > 0) || !(pricing.OutputPricePerToken > 0) {
 		return nil, false
@@ -1449,8 +1466,8 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 // marketAdmissionError maps a final-admission failure: a cancelled request
 // ends (no reselection); anything else fails over.
 func marketAdmissionError(ctx context.Context, err error) error {
-	if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
-		return err
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	return marketAdmissionFailoverError(err)
 }

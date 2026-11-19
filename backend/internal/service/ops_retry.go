@@ -425,6 +425,9 @@ func (s *OpsService) executePinnedRetry(ctx context.Context, reqType opsRetryReq
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: fmt.Sprintf("resolve group failed: %v", err)}
 		}
 		if group.MarketTier {
+			if reqType != opsRetryTypeMessages {
+				return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "sharing-market tiers only retry Anthropic messages"}
+			}
 			if account.OwnerUserID != nil {
 				return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account has an owner and the group is a sharing-market tier"}
 			}

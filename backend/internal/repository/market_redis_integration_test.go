@@ -396,3 +396,19 @@ func TestMarketUsageLateResponseNeverSetsUltraFlag(t *testing.T) {
 	require.False(t, got[73].FiveHourAbsent.Absent)
 	require.InDelta(t, 0.3, got[73].SevenDay.Utilization, 1e-9)
 }
+
+func TestMarketDeviceBudgetUnlistRelistSameCycle(t *testing.T) {
+	cache, ctx := newMarketIdentityCache(t)
+	full := service.ErrClaudeOAuthCarpoolDevicesFull
+	p := service.CarpoolAdmissionPolicy{Generation: "00000000000000000003", Admissions: 5, InitialDue: "2026-11-19T00:00:00Z"}
+	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
+	require.NoError(t, marketDevice(t, cache, ctx, 66, "b0", 10, &p, buyer)) // listed: classified
+	// Unlisted: two plain admissions in the same cycle.
+	for _, d := range []string{"x0", "x1"} {
+		_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, 66, d, service.ClientHints{}, 10, time.Now().Unix(), p)
+		require.NoError(t, err)
+	}
+	// Relisted: 1 + 2 = Q - Rq, no further buyer device this cycle.
+	require.ErrorIs(t, marketDevice(t, cache, ctx, 66, "b1", 10, &p, buyer), full)
+	require.NoError(t, marketDevice(t, cache, ctx, 66, "o0", 10, &p, service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}))
+}

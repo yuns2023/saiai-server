@@ -307,7 +307,7 @@ func newMarketEnv(t *testing.T, accounts []Account) *marketEnv {
 
 func buyerCtx(groupID int64) context.Context {
 	gid := groupID
-	key := &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, User: &User{ID: mktBuyer, Status: StatusActive}}
+	key := &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, Group: mktGroups()[groupID], User: &User{ID: mktBuyer, Status: StatusActive}}
 	ctx := WithAccountUserID(context.Background(), mktBuyer)
 	ctx = WithAccountAPIKeyID(ctx, mktKey)
 	return WithMarketDispatch(ctx, key)
@@ -379,7 +379,7 @@ func TestMarketClassification(t *testing.T) {
 	require.Equal(t, MarketClassExcluded, class(otherUser, listedInHosted), "a trusted co-user of the hosted group is not the owner")
 
 	// Self purchase stays on the buyer path (no reservation).
-	self := at(WithMarketDispatch(WithAccountUserID(context.Background(), mktOwner), &APIKey{ID: 5, UserID: mktOwner, User: &User{ID: mktOwner}}), mktTier)
+	self := at(WithMarketDispatch(WithAccountUserID(context.Background(), mktOwner), &APIKey{ID: 5, UserID: mktOwner, GroupID: ptr64(mktTier), Group: groups[mktTier], User: &User{ID: mktOwner}}), mktTier)
 	c, sel = svc.classifyMarketCandidate(self, &listed)
 	require.Equal(t, MarketClassBuyer, c)
 	require.True(t, sel.SelfPurchase)
@@ -679,7 +679,7 @@ func (s *marketDeviceStub) GetOrCreateCarpoolDeviceMarket(_ context.Context, _ i
 func buyerForwardCtx(t *testing.T, base context.Context) (context.Context, *MarketAttempt) {
 	t.Helper()
 	gid := mktTier
-	key := &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, User: &User{ID: mktBuyer, Status: StatusActive}}
+	key := &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, Group: mktGroups()[mktTier], User: &User{ID: mktBuyer, Status: StatusActive}}
 	ctx := WithAccountUserID(base, mktBuyer)
 	ctx = context.WithValue(ctx, ctxkey.ClientRequestID, "client-req-1")
 	ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: mktTier, Platform: PlatformAnthropic, Status: StatusActive, RateMultiplier: 1.2, MarketTier: true, Hydrated: true, ClaudeOAuthRequestGateDisabled: false})
@@ -1121,4 +1121,40 @@ func TestMarketOpsPinnedRetryRechecksTierPlatform(t *testing.T) {
 	require.Zero(t, upstream.calls)
 	require.Len(t, env.store.requests, 1)
 	require.Equal(t, MarketClassPlatform, env.store.requests[0].Class)
+}
+
+// ---- review round 3 ----
+
+func TestMarketDirtyGenerationSurvivesRecreation(t *testing.T) {
+	rt := NewMarketRuntime(nil, nil)
+	high := MarketUsageObservations{SevenDay: &MarketUsageObservation{Utilization: 0.9, ResetAt: 100, ObservedAt: 10}}
+	rt.usageWriteDone(1, high, 0, errors.New("down")) // entry A
+	_, genA1 := rt.takeUsageForWrite(1, MarketUsageObservations{})
+	_, genA2 := rt.takeUsageForWrite(1, MarketUsageObservations{})
+	rt.usageWriteDone(1, MarketUsageObservations{}, genA1, nil) // first replay succeeds: cleared
+	require.False(t, rt.usageIsDirty(1))
+	rt.usageWriteDone(1, high, 0, errors.New("down"))           // entry B (new failure)
+	rt.usageWriteDone(1, MarketUsageObservations{}, genA2, nil) // stale success of A
+	require.True(t, rt.usageIsDirty(1), "a success that never carried B's observations cannot clear B")
+}
+
+func TestMergeMarketObservationsNeverCarriesUltraFlag(t *testing.T) {
+	a := MarketUsageObservations{FiveHourAbsent: &MarketFiveHourAbsence{Absent: true, ObservedAt: 20}}
+	b := MarketUsageObservations{SevenDay: &MarketUsageObservation{Utilization: 0.5, ResetAt: 200, ObservedAt: 30}}
+	require.Nil(t, mergeMarketObservations(a, b).FiveHourAbsent)
+	c := MarketUsageObservations{FiveHourAbsent: &MarketFiveHourAbsence{Absent: false, ObservedAt: 20}}
+	require.False(t, mergeMarketObservations(a, c).FiveHourAbsent.Absent)
+}
+
+func TestMarketPriceUsesTheBilledKeyGroup(t *testing.T) {
+	env := newMarketEnv(t, []Account{mktListedAccount(1)})
+	gid := mktTier
+	noGroup := WithMarketDispatch(WithAccountUserID(context.Background(), mktBuyer), &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, User: &User{ID: mktBuyer}})
+	_, err := env.svc.SelectAccountWithLoadAwareness(noGroup, ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts, "no billed group object: not a sale")
+	zero := *mktGroups()[mktTier]
+	zero.ModelRateMultipliers = map[string]float64{"claude-fable-5": 0}
+	zeroRate := WithMarketDispatch(WithAccountUserID(context.Background(), mktBuyer), &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &gid, Group: &zero, User: &User{ID: mktBuyer}})
+	_, err = env.svc.SelectAccountWithLoadAwareness(zeroRate, ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts, "zero model rate: not sellable")
 }

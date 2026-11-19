@@ -223,10 +223,14 @@ func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accoun
 		// Only the current owner's own listing marks the account locally
 		// (someone else's request is refused below and must not change
 		// scheduling); the transaction re-checks ownership under the lock.
-		if _, err := s.repo.GetOwnedAccountFacts(ctx, ownerUserID, accountID); err == nil {
-			s.listings.BeginListing(accountID)
-			defer s.listings.EndListing(accountID)
+		_, err := s.repo.GetOwnedAccountFacts(ctx, ownerUserID, accountID)
+		if err != nil {
+			// Not the owner (or the check failed): nothing is listed; never
+			// let a listing commit without its local mark.
+			return nil, err
 		}
+		s.listings.BeginListing(accountID)
+		defer s.listings.EndListing(accountID)
 	}
 	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
 		OwnerUserID: ownerUserID,
