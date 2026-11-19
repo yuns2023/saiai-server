@@ -235,9 +235,10 @@ type MarketRuntime struct {
 	// pending: listings started in this process and not yet confirmed by a
 	// poll that began after they ended (treated as listed meanwhile).
 	pending map[int64]*marketPendingListing
-	// usageDirty: an observation write failed; the account is not sellable
-	// until a later write succeeds (the stored value may be too low).
-	usageDirty map[int64]struct{}
+	// usageDirty: observations whose write failed, kept (merged) and
+	// replayed with the next write; the account is not sellable until a
+	// write that includes them succeeds.
+	usageDirty map[int64]*marketDirtyUsage
 	stopOnce   sync.Once
 	stop       chan struct{}
 }
@@ -245,7 +246,7 @@ type MarketRuntime struct {
 // NewMarketRuntime creates the runtime; Start begins polling.
 func NewMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
 	return &MarketRuntime{store: store, usage: usage, listed: map[int64]struct{}{}, stop: make(chan struct{}),
-		pending: map[int64]*marketPendingListing{}, usageDirty: map[int64]struct{}{}}
+		pending: map[int64]*marketPendingListing{}, usageDirty: map[int64]*marketDirtyUsage{}}
 }
 
 type marketPendingListing struct {
@@ -283,17 +284,76 @@ func (r *MarketRuntime) EndListing(accountID int64) {
 	r.mu.Unlock()
 }
 
-func (r *MarketRuntime) markUsageDirty(accountID int64, dirty bool) {
-	if r == nil {
+type marketDirtyUsage struct {
+	obs MarketUsageObservations
+	gen uint64
+}
+
+// takeUsageForWrite merges the failed observations of the account into obs
+// and returns the dirty generation included.
+func (r *MarketRuntime) takeUsageForWrite(accountID int64, obs MarketUsageObservations) (MarketUsageObservations, uint64) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	d := r.usageDirty[accountID]
+	if d == nil {
+		return obs, 0
+	}
+	return mergeMarketObservations(d.obs, obs), d.gen
+}
+
+// usageWriteDone records a write outcome: a failure keeps (merges) the
+// observations for replay; a success clears them only if no newer failure
+// was recorded meanwhile.
+func (r *MarketRuntime) usageWriteDone(accountID int64, obs MarketUsageObservations, includedGen uint64, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d := r.usageDirty[accountID]
+	if err != nil {
+		if d == nil {
+			d = &marketDirtyUsage{}
+			r.usageDirty[accountID] = d
+		}
+		d.obs = mergeMarketObservations(d.obs, obs)
+		d.gen++
 		return
 	}
-	r.mu.Lock()
-	if dirty {
-		r.usageDirty[accountID] = struct{}{}
-	} else {
+	if d != nil && d.gen == includedGen {
 		delete(r.usageDirty, accountID)
 	}
-	r.mu.Unlock()
+}
+
+// mergeMarketObservations keeps, per window, the later window or the higher
+// utilization of the same window, and the later absence observation.
+func mergeMarketObservations(a, b MarketUsageObservations) MarketUsageObservations {
+	pick := func(x, y *MarketUsageObservation) *MarketUsageObservation {
+		switch {
+		case x == nil:
+			return y
+		case y == nil:
+			return x
+		case x.ResetAt != y.ResetAt:
+			if x.ResetAt > y.ResetAt {
+				return x
+			}
+			return y
+		}
+		out := *x
+		out.Utilization = math.Max(x.Utilization, y.Utilization)
+		out.ObservedAt = max64(x.ObservedAt, y.ObservedAt)
+		return &out
+	}
+	out := MarketUsageObservations{FiveHour: pick(a.FiveHour, b.FiveHour), SevenDay: pick(a.SevenDay, b.SevenDay), FiveHourAbsent: a.FiveHourAbsent}
+	if b.FiveHourAbsent != nil && (out.FiveHourAbsent == nil || b.FiveHourAbsent.ObservedAt >= out.FiveHourAbsent.ObservedAt) {
+		out.FiveHourAbsent = b.FiveHourAbsent
+	}
+	return out
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (r *MarketRuntime) usageIsDirty(accountID int64) bool {
@@ -310,8 +370,8 @@ func (r *MarketRuntime) usageIsDirty(accountID int64) bool {
 // poller.
 func ProvideMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
 	rt := NewMarketRuntime(store, usage)
-	for attempt := 0; attempt < 5 && !rt.Refresh(context.Background()); attempt++ {
-		time.Sleep(time.Second)
+	for attempt := 0; attempt < 10 && !rt.Refresh(context.Background()); attempt++ {
+		time.Sleep(2 * time.Second)
 	}
 	rt.Start(marketRegistryPollInterval)
 	return rt
@@ -421,7 +481,21 @@ func (r *MarketRuntime) marketAccountListed(account *Account) bool {
 	if account == nil {
 		return false
 	}
-	return len(account.MarketGroupIDs) > 0 || account.MarketListing != nil || r.IsListed(account.ID)
+	if len(account.MarketGroupIDs) > 0 || account.MarketListing != nil || r.IsListed(account.ID) {
+		return true
+	}
+	// Until the registry has loaded once, any account with an owner may be
+	// listed: treat it as listed (conservative; only after a failed start).
+	return r != nil && !r.isLoaded() && account.OwnerUserID != nil
+}
+
+func (r *MarketRuntime) isLoaded() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.loaded
 }
 
 // ShouldRecordUsage: observations are kept only for listed accounts.
@@ -1144,6 +1218,18 @@ func marketDeviceAdmissionFor(ctx context.Context, account *Account) *MarketDevi
 	return nil
 }
 
+// marketOwnerContext: the request's group (from context) is the owner path
+// of this listed account for the authenticated user.
+func (s *GatewayService) marketOwnerContext(ctx context.Context, account *Account) bool {
+	group, ok := ctx.Value(ctxkey.Group).(*Group)
+	if !ok || group == nil {
+		return false
+	}
+	id := group.ID
+	class, _ := s.classifyMarketCandidateInGroup(ctx, account, &id, false)
+	return class == MarketClassOwner
+}
+
 // markMarketDeviceAdmitted records a successful class-aware device
 // admission on the current attempt.
 func markMarketDeviceAdmitted(ctx context.Context, account *Account) {
@@ -1241,6 +1327,13 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		}
 		logMarketAdmission(ctx, sel, reason, nil)
 		return ErrMarketAdmissionRejected
+	}
+	if ctx.Err() != nil {
+		// The client went away while the admission ran: its lease was
+		// released on cancellation, so the first upstream send must not
+		// happen (an admission without a sale settles nothing).
+		logMarketAdmission(ctx, sel, "request_cancelled", ctx.Err())
+		return ctx.Err()
 	}
 	if sel.Class == MarketClassBuyer {
 		a := verdict.Admission
@@ -1353,6 +1446,15 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 	return "class"
 }
 
+// marketAdmissionError maps a final-admission failure: a cancelled request
+// ends (no reselection); anything else fails over.
+func marketAdmissionError(ctx context.Context, err error) error {
+	if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return err
+	}
+	return marketAdmissionFailoverError(err)
+}
+
 // marketAdmissionFailoverError refuses a candidate at the dispatch boundary
 // without touching the account's health: the handler releases the lease,
 // excludes the account for this request and reselects.
@@ -1404,14 +1506,11 @@ func (s *GatewayService) SelectMarketTierCountTokensAccount(ctx context.Context,
 
 // verifyMarketTierPlatform is the read-only authoritative platform check.
 func (s *GatewayService) verifyMarketTierPlatform(ctx context.Context, account *Account, groupID *int64) bool {
-	class, sel := s.classifyMarketCandidateInGroup(ctx, account, groupID, false)
-	if class != MarketClassPlatform || sel == nil {
+	if account == nil || groupID == nil || s.market == nil || s.market.store == nil {
 		return false
 	}
-	if s.market == nil || s.market.store == nil {
-		return true
-	}
-	req := &MarketAdmissionRequest{Class: MarketClassPlatform, AccountID: account.ID, GroupID: sel.GroupID, AuthUserID: authUserIDFromContext(ctx)}
+	sel := &MarketSelection{Class: MarketClassPlatform, AccountID: account.ID, GroupID: *groupID, Concurrency: account.Concurrency}
+	req := &MarketAdmissionRequest{Class: MarketClassPlatform, AccountID: account.ID, GroupID: *groupID, AuthUserID: authUserIDFromContext(ctx)}
 	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
 	defer cancel()
 	verdict, err := s.market.store.AdmitMarketCandidate(checkCtx, req, func(f *MarketAuthoritativeFacts) string {

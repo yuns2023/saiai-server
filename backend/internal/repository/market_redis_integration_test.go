@@ -360,3 +360,39 @@ func TestMarketUsageObservationsNeverGoBackwards(t *testing.T) {
 	require.InDelta(t, 0.45, got[account].SevenDay.Utilization, 1e-9)
 	require.InDelta(t, 0.02, got[account].FiveHour.Utilization, 1e-9)
 }
+
+func TestMarketDeviceBudgetAfterMaintenanceThenPlainAdmissions(t *testing.T) {
+	cache, ctx := newMarketIdentityCache(t)
+	full := service.ErrClaudeOAuthCarpoolDevicesFull
+	p := service.CarpoolAdmissionPolicy{Generation: "00000000000000000002", Admissions: 5, InitialDue: "2026-11-19T00:00:00Z"}
+	// Cycle rollover (not the first cycle), then two plain admissions, then
+	// the account is listed in the same cycle.
+	_, err := cache.ResetCarpoolAdmissionCycle(ctx, 65, 10, p, "2026-11-20T00:00:00Z")
+	require.NoError(t, err)
+	for _, d := range []string{"x0", "x1"} {
+		_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, 65, d, service.ClientHints{}, 10, time.Now().Unix(), p)
+		require.NoError(t, err)
+	}
+	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
+	require.NoError(t, marketDevice(t, cache, ctx, 65, "b0", 10, &p, buyer))
+	require.ErrorIs(t, marketDevice(t, cache, ctx, 65, "b1", 10, &p, buyer), full, "plain admissions count as buyer ones: 2 + 1 = Q - Rq")
+}
+
+func TestMarketUsageLateResponseNeverSetsUltraFlag(t *testing.T) {
+	ctx := context.Background()
+	cache := NewMarketUsageCache(testRedis(t))
+	now := time.Now().Unix()
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 73, service.MarketUsageObservations{
+		SevenDay:       &service.MarketUsageObservation{Utilization: 0.3, ResetAt: now + 6*24*3600, ObservedAt: now},
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: false, ObservedAt: now},
+	}))
+	// A late response from the previous weekly window claims "no 5h window".
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 73, service.MarketUsageObservations{
+		SevenDay:       &service.MarketUsageObservation{Utilization: 0.1, ResetAt: now - 3600, ObservedAt: now + 2},
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now + 2},
+	}))
+	got, err := cache.GetMarketUsageObservations(ctx, []int64{73})
+	require.NoError(t, err)
+	require.False(t, got[73].FiveHourAbsent.Absent)
+	require.InDelta(t, 0.3, got[73].SevenDay.Utilization, 1e-9)
+}

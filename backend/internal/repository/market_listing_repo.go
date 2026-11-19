@@ -940,6 +940,12 @@ func (r *marketListingRepository) admitMarketOnce(ctx context.Context, in *servi
 		[]any{in.AccountID, in.GroupID}, &state.AdminMember, &state.MarketMember, &state.DBNow); err != nil {
 		return nil, err
 	}
+	var enabled sql.NullString
+	if err := scanSingleRow(ctx, tx, "SELECT value FROM settings WHERE key = $1",
+		[]any{service.SettingKeyMarketEnabled}, &enabled); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	state.MarketEnabled = enabled.Valid && enabled.String == "true"
 	if err := check(state, in); err != nil {
 		return nil, err
 	}

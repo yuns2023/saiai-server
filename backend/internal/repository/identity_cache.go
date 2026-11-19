@@ -1028,9 +1028,10 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 				budget.LastDue = due
 				budget.Used = used
 				budget.BuyerUsed = buyerUsed
-				if used == 0 {
-					budget.MarketClassified = true
-				}
+				// A fresh cycle (used = 0) is unclassified again: admissions
+				// made by the plain path before the next market admission are
+				// then migrated as buyer ones. A kept first cycle keeps its flag.
+				budget.MarketClassified = budget.MarketClassified && used > 0
 				budget.Quota = policy.Admissions
 				encoded, err := json.Marshal(budget)
 				if err != nil {

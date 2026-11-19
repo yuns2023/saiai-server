@@ -30,6 +30,7 @@ var recordMarketUsageScript = redis.NewScript(`
 	local key = KEYS[1]
 	local ttl = tonumber(ARGV[1])
 	local written = 0
+	local stale = false
 	local function decode(raw)
 		if not raw then return nil end
 		local ok, v = pcall(cjson.decode, raw)
@@ -46,8 +47,11 @@ var recordMarketUsageScript = redis.NewScript(`
 		local out = nil
 		if field == '5h_absent' then
 			-- Later observation wins; at the same second "has a 5h window"
-			-- (absent=false) wins.
-			if old == nil then
+			-- (absent=false) wins. A response whose 7d belongs to an older
+			-- window than the stored one is late: it never sets the flag.
+			if stale then
+				out = nil
+			elseif old == nil then
 				out = raw
 			else
 				local oldAt = tonumber(old['at']) or 0
@@ -63,6 +67,9 @@ var recordMarketUsageScript = redis.NewScript(`
 				out = raw
 			else
 				local oldReset = tonumber(old['reset']) or 0
+				if new['reset'] < oldReset and field == '7d' then
+					stale = true
+				end
 				if new['reset'] > oldReset then
 					out = raw
 				elseif new['reset'] == oldReset then

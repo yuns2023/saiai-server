@@ -965,22 +965,26 @@ func TestMarketUsageWriteFailureStopsSelling(t *testing.T) {
 	res, err := env.svc.SelectAccountWithLoadAwareness(ctx, ptr64(mktTier), "", "claude-fable-5", nil, "")
 	require.NoError(t, err)
 	res.ReleaseFunc()
-	failing := &failingUsageCache{fakeMarketUsage: env.usage}
+	failing := &failingUsageCache{fakeMarketUsage: env.usage, fail: true}
 	env.rt.usage = failing
 	rl := &RateLimitService{market: env.rt}
 	acc := mktListedAccount(1)
 	h := http.Header{}
 	h.Set("anthropic-ratelimit-unified-7d-utilization", "0.9")
-	h.Set("anthropic-ratelimit-unified-7d-reset", itoa(time.Now().Add(48*time.Hour).Unix()))
+	h.Set("anthropic-ratelimit-unified-7d-reset", itoa(time.Now().Add(100*time.Hour).Unix())) // a later window than the fixture
 	rl.recordMarketUsageObservations(context.Background(), &acc, h, sampleAnthropicPassiveUsageHeaders(h, time.Now()), time.Now(), true)
 	_, err = env.svc.SelectAccountWithLoadAwareness(buyerCtx(mktTier), ptr64(mktTier), "", "claude-fable-5", nil, "")
 	require.ErrorIs(t, err, ErrNoAvailableAccounts, "a lost (possibly higher) observation stops selling")
+	require.True(t, env.rt.usageIsDirty(1))
+	// The store recovers; a later low value of the same window does not
+	// unblock it: the lost 0.9 is replayed and kept (same-window maximum).
 	failing.fail = false
 	h.Set("anthropic-ratelimit-unified-7d-utilization", "0.1")
 	rl.recordMarketUsageObservations(context.Background(), &acc, h, sampleAnthropicPassiveUsageHeaders(h, time.Now()), time.Now(), true)
-	res, err = env.svc.SelectAccountWithLoadAwareness(buyerCtx(mktTier), ptr64(mktTier), "", "claude-fable-5", nil, "")
-	require.NoError(t, err)
-	res.ReleaseFunc()
+	require.False(t, env.rt.usageIsDirty(1))
+	_, err = env.svc.SelectAccountWithLoadAwareness(buyerCtx(mktTier), ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts, "the replayed high value still caps")
+	require.InDelta(t, 0.9, env.usage.obs[1].SevenDay.Utilization, 1e-9)
 }
 
 type failingUsageCache struct {
@@ -992,7 +996,18 @@ func (f *failingUsageCache) RecordMarketUsageObservations(ctx context.Context, i
 	if f.fail || f.fakeMarketUsage == nil {
 		return errors.New("redis down")
 	}
-	return f.fakeMarketUsage.RecordMarketUsageObservations(ctx, id, obs)
+	// Same-window maximum, like the Lua store.
+	f.mu.Lock()
+	merged := mergeMarketObservations(derefObs(f.obs[id]), obs)
+	f.mu.Unlock()
+	return f.fakeMarketUsage.RecordMarketUsageObservations(ctx, id, merged)
+}
+
+func derefObs(o *MarketUsageObservations) MarketUsageObservations {
+	if o == nil {
+		return MarketUsageObservations{}
+	}
+	return *o
 }
 
 func TestMarketForwardRejectsBillingGroupMismatch(t *testing.T) {
@@ -1034,4 +1049,76 @@ func TestMarketTierCountTokensRechecksPlatformInDatabase(t *testing.T) {
 	only.store.members = 1
 	_, err := only.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-fable-5")
 	require.ErrorIs(t, err, ErrNoAvailableAccounts, "configured but unavailable: 503")
+}
+
+// ---- review round 2 ----
+
+func TestMarketRegistryColdStartIsConservative(t *testing.T) {
+	rt := NewMarketRuntime(&fakeMarketStore{}, nil) // never loaded
+	owned := mktPlatformAccount(1, mktPlain)
+	owned.OwnerUserID = ptr64(mktOwner)
+	require.True(t, rt.marketAccountListed(&owned), "before the first load any owned account may be listed")
+	require.False(t, rt.marketAccountListed(ptr(mktPlatformAccount(2, mktPlain))))
+	rt.SetState(&MarketDispatchState{})
+	require.False(t, rt.marketAccountListed(&owned))
+}
+
+type listingObserverStub struct{ begun []int64 }
+
+func (o *listingObserverStub) BeginListing(id int64) { o.begun = append(o.begun, id) }
+func (o *listingObserverStub) EndListing(int64)      {}
+
+func TestMarketListingMarksOnlyOwnListings(t *testing.T) {
+	repo := &fakeMarketRepo{account: marketTestAccount(7)}
+	svc := NewMarketListingService(repo, &marketSettingRepo{values: map[string]string{}})
+	obs := &listingObserverStub{}
+	svc.SetListingObserver(obs)
+	_, _ = svc.OwnerSet(context.Background(), 8, 11, 3, true)
+	require.Empty(t, obs.begun, "someone else's listing request never changes scheduling")
+	_, _ = svc.OwnerSet(context.Background(), 7, 11, 3, true)
+	require.Equal(t, []int64{11}, obs.begun)
+}
+
+func TestMarketForwardCancelledDuringAdmissionNeverDispatches(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	base, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	ctx, attempt := buyerForwardCtx(t, base)
+	inner := env.store.facts
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		cancel() // the client goes away while the admission runs
+		return inner(req)
+	}
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	require.ErrorIs(t, err, context.Canceled)
+	var failover *UpstreamFailoverError
+	require.False(t, errors.As(err, &failover), "a cancelled request ends, it does not reselect")
+	require.Zero(t, upstream.calls)
+	_, proof := attempt.SettlementFields()
+	require.Nil(t, proof)
+}
+
+func TestMarketOpsPinnedRetryRechecksTierPlatform(t *testing.T) {
+	platform := mktPlatformAccount(2, mktTier)
+	env := newMarketEnv(t, []Account{platform})
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		acc := mktPlatformAccount(req.AccountID, mktTier)
+		acc.OwnerUserID = ptr64(mktOwner) // got an owner after the read
+		return &MarketAuthoritativeFacts{AccountFound: true, Account: &acc, MembershipSource: AccountGroupSourceAdmin,
+			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic}
+	}
+	upstream := &scriptedGatewayHTTPUpstream{results: []scriptedGatewayHTTPResult{{response: gatewayHTTPSuccessResponse}}}
+	env.svc.httpUpstream = upstream
+	env.svc.responseHeaderFilter = compileResponseHeaderFilter(env.svc.cfg)
+	env.svc.rateLimitService = &RateLimitService{}
+	env.svc.deferredService = &DeferredService{}
+	ops := &OpsService{gatewayService: env.svc, accountRepo: env.svc.accountRepo}
+	errorLog := &OpsErrorLogDetail{OpsErrorLog: OpsErrorLog{GroupID: ptr64(mktTier), RequestPath: "/v1/messages"}}
+	body := []byte(`{"model":"claude-fable-5","stream":false,"max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	exec := ops.executePinnedRetry(context.Background(), opsRetryTypeMessages, errorLog, body, 2)
+	require.Equal(t, opsRetryStatusFailed, exec.status)
+	require.Zero(t, upstream.calls)
+	require.Len(t, env.store.requests, 1)
+	require.Equal(t, MarketClassPlatform, env.store.requests[0].Class)
 }

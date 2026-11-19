@@ -1101,6 +1101,12 @@ func (s *GatewayService) GenerateStickySessionHashForRequest(ctx context.Context
 	if err != nil || mode == "" {
 		return fallback, mode, err
 	}
+	if mode == ClaudeOAuthModePinned {
+		if g := s.groupForMarket(ctx, groupID); g != nil && g.MarketTier {
+			// Pinned scheduling is not supported in market tiers.
+			mode = ClaudeOAuthModeCarpool
+		}
+	}
 	parsedUserID := ParseMetadataUserID(strings.TrimSpace(parsed.MetadataUserID))
 	if parsedUserID == nil || parsedUserID.SessionID == "" {
 		return fallback, mode, nil
@@ -2071,7 +2077,17 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 			deviceAPIKey, _ = value.(*APIKey)
 		}
 		var deviceErr error
-		if marketDevice := marketDeviceAdmissionFor(ctx, account); marketDevice != nil {
+		marketDevice := marketDeviceAdmissionFor(ctx, account)
+		if marketDevice == nil && s.marketAccountListed(account) {
+			// A listed account without a market attempt (count_tokens): only
+			// its owner in the owner's hosted group, registered as an owner
+			// device, never as an unclassified one.
+			if !s.marketOwnerContext(ctx, account) {
+				return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, claudeOAuthCarpoolDevicesFullMessage, ErrMarketAdmissionRejected)
+			}
+			marketDevice = &MarketDeviceAdmission{Class: MarketDeviceClassOwner}
+		}
+		if marketDevice != nil {
 			_, deviceErr = s.identityService.EnsureCarpoolDeviceAllowedMarket(ctx, account, originalUserID, clientHeaders, *marketDevice, deviceAPIKey)
 			// The buyer path never dispatches without a device admission:
 			// unidentified device or registry error = try another account.
@@ -5537,7 +5553,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	if marketAttempt != nil && (account.IsAnthropicAPIKeyPassthroughEnabled() || account.IsBedrock()) {
 		if err := s.finalizeMarketAdmission(ctx, account, marketAttempt, parsed.Model); err != nil {
-			return nil, marketAdmissionFailoverError(err)
+			return nil, marketAdmissionError(ctx, err)
 		}
 	}
 
@@ -5645,7 +5661,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	if marketAttempt != nil {
 		if err := s.finalizeMarketAdmission(ctx, account, marketAttempt, reqModel); err != nil {
-			return nil, marketAdmissionFailoverError(err)
+			return nil, marketAdmissionError(ctx, err)
 		}
 	}
 

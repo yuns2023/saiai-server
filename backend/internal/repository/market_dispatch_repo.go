@@ -51,9 +51,8 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 // AdmitMarketCandidate runs one candidate's final admission.
 //
 // Buyer path: the admission contract AdmitMarket (REPEATABLE READ, listing
-// row share-locked, one snapshot, check then insert, one rerun on 40001);
-// evaluate runs inside its check (pure, may run twice). The market switch is
-// read just before (it only gates new admissions).
+// row share-locked, one snapshot incl. the market switch, check then insert,
+// one rerun on 40001); evaluate runs inside its check (pure, may run twice).
 //
 // Owner / platform paths: the same reads in a read-only REPEATABLE READ
 // transaction, plus the owner's hosted_owner_groups mapping and the group's
@@ -64,10 +63,6 @@ func (r *marketListingRepository) AdmitMarketCandidate(ctx context.Context, req 
 	}
 	if req.Class != service.MarketClassBuyer {
 		return r.checkMarketCandidate(ctx, req, evaluate)
-	}
-	enabled, err := r.marketEnabled(ctx, r.db)
-	if err != nil {
-		return nil, err
 	}
 	var (
 		facts  *service.MarketAuthoritativeFacts
@@ -81,7 +76,7 @@ func (r *marketListingRepository) AdmitMarketCandidate(ctx context.Context, req 
 		BuyerUserID: req.AuthUserID,
 		APIKeyID:    req.APIKeyID,
 	}, func(state *service.MarketAdmissionState, in *service.MarketAdmission) error {
-		facts = marketFactsFromState(state, enabled)
+		facts = marketFactsFromState(state)
 		reason = evaluate(facts)
 		if reason != "" {
 			return errMarketCandidateRefused
@@ -102,7 +97,7 @@ func (r *marketListingRepository) AdmitMarketCandidate(ctx context.Context, req 
 
 var errMarketCandidateRefused = errors.New("market candidate refused")
 
-func marketFactsFromState(state *service.MarketAdmissionState, enabled bool) *service.MarketAuthoritativeFacts {
+func marketFactsFromState(state *service.MarketAdmissionState) *service.MarketAuthoritativeFacts {
 	f := &service.MarketAuthoritativeFacts{
 		AccountFound:       state.Account != nil,
 		Account:            state.Account,
@@ -112,7 +107,7 @@ func marketFactsFromState(state *service.MarketAdmissionState, enabled bool) *se
 		GroupPlatform:      state.GroupPlatform,
 		OwnerUserStatus:    state.OwnerUserStatus,
 		LatestOwnerEventID: state.OwnerEventID,
-		MarketEnabled:      enabled,
+		MarketEnabled:      state.MarketEnabled,
 		Listing:            state.Listing,
 	}
 	if state.OwnerEventUserID != nil {

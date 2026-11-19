@@ -54,12 +54,14 @@ func (s *RateLimitService) recordMarketUsageObservations(ctx context.Context, ac
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
-	if err := s.market.usage.RecordMarketUsageObservations(writeCtx, account.ID, obs); err != nil {
-		// The stored value may now be lower than the truth: stop selling
-		// this account until a later write succeeds.
-		s.market.markUsageDirty(account.ID, true)
+	// Replay observations whose earlier write failed (merged; the store
+	// keeps the newer/higher value).
+	toWrite, gen := s.market.takeUsageForWrite(account.ID, obs)
+	err := s.market.usage.RecordMarketUsageObservations(writeCtx, account.ID, toWrite)
+	// A failure keeps them and stops selling the account (the stored value
+	// may be lower than the truth) until a write including them succeeds.
+	s.market.usageWriteDone(account.ID, toWrite, gen, err)
+	if err != nil {
 		slog.Warn("market_usage_observation_write_failed", "account_id", account.ID, "error", err)
-		return
 	}
-	s.market.markUsageDirty(account.ID, false)
 }

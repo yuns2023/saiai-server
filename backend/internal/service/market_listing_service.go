@@ -220,8 +220,13 @@ func (s *MarketListingService) OwnerGet(ctx context.Context, ownerUserID, accoun
 // market_enabled) or stops sharing (listed=false; always allowed).
 func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accountID, groupID int64, listed bool) (*OwnerMarketView, error) {
 	if listed && s.listings != nil {
-		s.listings.BeginListing(accountID)
-		defer s.listings.EndListing(accountID)
+		// Only the current owner's own listing marks the account locally
+		// (someone else's request is refused below and must not change
+		// scheduling); the transaction re-checks ownership under the lock.
+		if _, err := s.repo.GetOwnedAccountFacts(ctx, ownerUserID, accountID); err == nil {
+			s.listings.BeginListing(accountID)
+			defer s.listings.EndListing(accountID)
+		}
 	}
 	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
 		OwnerUserID: ownerUserID,
