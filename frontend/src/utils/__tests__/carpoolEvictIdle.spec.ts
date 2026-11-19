@@ -3,7 +3,7 @@ import { DEFAULT_CARPOOL_EVICT_IDLE_HOURS, normalizeCarpoolEvictIdleHours } from
 
 describe('normalizeCarpoolEvictIdleHours', () => {
   it('defaults when absent or invalid', () => {
-    for (const v of [undefined, null, '', 'abc', Number.NaN]) {
+    for (const v of [undefined, null, '', '  ', 'abc', Number.NaN, Number.POSITIVE_INFINITY, false, true, {}]) {
       expect(normalizeCarpoolEvictIdleHours(v)).toBe(DEFAULT_CARPOOL_EVICT_IDLE_HOURS)
     }
   })

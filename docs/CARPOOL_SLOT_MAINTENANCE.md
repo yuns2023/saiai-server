@@ -35,7 +35,8 @@ allowance and schedules first-cycle capacity reservation for the next worker pas
 (typically within a minute). Admissions consumed before that pass are retained. At each due time, atomically reset the allowance
 to the configured number and remove the least-recently-seen records only if
 needed to make room for that many admissions. For capacity 10 and allowance 2,
-counts 10, 9, 8 and 0 cause 2, 1, 0 and 0 removals, but each new cycle permits
+counts 10, 9, 8 and 0 cause at most 2, 1, 0 and 0 removals (fewer when the idle
+threshold below disqualifies records), but each new cycle permits
 at most 2 new registrations. Unused allowances never accumulate. Device
 registration and budget consumption share one Redis transaction, including
 cross-replica concurrency and repeat requests from the same device.
@@ -47,6 +48,13 @@ same cycle: the next chance is the next due time. The allowance still resets,
 so a device can register in that cycle only if capacity is free (for example
 after a manual deletion). The first-cycle reservation after enabling follows
 the same rule.
+
+Upgrade note: accounts that already had periodic maintenance enabled do not
+need to be re-saved; the absent field means 24 hours from the first due time
+after the upgrade. An account whose interval is shorter than the threshold
+(for example 1 admission every 6 or 8 hours) and whose devices are all used
+more often than every 24 hours can open 0 slots for several cycles in a row.
+Set the field to 0 to restore the previous behavior for such an account.
 
 Each pass removes at most the configured allowance, even if a capacity reduction
 has left more registered devices than the limit. Existing free slots reduce the

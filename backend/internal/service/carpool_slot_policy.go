@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -54,17 +56,37 @@ func (a *Account) GetCarpoolEvictIdleHours() int {
 	if a == nil || a.Extra == nil {
 		return DefaultCarpoolEvictIdleHours
 	}
-	v, ok := a.Extra[CarpoolEvictIdleHoursKey]
-	if !ok || v == nil {
-		return DefaultCarpoolEvictIdleHours
-	}
-	if str, isString := v.(string); isString {
-		// An unparseable value must not silently lift the restriction.
-		if _, err := strconv.ParseFloat(strings.TrimSpace(str), 64); err != nil {
+	var f float64
+	switch v := a.Extra[CarpoolEvictIdleHoursKey].(type) {
+	case float64:
+		f = v
+	case float32:
+		f = float64(v)
+	case int:
+		f = float64(v)
+	case int64:
+		f = float64(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		if err != nil {
 			return DefaultCarpoolEvictIdleHours
 		}
+		f = parsed
+	case string:
+		// An unparseable or blank value must not silently lift the restriction.
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return DefaultCarpoolEvictIdleHours
+		}
+		f = parsed
+	default:
+		// Absent, null, booleans and other JSON types keep the default.
+		return DefaultCarpoolEvictIdleHours
 	}
-	return min(max(0, int(parseExtraFloat64(v))), 720)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return DefaultCarpoolEvictIdleHours
+	}
+	return int(math.Min(720, math.Max(0, f)))
 }
 
 // The legacy enable flag remains wire-compatible; expansion is no longer performed.

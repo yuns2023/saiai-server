@@ -1177,10 +1177,10 @@
                   <input v-model.number="carpoolMaintenanceIntervalHours" data-testid="carpool-maintenance-interval" type="number" min="1" max="720" step="1" class="input" />
                   <label class="input-label mt-3">每周期新设备名额</label>
                   <input v-model.number="carpoolAdmissionsPerCycle" data-testid="carpool-admissions-per-cycle" type="number" min="0" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
-                  <label class="input-label mt-3">仅移除闲置超过（小时）的设备</label>
-                  <input v-model.number="carpoolEvictIdleHours" data-testid="carpool-evict-idle-hours" type="number" min="0" max="720" step="1" class="input" />
-                  <p class="input-hint">默认 24。周期调整需要腾位时，只移除最近这么多小时内没有使用过的设备（仍从最久未使用的开始）；没有符合条件的设备就不移除，本周期不再重试，等下次调整。0 表示不限制闲置时长。</p>
                   <p class="input-hint">默认 0，表示不限周期接纳数量，仍受设备总上限约束。大于 0 时，首次启用后约一分钟内按需释放首轮设备位，此后按执行间隔调整；每轮最多移除配置数量的最久未使用设备，已有空位足够时不移除。已登记设备不消耗名额，未用完的名额不累计。修改名额保存后立即生效，保留本轮已用数量和重置时间。</p>
+                  <label class="input-label mt-3">腾位所需最短闲置时长（小时）</label>
+                  <input v-model.number="carpoolEvictIdleHours" data-testid="carpool-evict-idle-hours" type="number" min="0" max="720" step="1" class="input" />
+                  <p class="input-hint">默认 24。周期调整需要腾位时，只移除至少这么多小时没有使用过的设备（仍从最久未使用的开始）；没有符合条件的设备就不移除，本周期不再重试，等下次调整。执行间隔短于该时长且设备都在持续使用时，可能连续多轮开放 0 个名额。0 表示不限制闲置时长（旧行为）。</p>
                   <p class="input-hint" data-testid="carpool-next-maintenance">下次调整：{{ carpoolNextMaintenanceLabel }}</p>
                 </div>
               </div>

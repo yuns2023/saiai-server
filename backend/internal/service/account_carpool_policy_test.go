@@ -168,6 +168,10 @@ func TestCarpoolEvictIdleHoursPolicy(t *testing.T) {
 		{name: "unparseable string keeps default", value: "abc", set: true, want: DefaultCarpoolEvictIdleHours},
 		{name: "negative clamps to zero", value: float64(-3), set: true, want: 0},
 		{name: "upper bound", value: float64(9999), set: true, want: 720},
+		{name: "huge value clamps without overflow", value: float64(1e300), set: true, want: 720},
+		{name: "blank string keeps default", value: "  ", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "boolean keeps default", value: false, set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "object keeps default", value: map[string]any{}, set: true, want: DefaultCarpoolEvictIdleHours},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
