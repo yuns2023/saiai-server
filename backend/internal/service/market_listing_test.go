@@ -255,8 +255,8 @@ func TestParseMarketSettings(t *testing.T) {
 // ---- service views (fake repository) ----
 
 type fakeMarketRepo struct {
-	account *Account
-	listing *MarketListing
+	account      *Account
+	listing      *MarketListing
 	tiers        []MarketTierOption
 	adminMembers []int64
 	lastCfg      *MarketAdminConfigureParams
