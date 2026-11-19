@@ -93,7 +93,7 @@ func TestClaudeOAuthCarpoolDevicesFullModelLimitedMessage(t *testing.T) {
 			t.Fatalf("message %q lacks %q", msg, part)
 		}
 	}
-	if strings.Contains(ClaudeOAuthCarpoolDevicesFullModelLimitedMessage("claude-fable-5-2", 0), "earliest reset") {
+	if strings.Contains(ClaudeOAuthCarpoolDevicesFullModelLimitedMessage("claude-fable-5-2", 0), "reset") {
 		t.Fatal("unknown wait must not print a reset time")
 	}
 	if !strings.Contains(ClaudeOAuthCarpoolDevicesFullModelLimitedMessage(" ", time.Hour), "serve this model") {
