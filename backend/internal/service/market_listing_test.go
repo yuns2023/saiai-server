@@ -497,9 +497,9 @@ func TestUpdateUserReportsRaceRejectedOverrideAfterFinishingCommit(t *testing.T)
 	users := &marketUserRepo{userRepoStub: userRepoStub{user: &User{ID: 5, Role: RoleUser, Status: StatusActive}}}
 	invalidator := &authCacheInvalidatorStub{}
 	svc := &adminServiceImpl{groupRepo: groups, userGroupRateRepo: &rejectingRateRepo{}, userRepo: users, authCacheInvalidator: invalidator}
-	rate := 1.0
-	// The pre-check passes (group 2 is not a tier); the database then
-	// rejects it (promoted meanwhile).
+	rate := 0.0
+	// The pre-check passes (group 2 is not a tier, 0 is allowed there); the
+	// database then rejects it (promoted meanwhile).
 	_, err := svc.UpdateUser(context.Background(), 5, &UpdateUserInput{Status: StatusDisabled, GroupRates: map[int64]*float64{2: &rate}})
 	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	require.Equal(t, 1, users.updates, "the user change was committed")
