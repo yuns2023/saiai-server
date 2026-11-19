@@ -369,6 +369,17 @@ func (r *hostedApplicationRepository) SetOwnerAccountState(ctx context.Context, 
 	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 		return nil, err
 	}
+	// Pause and withdraw stop sharing in the same transaction (the UPDATE
+	// above holds the account row lock). Resume never relists.
+	switch action {
+	case service.HostedOwnerActionPause:
+		err = marketUnlistAccountTx(ctx, tx, accountID, service.MarketListingActionOwnerPaused, false, service.MarketListingActorOwner, ownerUserID)
+	case service.HostedOwnerActionWithdraw:
+		err = marketUnlistAccountTx(ctx, tx, accountID, service.MarketListingActionOwnerWithdraw, false, service.MarketListingActorOwner, ownerUserID)
+	}
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

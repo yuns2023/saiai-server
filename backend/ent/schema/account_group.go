@@ -32,6 +32,11 @@ func (AccountGroup) Fields() []ent.Field {
 		field.Int64("group_id"),
 		field.Int("priority").
 			Default(50),
+		// source: 'admin' = admin binding, 'market' = written only by the
+		// market listing lifecycle (migration 134).
+		field.String("source").
+			Default("admin").
+			SchemaType(map[string]string{dialect.Postgres: "text"}),
 		field.Time("created_at").
 			Immutable().
 			Default(time.Now).

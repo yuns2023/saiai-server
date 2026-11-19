@@ -25,6 +25,10 @@ type SystemSettings struct {
 	// Hosted self-onboarding (setting_hosted_self_onboard.go).
 	HostedSelfOnboard HostedSelfOnboardSettings
 
+	// Sharing market (setting_market.go). nil = not loaded; UpdateSettings
+	// then leaves the stored values alone.
+	Market *MarketSettings
+
 	SMTPHost               string
 	SMTPPort               int
 	SMTPUsername           string

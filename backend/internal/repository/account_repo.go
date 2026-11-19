@@ -226,7 +226,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 	if err != nil {
 		return nil, err
 	}
-	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
+	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, marketGroupIDsByAccount, err := r.loadAccountGroupsWithMarket(ctx, accountIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +254,7 @@ func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*servi
 		if ags, ok := accountGroupsByAccount[entAcc.ID]; ok {
 			out.AccountGroups = ags
 		}
+		out.MarketGroupIDs = marketGroupIDsByAccount[entAcc.ID]
 		outByID[entAcc.ID] = out
 	}
 
@@ -535,6 +536,12 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 		txClient = r.client
 	}
 
+	// Deleting an account revokes its market listing (history kept) and
+	// removes the market memberships with their outbox rows, in this
+	// transaction.
+	if err := marketUnlistAccountTx(ctx, txClient, id, service.MarketListingActionAccountDeleted, true, service.MarketListingActorSystem, 0); err != nil {
+		return err
+	}
 	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(id)).Exec(ctx); err != nil {
 		return err
 	}
@@ -883,6 +890,14 @@ func (r *accountRepository) ClearError(ctx context.Context, id int64) error {
 }
 
 func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID int64, priority int) error {
+	if market, err := r.client.AccountGroup.Query().
+		Where(dbaccountgroup.AccountIDEQ(accountID), dbaccountgroup.GroupIDEQ(groupID),
+			dbaccountgroup.SourceEQ(service.AccountGroupSourceMarket)).
+		Exist(ctx); err != nil {
+		return err
+	} else if market {
+		return service.ErrMarketMembershipConflict
+	}
 	_, err := r.client.AccountGroup.Create().
 		SetAccountID(accountID).
 		SetGroupID(groupID).
@@ -899,10 +914,12 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 }
 
 func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, groupID int64) error {
+	// Admin bindings only: a market listing is removed through its lifecycle.
 	_, err := r.client.AccountGroup.Delete().
 		Where(
 			dbaccountgroup.AccountIDEQ(accountID),
 			dbaccountgroup.GroupIDEQ(groupID),
+			dbaccountgroup.SourceEQ(service.AccountGroupSourceAdmin),
 		).
 		Exec(ctx)
 	if err != nil {
@@ -952,7 +969,28 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 		txClient = r.client
 	}
 
-	if _, err := txClient.AccountGroup.Delete().Where(dbaccountgroup.AccountIDEQ(accountID)).Exec(ctx); err != nil {
+	// Admin bindings only (market rows belong to the listing lifecycle). The
+	// account row lock serializes this with listing writes, so the conflict
+	// check below cannot race an owner listing the same pair.
+	if _, err := txClient.ExecContext(ctx, "SELECT 1 FROM accounts WHERE id = $1 FOR NO KEY UPDATE", accountID); err != nil {
+		return err
+	}
+	if len(groupIDs) > 0 {
+		conflict, err := txClient.AccountGroup.Query().
+			Where(dbaccountgroup.AccountIDEQ(accountID), dbaccountgroup.GroupIDIn(groupIDs...),
+				dbaccountgroup.SourceEQ(service.AccountGroupSourceMarket)).
+			Exist(ctx)
+		if err != nil {
+			return err
+		}
+		if conflict {
+			return service.ErrMarketMembershipConflict
+		}
+	}
+	if _, err := txClient.AccountGroup.Delete().Where(
+		dbaccountgroup.AccountIDEQ(accountID),
+		dbaccountgroup.SourceEQ(service.AccountGroupSourceAdmin),
+	).Exec(ctx); err != nil {
 		return err
 	}
 
@@ -1808,7 +1846,7 @@ type accountGroupQueryOptions struct {
 
 func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID int64, opts accountGroupQueryOptions) ([]service.Account, error) {
 	q := r.client.AccountGroup.Query().
-		Where(dbaccountgroup.GroupIDEQ(groupID))
+		Where(dbaccountgroup.GroupIDEQ(groupID), dispatchableAccountGroupPredicate())
 
 	// 通过 account_groups 中间表查询账号，并按需叠加状态/平台/调度能力过滤。
 	preds := make([]dbpredicate.Account, 0, 6)
@@ -1895,7 +1933,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 	if err != nil {
 		return nil, err
 	}
-	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, err := r.loadAccountGroups(ctx, accountIDs)
+	groupsByAccount, groupIDsByAccount, accountGroupsByAccount, marketGroupIDsByAccount, err := r.loadAccountGroupsWithMarket(ctx, accountIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1922,6 +1960,7 @@ func (r *accountRepository) accountsToService(ctx context.Context, accounts []*d
 		if ags, ok := accountGroupsByAccount[acc.ID]; ok {
 			out.AccountGroups = ags
 		}
+		out.MarketGroupIDs = marketGroupIDsByAccount[acc.ID]
 		outAccounts = append(outAccounts, *out)
 	}
 
@@ -1981,13 +2020,16 @@ func (r *accountRepository) loadProxies(ctx context.Context, proxyIDs []int64) (
 	return proxyMap, nil
 }
 
-func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []int64) (map[int64][]*service.Group, map[int64][]int64, map[int64][]service.AccountGroup, error) {
+// loadAccountGroupsWithMarket splits memberships: dispatchable (admin) rows
+// fill the first three maps, market rows only the last one.
+func (r *accountRepository) loadAccountGroupsWithMarket(ctx context.Context, accountIDs []int64) (map[int64][]*service.Group, map[int64][]int64, map[int64][]service.AccountGroup, map[int64][]int64, error) {
 	groupsByAccount := make(map[int64][]*service.Group)
 	groupIDsByAccount := make(map[int64][]int64)
 	accountGroupsByAccount := make(map[int64][]service.AccountGroup)
+	marketGroupIDsByAccount := make(map[int64][]int64)
 
 	if len(accountIDs) == 0 {
-		return groupsByAccount, groupIDsByAccount, accountGroupsByAccount, nil
+		return groupsByAccount, groupIDsByAccount, accountGroupsByAccount, marketGroupIDsByAccount, nil
 	}
 
 	entries, err := r.client.AccountGroup.Query().
@@ -1996,10 +2038,14 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 		Order(dbaccountgroup.ByAccountID(), dbaccountgroup.ByPriority()).
 		All(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	for _, ag := range entries {
+		if !isDispatchableAccountGroupSource(ag.Source) {
+			marketGroupIDsByAccount[ag.AccountID] = append(marketGroupIDsByAccount[ag.AccountID], ag.GroupID)
+			continue
+		}
 		groupSvc := groupEntityToService(ag.Edges.Group)
 		agSvc := service.AccountGroup{
 			AccountID: ag.AccountID,
@@ -2015,7 +2061,7 @@ func (r *accountRepository) loadAccountGroups(ctx context.Context, accountIDs []
 		}
 	}
 
-	return groupsByAccount, groupIDsByAccount, accountGroupsByAccount, nil
+	return groupsByAccount, groupIDsByAccount, accountGroupsByAccount, marketGroupIDsByAccount, nil
 }
 
 func (r *accountRepository) loadAccountGroupIDs(ctx context.Context, accountID int64) ([]int64, error) {

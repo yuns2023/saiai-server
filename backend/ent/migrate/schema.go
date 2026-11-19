@@ -248,6 +248,7 @@ var (
 	// AccountGroupsColumns holds the columns for the "account_groups" table.
 	AccountGroupsColumns = []*schema.Column{
 		{Name: "priority", Type: field.TypeInt, Default: 50},
+		{Name: "source", Type: field.TypeString, Default: "admin", SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "account_id", Type: field.TypeInt64},
 		{Name: "group_id", Type: field.TypeInt64},
@@ -256,17 +257,17 @@ var (
 	AccountGroupsTable = &schema.Table{
 		Name:       "account_groups",
 		Columns:    AccountGroupsColumns,
-		PrimaryKey: []*schema.Column{AccountGroupsColumns[2], AccountGroupsColumns[3]},
+		PrimaryKey: []*schema.Column{AccountGroupsColumns[3], AccountGroupsColumns[4]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "account_groups_accounts_account",
-				Columns:    []*schema.Column{AccountGroupsColumns[2]},
+				Columns:    []*schema.Column{AccountGroupsColumns[3]},
 				RefColumns: []*schema.Column{AccountsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "account_groups_groups_group",
-				Columns:    []*schema.Column{AccountGroupsColumns[3]},
+				Columns:    []*schema.Column{AccountGroupsColumns[4]},
 				RefColumns: []*schema.Column{GroupsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -275,7 +276,7 @@ var (
 			{
 				Name:    "accountgroup_group_id",
 				Unique:  false,
-				Columns: []*schema.Column{AccountGroupsColumns[3]},
+				Columns: []*schema.Column{AccountGroupsColumns[4]},
 			},
 			{
 				Name:    "accountgroup_priority",
@@ -692,6 +693,7 @@ var (
 		{Name: "rate_multiplier", Type: field.TypeFloat64, Default: 1, SchemaType: map[string]string{"postgres": "decimal(10,4)"}},
 		{Name: "is_exclusive", Type: field.TypeBool, Default: false},
 		{Name: "hosted_usage_enabled", Type: field.TypeBool, Default: false},
+		{Name: "market_tier", Type: field.TypeBool, Default: false},
 		{Name: "show_account_quota", Type: field.TypeBool, Default: false},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "platform", Type: field.TypeString, Size: 50, Default: "anthropic"},
@@ -750,7 +752,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_access_levels_required_groups",
-				Columns:    []*schema.Column{GroupsColumns[57]},
+				Columns:    []*schema.Column{GroupsColumns[58]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -759,17 +761,17 @@ var (
 			{
 				Name:    "group_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[10]},
+				Columns: []*schema.Column{GroupsColumns[11]},
 			},
 			{
 				Name:    "group_platform",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[11]},
+				Columns: []*schema.Column{GroupsColumns[12]},
 			},
 			{
 				Name:    "group_subscription_type",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[12]},
+				Columns: []*schema.Column{GroupsColumns[13]},
 			},
 			{
 				Name:    "group_is_exclusive",
@@ -784,12 +786,12 @@ var (
 			{
 				Name:    "group_sort_order",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[38]},
+				Columns: []*schema.Column{GroupsColumns[39]},
 			},
 			{
 				Name:    "group_required_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[57]},
+				Columns: []*schema.Column{GroupsColumns[58]},
 			},
 		},
 	}

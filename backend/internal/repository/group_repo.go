@@ -87,6 +87,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetIsExclusive(groupIn.IsExclusive).
 		SetShowAccountQuota(groupIn.ShowAccountQuota).
 		SetHostedUsageEnabled(groupIn.HostedUsageEnabled).
+		SetMarketTier(groupIn.MarketTier).
 		SetNillableRequiredLevelID(groupIn.RequiredLevelID).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
@@ -184,7 +185,27 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if modelRates == nil {
 		modelRates = map[string]float64{}
 	}
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
+	// One transaction with the group row locked: a tier that stops being a
+	// market tier leaves every listing in the same transaction (lock order:
+	// group row, then listing rows).
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	client := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+	}
+	var wasMarketTier bool
+	if err := scanSingleRow(ctx, client, "SELECT market_tier FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+		[]any{groupIn.ID}, &wasMarketTier); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.ErrGroupNotFound
+		}
+		return err
+	}
+	builder := client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -192,6 +213,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetIsExclusive(groupIn.IsExclusive).
 		SetShowAccountQuota(groupIn.ShowAccountQuota).
 		SetHostedUsageEnabled(groupIn.HostedUsageEnabled).
+		SetMarketTier(groupIn.MarketTier).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
 		SetNillableFiveHourLimitUsd(groupIn.FiveHourLimitUSD).
@@ -308,6 +330,16 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
+	if wasMarketTier && !groupIn.MarketTier {
+		if err := marketRemoveGroupTx(ctx, client, groupIn.ID, service.MarketListingActionGroupDemoted); err != nil {
+			return err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	groupIn.UpdatedAt = updated.UpdatedAt
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
@@ -316,9 +348,27 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 }
 
 func (r *groupRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Group.Delete().Where(group.IDEQ(id)).Exec(ctx)
-	if err != nil {
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	client := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+	}
+	if _, err := client.Group.Delete().Where(group.IDEQ(id)).Exec(ctx); err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
+	}
+	// Market listings drop the deleted group in the same transaction (the
+	// soft delete above holds the group row lock).
+	if err := marketRemoveGroupTx(ctx, client, id, service.MarketListingActionGroupDeleted); err != nil {
+		return err
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group delete failed: group=%d err=%v", id, err)
@@ -515,8 +565,10 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 	return
 }
 
+// DeleteAccountGroupsByGroupID clears the group's admin bindings (the
+// group-side replace); market listings stay.
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1 AND source = 'admin'", groupID)
 	if err != nil {
 		return 0, err
 	}
@@ -616,7 +668,11 @@ func (r *groupRepository) DeleteCascade(ctx context.Context, id int64) ([]int64,
 		return nil, err
 	}
 
-	// 4. Delete account_groups join rows.
+	// 4. Market listings drop the group (unlist if it was selected, history
+	// kept), then every account_groups join row goes.
+	if err := marketRemoveGroupTx(ctx, exec, id, service.MarketListingActionGroupDeleted); err != nil {
+		return nil, err
+	}
 	if _, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", id); err != nil {
 		return nil, err
 	}
@@ -699,7 +755,8 @@ func (r *groupRepository) GetAccountIDsByGroupIDs(ctx context.Context, groupIDs 
 
 	rows, err := r.sql.QueryContext(
 		ctx,
-		"SELECT DISTINCT account_id FROM account_groups WHERE group_id = ANY($1) ORDER BY account_id",
+		// Copy admin bindings only: market listings are never copied.
+		"SELECT DISTINCT account_id FROM account_groups WHERE group_id = ANY($1) AND source = 'admin' ORDER BY account_id",
 		pq.Array(groupIDs),
 	)
 	if err != nil {
@@ -728,7 +785,8 @@ func (r *groupRepository) BindAccountsToGroup(ctx context.Context, groupID int64
 		return nil
 	}
 
-	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定
+	// 使用 INSERT ... ON CONFLICT DO NOTHING 忽略已存在的绑定（含号主上架的
+	// market 行：保持为 market，不改写为 admin）
 	_, err := r.sql.ExecContext(
 		ctx,
 		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
@@ -823,4 +881,28 @@ func (r *groupRepository) UpdateSortOrders(ctx context.Context, updates []servic
 		}
 	}
 	return nil
+}
+
+// ListFallbackReferrers lists live groups whose claude_code_only fallback or
+// invalid-request fallback points at groupID (a market tier may not be
+// entered through a fallback chain).
+func (r *groupRepository) ListFallbackReferrers(ctx context.Context, groupID int64) ([]int64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT id FROM groups
+		WHERE deleted_at IS NULL AND id <> $1
+		  AND (fallback_group_id = $1 OR fallback_group_id_on_invalid_request = $1)
+		ORDER BY id`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

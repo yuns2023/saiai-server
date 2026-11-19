@@ -3340,7 +3340,7 @@ func (s *GatewayService) isAccountInGroup(account *Account, groupID *int64) bool
 	if groupID == nil {
 		// 无分组的 API Key 只能使用未分组的账号；自助托管号只经号主专属组调度
 		// （专属组被删除后不会落入未分组池）。
-		return len(account.AccountGroups) == 0 && !account.SelfOnboarded
+		return len(account.AccountGroups) == 0 && len(account.MarketGroupIDs) == 0 && !account.SelfOnboarded
 	}
 	for _, ag := range account.AccountGroups {
 		if ag.GroupID == *groupID {

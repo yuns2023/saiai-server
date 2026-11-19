@@ -277,6 +277,10 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		accounts.POST("/sync/crs/preview", h.Admin.Account.PreviewFromCRS)
 		accounts.PUT("/:id", h.Admin.Account.Update)
 		accounts.PUT("/:id/owner", h.Admin.Account.SetOwner)
+		// 共享市场：允许档位与号主保障参数（P3a）
+		accounts.GET("/:id/market-listing", h.Admin.MarketListing.Get)
+		accounts.PUT("/:id/market-listing", h.Admin.MarketListing.Put)
+		accounts.DELETE("/:id/market-listing", h.Admin.MarketListing.Delete)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.GET("/:id/claude-carpool-devices", h.Admin.Account.ListClaudeCarpoolDevices)

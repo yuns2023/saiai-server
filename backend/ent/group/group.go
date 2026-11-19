@@ -31,6 +31,8 @@ const (
 	FieldIsExclusive = "is_exclusive"
 	// FieldHostedUsageEnabled holds the string denoting the hosted_usage_enabled field in the database.
 	FieldHostedUsageEnabled = "hosted_usage_enabled"
+	// FieldMarketTier holds the string denoting the market_tier field in the database.
+	FieldMarketTier = "market_tier"
 	// FieldShowAccountQuota holds the string denoting the show_account_quota field in the database.
 	FieldShowAccountQuota = "show_account_quota"
 	// FieldRequiredLevelID holds the string denoting the required_level_id field in the database.
@@ -221,6 +223,7 @@ var Columns = []string{
 	FieldRateMultiplier,
 	FieldIsExclusive,
 	FieldHostedUsageEnabled,
+	FieldMarketTier,
 	FieldShowAccountQuota,
 	FieldRequiredLevelID,
 	FieldStatus,
@@ -313,6 +316,8 @@ var (
 	DefaultIsExclusive bool
 	// DefaultHostedUsageEnabled holds the default value on creation for the "hosted_usage_enabled" field.
 	DefaultHostedUsageEnabled bool
+	// DefaultMarketTier holds the default value on creation for the "market_tier" field.
+	DefaultMarketTier bool
 	// DefaultShowAccountQuota holds the default value on creation for the "show_account_quota" field.
 	DefaultShowAccountQuota bool
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -443,6 +448,11 @@ func ByIsExclusive(opts ...sql.OrderTermOption) OrderOption {
 // ByHostedUsageEnabled orders the results by the hosted_usage_enabled field.
 func ByHostedUsageEnabled(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldHostedUsageEnabled, opts...).ToFunc()
+}
+
+// ByMarketTier orders the results by the market_tier field.
+func ByMarketTier(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMarketTier, opts...).ToFunc()
 }
 
 // ByShowAccountQuota orders the results by the show_account_quota field.

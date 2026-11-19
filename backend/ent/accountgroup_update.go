@@ -78,6 +78,20 @@ func (_u *AccountGroupUpdate) AddPriority(v int) *AccountGroupUpdate {
 	return _u
 }
 
+// SetSource sets the "source" field.
+func (_u *AccountGroupUpdate) SetSource(v string) *AccountGroupUpdate {
+	_u.mutation.SetSource(v)
+	return _u
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_u *AccountGroupUpdate) SetNillableSource(v *string) *AccountGroupUpdate {
+	if v != nil {
+		_u.SetSource(*v)
+	}
+	return _u
+}
+
 // SetAccount sets the "account" edge to the Account entity.
 func (_u *AccountGroupUpdate) SetAccount(v *Account) *AccountGroupUpdate {
 	return _u.SetAccountID(v.ID)
@@ -160,6 +174,9 @@ func (_u *AccountGroupUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if value, ok := _u.mutation.AddedPriority(); ok {
 		_spec.AddField(accountgroup.FieldPriority, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.Source(); ok {
+		_spec.SetField(accountgroup.FieldSource, field.TypeString, value)
 	}
 	if _u.mutation.AccountCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -288,6 +305,20 @@ func (_u *AccountGroupUpdateOne) AddPriority(v int) *AccountGroupUpdateOne {
 	return _u
 }
 
+// SetSource sets the "source" field.
+func (_u *AccountGroupUpdateOne) SetSource(v string) *AccountGroupUpdateOne {
+	_u.mutation.SetSource(v)
+	return _u
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_u *AccountGroupUpdateOne) SetNillableSource(v *string) *AccountGroupUpdateOne {
+	if v != nil {
+		_u.SetSource(*v)
+	}
+	return _u
+}
+
 // SetAccount sets the "account" edge to the Account entity.
 func (_u *AccountGroupUpdateOne) SetAccount(v *Account) *AccountGroupUpdateOne {
 	return _u.SetAccountID(v.ID)
@@ -402,6 +433,9 @@ func (_u *AccountGroupUpdateOne) sqlSave(ctx context.Context) (_node *AccountGro
 	}
 	if value, ok := _u.mutation.AddedPriority(); ok {
 		_spec.AddField(accountgroup.FieldPriority, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.Source(); ok {
+		_spec.SetField(accountgroup.FieldSource, field.TypeString, value)
 	}
 	if _u.mutation.AccountCleared() {
 		edge := &sqlgraph.EdgeSpec{

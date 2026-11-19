@@ -199,6 +199,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		IsExclusive:                     g.IsExclusive,
 		ShowAccountQuota:                g.ShowAccountQuota,
 		HostedUsageEnabled:              g.HostedUsageEnabled,
+		MarketTier:                      g.MarketTier,
 		Status:                          g.Status,
 		RequiredLevelID:                 g.RequiredLevelID,
 		RequiredLevel:                   AccessLevelFromService(g.RequiredLevel),

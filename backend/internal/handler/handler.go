@@ -33,6 +33,8 @@ type AdminHandlers struct {
 	Settlement       *admin.SettlementHandler
 	// HostedApplication reviews hosting applications (P2c).
 	HostedApplication *admin.HostedApplicationHandler
+	// MarketListing: per-account sharing permission (P3a).
+	MarketListing *admin.MarketListingHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -61,6 +63,8 @@ type Handlers struct {
 	AITPInstallCode *AITPInstallCodeHandler
 	// HostedSelfOnboard: hosting applications and owner pause/withdraw (P2c).
 	HostedSelfOnboard *HostedSelfOnboardHandler
+	// MarketListing: owner side of the sharing market (P3a).
+	MarketListing *MarketListingHandler
 }
 
 // BuildInfo contains build-time information

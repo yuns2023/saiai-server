@@ -32,6 +32,7 @@ type Group struct {
 	IsExclusive        bool
 	ShowAccountQuota   bool
 	HostedUsageEnabled bool
+	MarketTier         bool // admin-designated sharing tier (P3a), see ValidateMarketTier
 	Status             string
 	Hydrated           bool // indicates the group was loaded from a trusted repository source
 	RequiredLevelID    *int64

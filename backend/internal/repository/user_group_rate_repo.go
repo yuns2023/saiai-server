@@ -229,3 +229,23 @@ func (r *userGroupRateRepository) DeleteByUserID(ctx context.Context, userID int
 	_, err := r.sql.ExecContext(ctx, `DELETE FROM user_group_rate_multipliers WHERE user_id = $1`, userID)
 	return err
 }
+
+// ListNonPositiveRateUsers lists users whose stored override on groupID is
+// <= 0 (a market tier may not be sold at a zero rate).
+func (r *userGroupRateRepository) ListNonPositiveRateUsers(ctx context.Context, groupID int64) ([]int64, error) {
+	rows, err := r.sql.QueryContext(ctx,
+		`SELECT user_id FROM user_group_rate_multipliers WHERE group_id = $1 AND rate_multiplier <= 0 ORDER BY user_id`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

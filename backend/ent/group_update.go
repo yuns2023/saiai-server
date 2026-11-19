@@ -146,6 +146,20 @@ func (_u *GroupUpdate) SetNillableHostedUsageEnabled(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetMarketTier sets the "market_tier" field.
+func (_u *GroupUpdate) SetMarketTier(v bool) *GroupUpdate {
+	_u.mutation.SetMarketTier(v)
+	return _u
+}
+
+// SetNillableMarketTier sets the "market_tier" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableMarketTier(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetMarketTier(*v)
+	}
+	return _u
+}
+
 // SetShowAccountQuota sets the "show_account_quota" field.
 func (_u *GroupUpdate) SetShowAccountQuota(v bool) *GroupUpdate {
 	_u.mutation.SetShowAccountQuota(v)
@@ -1434,6 +1448,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.HostedUsageEnabled(); ok {
 		_spec.SetField(group.FieldHostedUsageEnabled, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.MarketTier(); ok {
+		_spec.SetField(group.FieldMarketTier, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
 	}
@@ -2163,6 +2180,20 @@ func (_u *GroupUpdateOne) SetHostedUsageEnabled(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableHostedUsageEnabled(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetHostedUsageEnabled(*v)
+	}
+	return _u
+}
+
+// SetMarketTier sets the "market_tier" field.
+func (_u *GroupUpdateOne) SetMarketTier(v bool) *GroupUpdateOne {
+	_u.mutation.SetMarketTier(v)
+	return _u
+}
+
+// SetNillableMarketTier sets the "market_tier" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableMarketTier(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetMarketTier(*v)
 	}
 	return _u
 }
@@ -3484,6 +3515,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.HostedUsageEnabled(); ok {
 		_spec.SetField(group.FieldHostedUsageEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.MarketTier(); ok {
+		_spec.SetField(group.FieldMarketTier, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)

@@ -158,6 +158,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		UserInviteMaxPerWeek:                 settings.UserInviteMaxPerWeek,
 		RedeemPurchaseSettings:               dto.RedeemPurchaseSettingsFromService(settings),
 		HostedSelfOnboardSettings:            dto.HostedSelfOnboardSettingsFromService(settings),
+		MarketSettings:                       dto.MarketSettingsFromService(settings),
 		TotpEnabled:                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             settings.SMTPHost,
@@ -263,6 +264,9 @@ type UpdateSettingsRequest struct {
 	HostedSelfOnboardDefaultDeviceLimit        *int     `json:"hosted_self_onboard_default_device_limit"`
 	HostedSelfOnboardDefaultAdmissionsPerCycle *int     `json:"hosted_self_onboard_default_admissions_per_cycle"`
 	HostedSelfOnboardDefaultIntervalHours      *int     `json:"hosted_self_onboard_default_interval_hours"`
+
+	// Sharing market (P3a); nil = keep the stored value.
+	marketSettingsRequest
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -710,6 +714,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, msg)
 		return
 	}
+	market, msg := resolveMarketSettings(&req.marketSettingsRequest, previousSettings)
+	if msg != "" {
+		response.Error(c, http.StatusBadRequest, msg)
+		return
+	}
 	redeemPurchase, msg := resolveRedeemPurchaseSettings(&req, previousSettings)
 	if msg != "" {
 		response.Error(c, http.StatusBadRequest, msg)
@@ -852,6 +861,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	redeemPurchase.apply(settings)
 	settings.HostedSelfOnboard = hostedSelfOnboard
+	settings.Market = &market
 
 	if h.pricingService != nil && req.PricingModelAliases != nil {
 		for requestModel, pricingModel := range settings.PricingModelAliases {
@@ -904,6 +914,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		UserInviteMaxPerWeek:                 updatedSettings.UserInviteMaxPerWeek,
 		RedeemPurchaseSettings:               dto.RedeemPurchaseSettingsFromService(updatedSettings),
 		HostedSelfOnboardSettings:            dto.HostedSelfOnboardSettingsFromService(updatedSettings),
+		MarketSettings:                       dto.MarketSettingsFromService(updatedSettings),
 		TotpEnabled:                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SMTPHost:                             updatedSettings.SMTPHost,
@@ -1086,6 +1097,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	changed = append(changed, diffRedeemPurchaseSettings(before, after)...)
 	changed = append(changed, diffHostedSelfOnboardSettings(before, after)...)
+	changed = append(changed, diffMarketSettings(before, after)...)
 	if before.SiteName != after.SiteName {
 		changed = append(changed, "site_name")
 	}

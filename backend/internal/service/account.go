@@ -77,10 +77,15 @@ type Account struct {
 	SessionWindowEnd    *time.Time
 	SessionWindowStatus string
 
-	Proxy         *Proxy
-	AccountGroups []AccountGroup
-	GroupIDs      []int64
-	Groups        []*Group
+	Proxy *Proxy
+	// AccountGroups / GroupIDs / Groups are the dispatchable (admin)
+	// memberships. MarketGroupIDs are the owner's market listings
+	// (account_groups.source = 'market'), never dispatchable in P3a part 1;
+	// an account with one is not "ungrouped" either.
+	AccountGroups  []AccountGroup
+	GroupIDs       []int64
+	Groups         []*Group
+	MarketGroupIDs []int64 `json:"market_group_ids,omitempty"`
 
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string

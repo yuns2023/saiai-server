@@ -118,6 +118,13 @@ func setAccountOwnerTx(ctx context.Context, exec sqlExecutor, accountID int64, o
 	); err != nil {
 		return false, err
 	}
+	// Clearing the owner stops sharing in the same transaction (market rows
+	// and outbox included). Assigning an owner never lists the account.
+	if ownerUserID == nil {
+		if err := marketUnlistAccountTx(ctx, exec, accountID, service.MarketListingActionOwnerCleared, false, service.MarketListingActorAdmin, adminUserID); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
 }
 

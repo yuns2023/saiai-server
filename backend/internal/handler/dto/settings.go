@@ -38,6 +38,9 @@ type SystemSettings struct {
 	// Hosted self-onboarding (flattened into this object).
 	HostedSelfOnboardSettings
 
+	// Sharing market (flattened into this object).
+	MarketSettings
+
 	SMTPHost               string `json:"smtp_host"`
 	SMTPPort               int    `json:"smtp_port"`
 	SMTPUsername           string `json:"smtp_username"`

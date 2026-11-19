@@ -6789,6 +6789,7 @@ type AccountGroupMutation struct {
 	typ            string
 	priority       *int
 	addpriority    *int
+	source         *string
 	created_at     *time.Time
 	clearedFields  map[string]struct{}
 	account        *int64
@@ -6915,6 +6916,25 @@ func (m *AccountGroupMutation) ResetPriority() {
 	m.addpriority = nil
 }
 
+// SetSource sets the "source" field.
+func (m *AccountGroupMutation) SetSource(s string) {
+	m.source = &s
+}
+
+// Source returns the value of the "source" field in the mutation.
+func (m *AccountGroupMutation) Source() (r string, exists bool) {
+	v := m.source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSource resets all changes to the "source" field.
+func (m *AccountGroupMutation) ResetSource() {
+	m.source = nil
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *AccountGroupMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -7022,7 +7042,7 @@ func (m *AccountGroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AccountGroupMutation) Fields() []string {
-	fields := make([]string, 0, 4)
+	fields := make([]string, 0, 5)
 	if m.account != nil {
 		fields = append(fields, accountgroup.FieldAccountID)
 	}
@@ -7031,6 +7051,9 @@ func (m *AccountGroupMutation) Fields() []string {
 	}
 	if m.priority != nil {
 		fields = append(fields, accountgroup.FieldPriority)
+	}
+	if m.source != nil {
+		fields = append(fields, accountgroup.FieldSource)
 	}
 	if m.created_at != nil {
 		fields = append(fields, accountgroup.FieldCreatedAt)
@@ -7049,6 +7072,8 @@ func (m *AccountGroupMutation) Field(name string) (ent.Value, bool) {
 		return m.GroupID()
 	case accountgroup.FieldPriority:
 		return m.Priority()
+	case accountgroup.FieldSource:
+		return m.Source()
 	case accountgroup.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -7087,6 +7112,13 @@ func (m *AccountGroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPriority(v)
+		return nil
+	case accountgroup.FieldSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSource(v)
 		return nil
 	case accountgroup.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -7167,6 +7199,9 @@ func (m *AccountGroupMutation) ResetField(name string) error {
 		return nil
 	case accountgroup.FieldPriority:
 		m.ResetPriority()
+		return nil
+	case accountgroup.FieldSource:
+		m.ResetSource()
 		return nil
 	case accountgroup.FieldCreatedAt:
 		m.ResetCreatedAt()
@@ -18032,6 +18067,7 @@ type GroupMutation struct {
 	addrate_multiplier                      *float64
 	is_exclusive                            *bool
 	hosted_usage_enabled                    *bool
+	market_tier                             *bool
 	show_account_quota                      *bool
 	status                                  *string
 	platform                                *string
@@ -18563,6 +18599,42 @@ func (m *GroupMutation) OldHostedUsageEnabled(ctx context.Context) (v bool, err 
 // ResetHostedUsageEnabled resets all changes to the "hosted_usage_enabled" field.
 func (m *GroupMutation) ResetHostedUsageEnabled() {
 	m.hosted_usage_enabled = nil
+}
+
+// SetMarketTier sets the "market_tier" field.
+func (m *GroupMutation) SetMarketTier(b bool) {
+	m.market_tier = &b
+}
+
+// MarketTier returns the value of the "market_tier" field in the mutation.
+func (m *GroupMutation) MarketTier() (r bool, exists bool) {
+	v := m.market_tier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMarketTier returns the old "market_tier" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldMarketTier(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMarketTier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMarketTier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMarketTier: %w", err)
+	}
+	return oldValue.MarketTier, nil
+}
+
+// ResetMarketTier resets all changes to the "market_tier" field.
+func (m *GroupMutation) ResetMarketTier() {
+	m.market_tier = nil
 }
 
 // SetShowAccountQuota sets the "show_account_quota" field.
@@ -21469,7 +21541,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 57)
+	fields := make([]string, 0, 58)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -21493,6 +21565,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.hosted_usage_enabled != nil {
 		fields = append(fields, group.FieldHostedUsageEnabled)
+	}
+	if m.market_tier != nil {
+		fields = append(fields, group.FieldMarketTier)
 	}
 	if m.show_account_quota != nil {
 		fields = append(fields, group.FieldShowAccountQuota)
@@ -21665,6 +21740,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.IsExclusive()
 	case group.FieldHostedUsageEnabled:
 		return m.HostedUsageEnabled()
+	case group.FieldMarketTier:
+		return m.MarketTier()
 	case group.FieldShowAccountQuota:
 		return m.ShowAccountQuota()
 	case group.FieldRequiredLevelID:
@@ -21788,6 +21865,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldIsExclusive(ctx)
 	case group.FieldHostedUsageEnabled:
 		return m.OldHostedUsageEnabled(ctx)
+	case group.FieldMarketTier:
+		return m.OldMarketTier(ctx)
 	case group.FieldShowAccountQuota:
 		return m.OldShowAccountQuota(ctx)
 	case group.FieldRequiredLevelID:
@@ -21950,6 +22029,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetHostedUsageEnabled(v)
+		return nil
+	case group.FieldMarketTier:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMarketTier(v)
 		return nil
 	case group.FieldShowAccountQuota:
 		v, ok := value.(bool)
@@ -22774,6 +22860,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldHostedUsageEnabled:
 		m.ResetHostedUsageEnabled()
+		return nil
+	case group.FieldMarketTier:
+		m.ResetMarketTier()
 		return nil
 	case group.FieldShowAccountQuota:
 		m.ResetShowAccountQuota()

@@ -25,6 +25,11 @@ func Priority(v int) predicate.AccountGroup {
 	return predicate.AccountGroup(sql.FieldEQ(FieldPriority, v))
 }
 
+// Source applies equality check predicate on the "source" field. It's identical to SourceEQ.
+func Source(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldEQ(FieldSource, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.AccountGroup {
 	return predicate.AccountGroup(sql.FieldEQ(FieldCreatedAt, v))
@@ -108,6 +113,71 @@ func PriorityLT(v int) predicate.AccountGroup {
 // PriorityLTE applies the LTE predicate on the "priority" field.
 func PriorityLTE(v int) predicate.AccountGroup {
 	return predicate.AccountGroup(sql.FieldLTE(FieldPriority, v))
+}
+
+// SourceEQ applies the EQ predicate on the "source" field.
+func SourceEQ(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldEQ(FieldSource, v))
+}
+
+// SourceNEQ applies the NEQ predicate on the "source" field.
+func SourceNEQ(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldNEQ(FieldSource, v))
+}
+
+// SourceIn applies the In predicate on the "source" field.
+func SourceIn(vs ...string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldIn(FieldSource, vs...))
+}
+
+// SourceNotIn applies the NotIn predicate on the "source" field.
+func SourceNotIn(vs ...string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldNotIn(FieldSource, vs...))
+}
+
+// SourceGT applies the GT predicate on the "source" field.
+func SourceGT(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldGT(FieldSource, v))
+}
+
+// SourceGTE applies the GTE predicate on the "source" field.
+func SourceGTE(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldGTE(FieldSource, v))
+}
+
+// SourceLT applies the LT predicate on the "source" field.
+func SourceLT(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldLT(FieldSource, v))
+}
+
+// SourceLTE applies the LTE predicate on the "source" field.
+func SourceLTE(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldLTE(FieldSource, v))
+}
+
+// SourceContains applies the Contains predicate on the "source" field.
+func SourceContains(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldContains(FieldSource, v))
+}
+
+// SourceHasPrefix applies the HasPrefix predicate on the "source" field.
+func SourceHasPrefix(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldHasPrefix(FieldSource, v))
+}
+
+// SourceHasSuffix applies the HasSuffix predicate on the "source" field.
+func SourceHasSuffix(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldHasSuffix(FieldSource, v))
+}
+
+// SourceEqualFold applies the EqualFold predicate on the "source" field.
+func SourceEqualFold(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldEqualFold(FieldSource, v))
+}
+
+// SourceContainsFold applies the ContainsFold predicate on the "source" field.
+func SourceContainsFold(v string) predicate.AccountGroup {
+	return predicate.AccountGroup(sql.FieldContainsFold(FieldSource, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

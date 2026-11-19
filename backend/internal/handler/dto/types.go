@@ -102,6 +102,7 @@ type Group struct {
 	IsExclusive        bool         `json:"is_exclusive"`
 	ShowAccountQuota   bool         `json:"show_account_quota"`
 	HostedUsageEnabled bool         `json:"hosted_usage_enabled"`
+	MarketTier         bool         `json:"market_tier"`
 	Status             string       `json:"status"`
 	RequiredLevelID    *int64       `json:"required_level_id"`
 	RequiredLevel      *AccessLevel `json:"required_level,omitempty"`

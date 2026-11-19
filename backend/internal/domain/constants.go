@@ -88,6 +88,10 @@ const (
 	RedeemTypePurchaseRefund = "purchase_refund" // 用户撤回已购兑换码退款：value = +金额
 )
 
+// Sharing-market earnings converted to balance (migration 134), a history
+// row like the purchase records above: status used, used_by the owner.
+const RedeemTypeMarketEarning = "market_earning" // 号主收益转入余额：value = +金额
+
 // Subscription usage windows reset by an admin, as bits of an admin_sub_reset record value.
 const (
 	SubscriptionResetFiveHour = 1
