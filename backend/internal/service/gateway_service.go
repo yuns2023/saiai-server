@@ -2230,6 +2230,11 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 	if err != nil {
 		return nil, err
 	}
+	if group != nil && group.MarketTier {
+		// Pinned scheduling is not supported in market tiers (pinned-mode
+		// accounts are excluded per candidate; never bind carpool buyers).
+		claudeOAuthMode = ""
+	}
 
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		// 复制排除列表，用于会话限制拒绝时的重试
@@ -9445,8 +9450,9 @@ type RecordUsageInput struct {
 	// MarketPath / Market: the served attempt was admitted on the market
 	// buyer path; Market is its admission proof (captured before the async
 	// enqueue from that attempt only). Both zero for every other sale.
-	MarketPath bool
-	Market     *MarketSettlementProof
+	MarketPath  bool
+	Market      *MarketSettlementProof
+	MarketPrice *MarketPriceSnapshot
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -9485,8 +9491,9 @@ type postUsageBillingParams struct {
 	PriceMissing bool
 	// MarketPath / Market: frozen admission of the served market attempt
 	// (RecordUsageInput), handed to the settlement unchanged.
-	MarketPath bool
-	Market     *MarketSettlementProof
+	MarketPath  bool
+	Market      *MarketSettlementProof
+	MarketPrice *MarketPriceSnapshot
 }
 
 // postUsageBilling 统一处理使用量记录后的扣费逻辑：
@@ -9695,6 +9702,10 @@ func buildUsageSettlementInput(cmd *UsageBillingCommand, usageLog *UsageLog, p *
 	if p.Market != nil {
 		proof := *p.Market
 		in.Market = &proof
+	}
+	if p.MarketPrice != nil {
+		price := *p.MarketPrice
+		in.MarketPrice = &price
 	}
 	if usageLog != nil {
 		if usageLog.RateMultiplier == 0 {
@@ -10027,6 +10038,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 			PriceMissing:          priceMissing,
 			MarketPath:            input.MarketPath,
 			Market:                input.Market,
+			MarketPrice:           input.MarketPrice,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

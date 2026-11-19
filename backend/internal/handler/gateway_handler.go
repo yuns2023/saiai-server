@@ -1394,11 +1394,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			clientAttestation := middleware2.GetClientAttestation(c)
 			clientEntrypoint := entrypointPolicy.clientEntrypointFlag()
 			marketPath, marketProof := marketAttempt.SettlementFields()
+			marketPrice := marketAttempt.PriceSnapshot()
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					MarketPath:         marketPath,
 					Market:             marketProof,
+					MarketPrice:        marketPrice,
 					ClientAttestation:  clientAttestation,
 					ClientEntrypoint:   clientEntrypoint,
 					ModerationRef:      moderationRef,
@@ -2472,7 +2474,8 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	sessionBoundAccountID, stickyBindingSource, _ := h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), apiKey.GroupID, sessionHash)
+	var sessionBoundAccountID int64
+	var stickyBindingSource string
 
 	// 选择支持该模型的账号
 	var account *service.Account
@@ -2485,6 +2488,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 			return
 		}
 	} else {
+		sessionBoundAccountID, stickyBindingSource, _ = h.gatewayService.GetCachedSessionAccountIDWithSource(c.Request.Context(), apiKey.GroupID, sessionHash)
 		account, err = h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
 	}
 	if err != nil {

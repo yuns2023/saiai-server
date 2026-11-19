@@ -44,7 +44,15 @@ func (f *fakeMarketStore) AdmitMarketCandidate(_ context.Context, req *MarketAdm
 	if f.admitErr != nil {
 		return nil, f.admitErr
 	}
-	facts := f.facts(req)
+	var facts *MarketAuthoritativeFacts
+	if f.facts != nil {
+		facts = f.facts(req)
+	} else {
+		// Default: a platform admin member of the requested tier.
+		acc := mktPlatformAccount(req.AccountID, req.GroupID)
+		facts = &MarketAuthoritativeFacts{AccountFound: true, Account: &acc, MembershipSource: AccountGroupSourceAdmin,
+			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic}
+	}
 	if reason := evaluate(facts); reason != "" {
 		return &MarketAdmissionVerdict{Reason: reason, Facts: facts}, nil
 	}
@@ -507,6 +515,9 @@ func TestEvaluateMarketShareCaps(t *testing.T) {
 		{"7d at cap", &MarketUsageObservations{FiveHour: ok5, SevenDay: w(0.60, 72*time.Hour, time.Minute)}, "7d_cap"},
 		{"5h at cap", &MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.70, 2*time.Hour, time.Minute)}, "5h_cap"},
 		{"5h just below", &MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.6999, 2*time.Hour, time.Minute)}, ""},
+		{"observed a few seconds in the future", &MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.2, 2*time.Hour, -5*time.Second)}, "5h_stale"},
+		{"ultra flag in the same second as a 5h sample", &MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.9, 2*time.Hour, time.Minute),
+			FiveHourAbsent: &MarketFiveHourAbsence{Absent: true, ObservedAt: now.Add(-time.Minute).Unix()}}, "5h_cap"},
 		{"window rolled over", &MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.95, -time.Minute, 2*time.Minute)}, ""},
 		{"ultra: no 5h needed", &MarketUsageObservations{SevenDay: ok7, FiveHourAbsent: &MarketFiveHourAbsence{Absent: true, ObservedAt: now.Unix()}}, ""},
 		{"ultra flag older than a 5h sample", &MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.9, 2*time.Hour, time.Minute),
@@ -517,6 +528,9 @@ func TestEvaluateMarketShareCaps(t *testing.T) {
 	for _, tc := range cases {
 		require.Equal(t, tc.want, evaluateMarketShareCaps(tc.obs, p, now), tc.name)
 	}
+	p29 := p
+	p29.Cap5hPct = 29
+	require.Equal(t, "5h_cap", evaluateMarketShareCaps(&MarketUsageObservations{SevenDay: ok7, FiveHour: w(0.29, 2*time.Hour, time.Minute)}, p29, now))
 }
 
 func TestBuildMarketUsageObservations(t *testing.T) {
@@ -545,6 +559,7 @@ func TestBuildMarketUsageObservations(t *testing.T) {
 	noReset.Set("anthropic-ratelimit-unified-7d-utilization", "0.5")
 	obs = buildMarketUsageObservations(noReset, sampleAnthropicPassiveUsageHeaders(noReset, now), now, true)
 	require.Nil(t, obs.SevenDay, "utilization without a window end is not an observation")
+	require.Nil(t, obs.FiveHourAbsent, "no Ultra flag without a complete 7d observation of its own")
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
@@ -552,7 +567,8 @@ func itoa(v int64) string { return strconv.FormatInt(v, 10) }
 // ---- authoritative evaluation ----
 
 func TestEvaluateMarketAdmission(t *testing.T) {
-	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3, Concurrency: 4, BuyerMaxConcurrency: 3}
+	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3, Concurrency: 4, BuyerMaxConcurrency: 3,
+		ReservedDevices: 2, ReservedAdmissions: 1, DeviceLimit: 5}
 	req := &MarketAdmissionRequest{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, AuthUserID: mktBuyer}
 	base := func() *MarketAuthoritativeFacts {
 		acc := mktListedAccount(1)
@@ -584,6 +600,8 @@ func TestEvaluateMarketAdmission(t *testing.T) {
 		{"capacity_changed", func(f *MarketAuthoritativeFacts) { f.Account.Concurrency = 6 }},
 		{"ineligible_" + MarketReasonMaxSessions, func(f *MarketAuthoritativeFacts) { f.Account.Extra["max_sessions"] = 3 }},
 		{"account_missing", func(f *MarketAuthoritativeFacts) { f.AccountFound = false }},
+		{"reservation_changed", func(f *MarketAuthoritativeFacts) { f.Listing.Protection.ReservedDevices = 1 }},
+		{"device_policy_changed", func(f *MarketAuthoritativeFacts) { f.Account.Extra["claude_oauth_carpool_device_limit"] = 8 }},
 	}
 	for _, m := range mut {
 		f := base()
@@ -667,7 +685,7 @@ func buyerForwardCtx(t *testing.T, base context.Context) (context.Context, *Mark
 	ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: mktTier, Platform: PlatformAnthropic, Status: StatusActive, RateMultiplier: 1.2, MarketTier: true, Hydrated: true, ClaudeOAuthRequestGateDisabled: false})
 	ctx = WithMarketDispatch(ctx, key)
 	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3,
-		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, Protection: mktProtection()}
+		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, Protection: mktProtection(), DeviceLimit: 5}
 	return WithMarketAttempt(ctx, sel)
 }
 
@@ -912,4 +930,105 @@ func TestMarketOpsClientRetrySkipsListedAccount(t *testing.T) {
 		require.Contains(t, exec.errorMessage, "listed")
 		require.Equal(t, 1, upstream.calls, "only the platform account was sent upstream")
 	}
+}
+
+// ---- review round 1 ----
+
+func TestMarketRegistryPendingListing(t *testing.T) {
+	store := &fakeMarketStore{state: &MarketDispatchState{Enabled: true}}
+	rt := NewMarketRuntime(store, nil)
+	require.True(t, rt.Refresh(context.Background()))
+	rt.BeginListing(5)
+	require.True(t, rt.IsListed(5), "listed locally before the transaction commits")
+	require.True(t, rt.Refresh(context.Background()))
+	require.True(t, rt.IsListed(5), "a poll during the transaction keeps the mark")
+	rt.EndListing(5)
+	time.Sleep(2 * time.Millisecond)
+	store.state = &MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{5}}
+	require.True(t, rt.Refresh(context.Background()))
+	require.True(t, rt.IsListed(5))
+	// A rolled-back listing: dropped by the first poll after it ended.
+	rt.BeginListing(6)
+	rt.EndListing(6)
+	time.Sleep(2 * time.Millisecond)
+	require.True(t, rt.IsListed(6))
+	require.True(t, rt.Refresh(context.Background()))
+	require.False(t, rt.IsListed(6))
+}
+
+func TestMarketUsageWriteFailureStopsSelling(t *testing.T) {
+	env := newMarketEnv(t, []Account{mktListedAccount(1)})
+	ctx := buyerCtx(mktTier)
+	res, err := env.svc.SelectAccountWithLoadAwareness(ctx, ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.NoError(t, err)
+	res.ReleaseFunc()
+	failing := &failingUsageCache{fakeMarketUsage: env.usage}
+	env.rt.usage = failing
+	rl := &RateLimitService{market: env.rt}
+	acc := mktListedAccount(1)
+	h := http.Header{}
+	h.Set("anthropic-ratelimit-unified-7d-utilization", "0.9")
+	h.Set("anthropic-ratelimit-unified-7d-reset", itoa(time.Now().Add(48*time.Hour).Unix()))
+	rl.recordMarketUsageObservations(context.Background(), &acc, h, sampleAnthropicPassiveUsageHeaders(h, time.Now()), time.Now(), true)
+	_, err = env.svc.SelectAccountWithLoadAwareness(buyerCtx(mktTier), ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts, "a lost (possibly higher) observation stops selling")
+	failing.fail = false
+	h.Set("anthropic-ratelimit-unified-7d-utilization", "0.1")
+	rl.recordMarketUsageObservations(context.Background(), &acc, h, sampleAnthropicPassiveUsageHeaders(h, time.Now()), time.Now(), true)
+	res, err = env.svc.SelectAccountWithLoadAwareness(buyerCtx(mktTier), ptr64(mktTier), "", "claude-fable-5", nil, "")
+	require.NoError(t, err)
+	res.ReleaseFunc()
+}
+
+type failingUsageCache struct {
+	*fakeMarketUsage
+	fail bool
+}
+
+func (f *failingUsageCache) RecordMarketUsageObservations(ctx context.Context, id int64, obs MarketUsageObservations) error {
+	if f.fail || f.fakeMarketUsage == nil {
+		return errors.New("redis down")
+	}
+	return f.fakeMarketUsage.RecordMarketUsageObservations(ctx, id, obs)
+}
+
+func TestMarketForwardRejectsBillingGroupMismatch(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx, attempt := buyerForwardCtx(t, c.Request.Context())
+	other := mktPlain
+	ctx = WithMarketDispatch(ctx, &APIKey{ID: mktKey, UserID: mktBuyer, GroupID: &other, User: &User{ID: mktBuyer}})
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	require.ErrorIs(t, err, ErrMarketAdmissionRejected)
+	require.Zero(t, upstream.calls)
+	_, proof := attempt.SettlementFields()
+	require.Nil(t, proof)
+	require.Empty(t, env.store.requests)
+}
+
+func TestMarketTierCountTokensRechecksPlatformInDatabase(t *testing.T) {
+	stale := mktPlatformAccount(2, mktTier) // cached "no owner"
+	good := mktPlatformAccount(3, mktTier)
+	stale.Priority, good.Priority = 0, 50
+	env := newMarketEnv(t, []Account{stale, good})
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		acc := mktPlatformAccount(req.AccountID, mktTier)
+		if req.AccountID == 2 {
+			acc.OwnerUserID = ptr64(mktOwner) // just got an owner
+		}
+		return &MarketAuthoritativeFacts{AccountFound: true, Account: &acc, MembershipSource: AccountGroupSourceAdmin,
+			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic}
+	}
+	ctx := context.WithValue(WithAccountUserID(context.Background(), mktBuyer), ctxkey.Group, mktGroups()[mktTier])
+	for i := 0; i < 5; i++ {
+		acc, err := env.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-fable-5")
+		require.NoError(t, err)
+		require.Equal(t, int64(3), acc.ID)
+	}
+	env.store.members = 2
+	only := newMarketEnv(t, []Account{stale})
+	only.store.facts = env.store.facts
+	only.store.members = 1
+	_, err := only.svc.SelectMarketTierCountTokensAccount(ctx, ptr64(mktTier), "claude-fable-5")
+	require.ErrorIs(t, err, ErrNoAvailableAccounts, "configured but unavailable: 503")
 }

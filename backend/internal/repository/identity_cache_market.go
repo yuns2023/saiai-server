@@ -113,6 +113,12 @@ func (c *identityCache) GetOrCreateCarpoolDeviceMarket(ctx context.Context, acco
 				if err != nil {
 					return err
 				}
+				if !budget.MarketClassified {
+					// Admissions of this cycle made before classes were
+					// counted: assume they were all buyer admissions.
+					budget.BuyerUsed = budget.Used
+					budget.MarketClassified = true
+				}
 				if budget.Generation != policy.Generation || budget.Used >= budget.Quota {
 					allowed = false
 				} else if adm.Class == service.MarketDeviceClassBuyer {

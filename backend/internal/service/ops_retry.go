@@ -420,7 +420,11 @@ func (s *OpsService) executePinnedRetry(ctx context.Context, reqType opsRetryReq
 	// A market tier dispatches only platform accounts (admin member, no
 	// owner) outside the market path; GetByID is a database read.
 	if errorLog.GroupID != nil && *errorLog.GroupID > 0 && account.OwnerUserID != nil && s.gatewayService != nil {
-		if group, err := s.gatewayService.ResolveGroupByID(ctx, *errorLog.GroupID); err == nil && group.MarketTier {
+		group, err := s.gatewayService.ResolveGroupByID(ctx, *errorLog.GroupID)
+		if err != nil {
+			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: fmt.Sprintf("resolve group failed: %v", err)}
+		}
+		if group.MarketTier {
 			return &opsRetryExecution{status: opsRetryStatusFailed, errorMessage: "pinned account has an owner and the group is a sharing-market tier"}
 		}
 	}

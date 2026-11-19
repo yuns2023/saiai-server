@@ -309,6 +309,14 @@ func ProvideRateLimitService(
 	return svc
 }
 
+// ProvideMarketListingService wires the listing lifecycle to the dispatch
+// registry (a listing is known locally before it commits).
+func ProvideMarketListingService(repo MarketListingRepository, settingRepo SettingRepository, market *MarketRuntime) *MarketListingService {
+	svc := NewMarketListingService(repo, settingRepo)
+	svc.SetListingObserver(market)
+	return svc
+}
+
 // ProvideGatewayService creates GatewayService with the market dispatch
 // runtime (P3a part 2).
 func ProvideGatewayService(
@@ -673,7 +681,7 @@ var ProviderSet = wire.NewSet(
 	NewHostedAccountService,
 	NewHostedOwnerService,
 	ProvideHostedSelfOnboardService,
-	NewMarketListingService,
+	ProvideMarketListingService,
 	ProvideHostedApplicationExpiryWorker,
 	NewSettlementReconcileService,
 	ProvideAccountTestService,

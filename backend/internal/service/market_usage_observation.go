@@ -34,7 +34,8 @@ func buildMarketUsageObservations(headers http.Header, sample anthropicPassiveUs
 		switch {
 		case sample.hasValidFiveHour:
 			out.FiveHourAbsent = &MarketFiveHourAbsence{Absent: false, ObservedAt: at}
-		case !sample.hasFiveHourHeader && sample.hasValidSevenDay:
+		case !sample.hasFiveHourHeader && sample.hasValidSevenDay && out.SevenDay != nil:
+			// Only a response that itself carries a complete 7d observation.
 			out.FiveHourAbsent = &MarketFiveHourAbsence{Absent: true, ObservedAt: at}
 		}
 	}
@@ -54,6 +55,11 @@ func (s *RateLimitService) recordMarketUsageObservations(ctx context.Context, ac
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 	defer cancel()
 	if err := s.market.usage.RecordMarketUsageObservations(writeCtx, account.ID, obs); err != nil {
+		// The stored value may now be lower than the truth: stop selling
+		// this account until a later write succeeds.
+		s.market.markUsageDirty(account.ID, true)
 		slog.Warn("market_usage_observation_write_failed", "account_id", account.ID, "error", err)
+		return
 	}
+	s.market.markUsageDirty(account.ID, false)
 }

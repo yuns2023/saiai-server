@@ -260,6 +260,21 @@ func TestMarketDeviceCycleBudget(t *testing.T) {
 		require.ErrorIs(t, marketDevice(t, cache, ctx, 62, "o2", 10, policy(2), owner), full, "total Q")
 	})
 
+	t.Run("a budget from before the market counts its admissions as buyer ones", func(t *testing.T) {
+		cache, ctx := newMarketIdentityCache(t)
+		buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
+		p := policy(5)
+		// Two unclassified admissions this cycle (old path).
+		for _, d := range []string{"x0", "x1"} {
+			_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, 64, d, service.ClientHints{}, 10, time.Now().Unix(), *p)
+			require.NoError(t, err)
+		}
+		// Buyer quota 5-2 = 3, two already used: one more buyer device only.
+		require.NoError(t, marketDevice(t, cache, ctx, 64, "b0", 10, p, buyer))
+		require.ErrorIs(t, marketDevice(t, cache, ctx, 64, "b1", 10, p, buyer), full)
+		require.NoError(t, marketDevice(t, cache, ctx, 64, "o0", 10, p, owner), "the owner keeps the reserved admissions")
+	})
+
 	t.Run("buyers within Q-Rq, owner within Q; rollover resets both counts", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
 		buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 1}
@@ -319,6 +334,21 @@ func TestMarketUsageObservationsNeverGoBackwards(t *testing.T) {
 	require.InDelta(t, 0.30, obs.FiveHour.Utilization, 1e-9)
 	require.False(t, obs.FiveHourAbsent.Absent)
 	require.Nil(t, got[72].SevenDay, "unknown account = no observation")
+
+	// Same window, delivered out of order with a later timestamp but a lower
+	// value: the maximum stays.
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
+		SevenDay: &service.MarketUsageObservation{Utilization: 0.20, ResetAt: week, ObservedAt: now + 10},
+	}))
+	// Same-second tie of the 5h-absence flag: "has a 5h window" wins.
+	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
+		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now},
+	}))
+	got, err = cache.GetMarketUsageObservations(ctx, []int64{account})
+	require.NoError(t, err)
+	require.InDelta(t, 0.40, got[account].SevenDay.Utilization, 1e-9)
+	require.Equal(t, now+10, got[account].SevenDay.ObservedAt, "the observation time still advances")
+	require.False(t, got[account].FiveHourAbsent.Absent)
 
 	// A newer observation and a new window replace.
 	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{

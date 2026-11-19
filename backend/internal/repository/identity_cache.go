@@ -1028,6 +1028,9 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 				budget.LastDue = due
 				budget.Used = used
 				budget.BuyerUsed = buyerUsed
+				if used == 0 {
+					budget.MarketClassified = true
+				}
 				budget.Quota = policy.Admissions
 				encoded, err := json.Marshal(budget)
 				if err != nil {
@@ -1063,6 +1066,10 @@ type carpoolAdmissionBudget struct {
 	// BuyerUsed counts this cycle's admissions on the market buyer path
 	// (also included in Used). Reset with Used on cycle rollover.
 	BuyerUsed int `json:"buyer_used,omitempty"`
+	// MarketClassified: BuyerUsed is authoritative for this cycle. Absent
+	// (a budget written before the market path counted classes), every
+	// admission of the cycle is conservatively treated as a buyer one.
+	MarketClassified bool `json:"market_classified,omitempty"`
 }
 
 func readCarpoolAdmissionBudget(ctx context.Context, reader redis.Cmdable, key string, policy service.CarpoolAdmissionPolicy) (*carpoolAdmissionBudget, error) {

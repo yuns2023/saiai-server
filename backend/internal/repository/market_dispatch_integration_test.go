@@ -28,6 +28,8 @@ func buyerSelection(t *testing.T, f *marketFixture, accountID, tier, owner int64
 	return &service.MarketSelection{
 		Class: service.MarketClassBuyer, AccountID: accountID, GroupID: tier, OwnerUserID: owner,
 		ListingVersion: l.Version, Concurrency: 4, BuyerMaxConcurrency: 4 - l.Protection.ReservedConcurrency,
+		ReservedDevices: l.Protection.ReservedDevices, ReservedAdmissions: l.Protection.ReservedAdmissions,
+		DeviceLimit: 5, // fixture: claude_oauth_carpool_device_limit = 5, no cycle budget
 	}
 }
 
@@ -129,6 +131,13 @@ func TestMarketAdmitBuyerRefusesChangedState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ineligible_"+service.MarketReasonMaxSessions, admit(t, f, sel, buyerRequest(acc, tier, buyer)).Reason)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra = extra - 'max_sessions' WHERE id=$1`, acc)
+	require.NoError(t, err)
+
+	// Device limit raised by an admin while the request waited.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra = extra || '{"claude_oauth_carpool_device_limit": 8}'::jsonb WHERE id=$1`, acc)
+	require.NoError(t, err)
+	require.Equal(t, "device_policy_changed", admit(t, f, sel, buyerRequest(acc, tier, buyer)).Reason)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra = extra || '{"claude_oauth_carpool_device_limit": 5}'::jsonb WHERE id=$1`, acc)
 	require.NoError(t, err)
 
 	// Concurrency changed (buyer cap C-R would differ).

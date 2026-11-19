@@ -118,7 +118,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	hostedSelfOnboardService := service.ProvideHostedSelfOnboardService(hostedApplicationRepository, hostedOnboardStore, settingRepository, proxyRepository, claudeOAuthClient, adminService, apiKeyAuthCacheInvalidator)
 	hostedSelfOnboardHandler := handler.NewHostedSelfOnboardHandler(hostedSelfOnboardService)
 	marketListingRepository := repository.NewMarketListingRepository(client, db, schedulerCache)
-	marketListingService := service.NewMarketListingService(marketListingRepository, settingRepository)
+	marketListingService := service.ProvideMarketListingService(marketListingRepository, settingRepository, marketRuntime)
 	marketListingHandler := handler.NewMarketListingHandler(marketListingService)
 	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService)

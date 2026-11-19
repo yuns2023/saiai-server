@@ -11,6 +11,23 @@ import (
 type MarketListingService struct {
 	repo        MarketListingRepository
 	settingRepo SettingRepository
+	// listings is told about a listing before its transaction starts, so
+	// this process treats the account as listed even before the registry
+	// poll (or a stale cached copy) catches up.
+	listings MarketListingObserver
+}
+
+// MarketListingObserver is implemented by MarketRuntime.
+type MarketListingObserver interface {
+	BeginListing(accountID int64)
+	EndListing(accountID int64)
+}
+
+// SetListingObserver wires the dispatch registry (P3a part 2).
+func (s *MarketListingService) SetListingObserver(o MarketListingObserver) {
+	if s != nil {
+		s.listings = o
+	}
 }
 
 func NewMarketListingService(repo MarketListingRepository, settingRepo SettingRepository) *MarketListingService {
@@ -202,6 +219,10 @@ func (s *MarketListingService) OwnerGet(ctx context.Context, ownerUserID, accoun
 // OwnerSet lists the account into one allowed tier (listed=true; requires
 // market_enabled) or stops sharing (listed=false; always allowed).
 func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accountID, groupID int64, listed bool) (*OwnerMarketView, error) {
+	if listed && s.listings != nil {
+		s.listings.BeginListing(accountID)
+		defer s.listings.EndListing(accountID)
+	}
 	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
 		OwnerUserID: ownerUserID,
 		AccountID:   accountID,

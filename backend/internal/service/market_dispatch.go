@@ -61,7 +61,6 @@ const (
 	marketRegistryPollInterval   = 2 * time.Second
 	marketAdmissionTimeout       = 3 * time.Second
 	marketAdmissionConfirmWindow = 2 * time.Second
-	marketSampleFutureSkew       = time.Minute
 	marketObservationReadTimeout = 500 * time.Millisecond
 )
 
@@ -105,6 +104,12 @@ type MarketSelection struct {
 	ReservedAdmissions  int
 	Protection          MarketProtectionParams
 	SelfPurchase        bool
+	// Device policy the device admission ran under (buyer): checked against
+	// the account row at the final admission.
+	DeviceLimit     int
+	CycleBudget     bool
+	CycleAdmissions int
+	CycleGeneration string
 }
 
 // IsBuyer reports a buyer-path selection.
@@ -227,30 +232,99 @@ type MarketRuntime struct {
 	listed   map[int64]struct{}
 	loaded   bool
 	lastWarn time.Time
-	stopOnce sync.Once
-	stop     chan struct{}
+	// pending: listings started in this process and not yet confirmed by a
+	// poll that began after they ended (treated as listed meanwhile).
+	pending map[int64]*marketPendingListing
+	// usageDirty: an observation write failed; the account is not sellable
+	// until a later write succeeds (the stored value may be too low).
+	usageDirty map[int64]struct{}
+	stopOnce   sync.Once
+	stop       chan struct{}
 }
 
 // NewMarketRuntime creates the runtime; Start begins polling.
 func NewMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
-	return &MarketRuntime{store: store, usage: usage, listed: map[int64]struct{}{}, stop: make(chan struct{})}
+	return &MarketRuntime{store: store, usage: usage, listed: map[int64]struct{}{}, stop: make(chan struct{}),
+		pending: map[int64]*marketPendingListing{}, usageDirty: map[int64]struct{}{}}
 }
 
-// ProvideMarketRuntime loads the registry once and starts the poller.
+type marketPendingListing struct {
+	active  int
+	endedAt time.Time
+}
+
+// BeginListing marks an account listed locally before its listing
+// transaction starts (MarketListingObserver).
+func (r *MarketRuntime) BeginListing(accountID int64) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	p := r.pending[accountID]
+	if p == nil {
+		p = &marketPendingListing{}
+		r.pending[accountID] = p
+	}
+	p.active++
+	r.mu.Unlock()
+}
+
+// EndListing records the end of the transaction (committed or not); the
+// pending mark stays until a registry poll that started afterwards.
+func (r *MarketRuntime) EndListing(accountID int64) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if p := r.pending[accountID]; p != nil {
+		p.active--
+		p.endedAt = time.Now()
+	}
+	r.mu.Unlock()
+}
+
+func (r *MarketRuntime) markUsageDirty(accountID int64, dirty bool) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if dirty {
+		r.usageDirty[accountID] = struct{}{}
+	} else {
+		delete(r.usageDirty, accountID)
+	}
+	r.mu.Unlock()
+}
+
+func (r *MarketRuntime) usageIsDirty(accountID int64) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	_, ok := r.usageDirty[accountID]
+	r.mu.RUnlock()
+	return ok
+}
+
+// ProvideMarketRuntime loads the registry (retrying briefly) and starts the
+// poller.
 func ProvideMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
 	rt := NewMarketRuntime(store, usage)
-	rt.Refresh(context.Background())
+	for attempt := 0; attempt < 5 && !rt.Refresh(context.Background()); attempt++ {
+		time.Sleep(time.Second)
+	}
 	rt.Start(marketRegistryPollInterval)
 	return rt
 }
 
 // Refresh reloads the registry once; a failure keeps the last state.
-func (r *MarketRuntime) Refresh(ctx context.Context) {
+func (r *MarketRuntime) Refresh(ctx context.Context) bool {
 	if r == nil || r.store == nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	started := time.Now()
 	state, err := r.store.LoadMarketDispatchState(ctx)
 	if err != nil {
 		r.mu.Lock()
@@ -262,13 +336,18 @@ func (r *MarketRuntime) Refresh(ctx context.Context) {
 		if warn {
 			logger.LegacyPrintf("service.market", "Warning: market registry refresh failed (keeping the last state): %v", err)
 		}
-		return
+		return false
 	}
-	r.SetState(state)
+	r.setState(state, started)
+	return true
 }
 
-// SetState replaces the registry content (tests and Refresh).
+// SetState replaces the registry content (tests).
 func (r *MarketRuntime) SetState(state *MarketDispatchState) {
+	r.setState(state, time.Now())
+}
+
+func (r *MarketRuntime) setState(state *MarketDispatchState, readStarted time.Time) {
 	if r == nil || state == nil {
 		return
 	}
@@ -280,6 +359,11 @@ func (r *MarketRuntime) SetState(state *MarketDispatchState) {
 	r.enabled = state.Enabled
 	r.listed = listed
 	r.loaded = true
+	for id, p := range r.pending {
+		if p.active <= 0 && !p.endedAt.IsZero() && p.endedAt.Before(readStarted) {
+			delete(r.pending, id)
+		}
+	}
 	r.mu.Unlock()
 }
 
@@ -325,6 +409,9 @@ func (r *MarketRuntime) IsListed(accountID int64) bool {
 	}
 	r.mu.RLock()
 	_, ok := r.listed[accountID]
+	if !ok {
+		_, ok = r.pending[accountID]
+	}
 	r.mu.RUnlock()
 	return ok
 }
@@ -417,6 +504,16 @@ func marketAttemptFromContext(ctx context.Context) *MarketAttempt {
 	}
 	a, _ := ctx.Value(marketAttemptKey{}).(*MarketAttempt)
 	return a
+}
+
+// PriceSnapshot is the price the served buyer admission was evaluated
+// with (nil for every other attempt).
+func (a *MarketAttempt) PriceSnapshot() *MarketPriceSnapshot {
+	if a == nil || a.Proof == nil || a.Price == nil {
+		return nil
+	}
+	p := *a.Price
+	return &p
 }
 
 // SettlementFields returns what RecordUsage must carry for this attempt.
@@ -583,6 +680,7 @@ func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Acco
 		Protection:          listing.Protection,
 		SelfPurchase:        dispatch.APIKey.UserID == listing.OwnerUserID,
 	}
+	sel.DeviceLimit, sel.CycleBudget, sel.CycleAdmissions, sel.CycleGeneration = marketDevicePolicy(account)
 	if !sellable {
 		return sel, ""
 	}
@@ -594,6 +692,16 @@ func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Acco
 		return nil, reason
 	}
 	return sel, ""
+}
+
+// marketDevicePolicy is the carpool device policy of an account copy.
+func marketDevicePolicy(a *Account) (limit int, budget bool, admissions int, generation string) {
+	limit = a.GetClaudeOAuthCarpoolDeviceLimit()
+	if a.IsClaudeOAuthCarpoolAutoExpandEnabled() {
+		p := a.CarpoolAdmissionPolicy()
+		return limit, true, p.Admissions, p.Generation
+	}
+	return limit, false, 0, ""
 }
 
 // marketFilterCandidates drops excluded candidates (and prefetches buyer
@@ -702,7 +810,7 @@ func evaluateMarketShareCaps(obs *MarketUsageObservations, p MarketProtectionPar
 			return false
 		}
 		t := time.Unix(at, 0)
-		return !t.After(now.Add(marketSampleFutureSkew)) && now.Sub(t) <= maxAge
+		return !t.After(now) && now.Sub(t) <= maxAge
 	}
 	window := func(w *MarketUsageObservation, capPct int, name string) string {
 		if w == nil {
@@ -718,7 +826,7 @@ func evaluateMarketShareCaps(obs *MarketUsageObservations, p MarketProtectionPar
 		if w.ResetAt > 0 && !time.Unix(w.ResetAt, 0).After(now) {
 			u = 0
 		}
-		if u*100 >= float64(capPct) {
+		if u >= float64(capPct)/100 {
 			return name + "_cap"
 		}
 		return ""
@@ -727,7 +835,7 @@ func evaluateMarketShareCaps(obs *MarketUsageObservations, p MarketProtectionPar
 		return reason
 	}
 	if a := obs.FiveHourAbsent; a != nil && a.Absent && fresh(a.ObservedAt) &&
-		(obs.FiveHour == nil || a.ObservedAt >= obs.FiveHour.ObservedAt) {
+		(obs.FiveHour == nil || a.ObservedAt > obs.FiveHour.ObservedAt) {
 		return ""
 	}
 	return window(obs.FiveHour, p.Cap5hPct, "5h")
@@ -768,7 +876,7 @@ func (s *GatewayService) prefetchMarketObservations(ctx context.Context, d *Mark
 // marketObservations returns the account's observations; fresh bypasses the
 // per-request cache (final admission).
 func (s *GatewayService) marketObservations(ctx context.Context, d *MarketDispatch, accountID int64, fresh bool) *MarketUsageObservations {
-	if s.market == nil || s.market.usage == nil {
+	if s.market == nil || s.market.usage == nil || s.market.usageIsDirty(accountID) {
 		return nil
 	}
 	if !fresh && d != nil {
@@ -1068,7 +1176,10 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 			logMarketAdmission(ctx, sel, "device_not_admitted", nil)
 			return ErrMarketAdmissionRejected
 		}
-		if dispatch == nil || authUser <= 0 || dispatch.APIKey.UserID != authUser {
+		if dispatch == nil || authUser <= 0 || dispatch.APIKey.UserID != authUser ||
+			dispatch.APIKey.GroupID == nil || *dispatch.APIKey.GroupID != sel.GroupID {
+			// The Key as billed must be the tier the candidate was admitted to.
+			logMarketAdmission(ctx, sel, "billing_group_mismatch", nil)
 			return ErrMarketAdmissionRejected
 		}
 		requestRef, _ := ctx.Value(ctxkey.ClientRequestID).(string)
@@ -1081,8 +1192,15 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 				group = g
 			}
 		}
-		price, ok := s.marketPrice(ctx, dispatch, group, mappedModel)
+		// Re-evaluated now (not the selection-time cache): a price or rate
+		// that changed while waiting is caught here.
+		var price *MarketPriceSnapshot
+		ok := group != nil
+		if ok {
+			price, ok = s.computeMarketPrice(ctx, dispatch, group, claude.NormalizeModelID(strings.TrimSpace(mappedModel)))
+		}
 		if !ok {
+			logMarketAdmission(ctx, sel, "not_priced", nil)
 			return ErrMarketAdmissionRejected
 		}
 		if reason := evaluateMarketShareCaps(s.marketObservations(ctx, dispatch, account.ID, true), sel.Protection, time.Now()); reason != "" {
@@ -1223,6 +1341,13 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 		if acc.Concurrency != sel.Concurrency || acc.Concurrency-f.Listing.Protection.ReservedConcurrency != sel.BuyerMaxConcurrency {
 			return "capacity_changed"
 		}
+		if f.Listing.Protection.ReservedDevices != sel.ReservedDevices || f.Listing.Protection.ReservedAdmissions != sel.ReservedAdmissions {
+			return "reservation_changed"
+		}
+		limit, budget, admissions, generation := marketDevicePolicy(acc)
+		if limit != sel.DeviceLimit || budget != sel.CycleBudget || admissions != sel.CycleAdmissions || generation != sel.CycleGeneration {
+			return "device_policy_changed"
+		}
 		return ""
 	}
 	return "class"
@@ -1244,17 +1369,29 @@ func marketAdmissionFailoverError(cause error) error {
 
 // SelectMarketTierCountTokensAccount selects the count_tokens account of a
 // market tier: platform accounts only (buyer candidates need the Messages
-// final admission and are never selected here), no sticky session read,
-// write, renewal or clear. ErrMarketCountTokensUnsupported when the tier has
-// no platform account at all (404 like platforms without count_tokens);
-// otherwise selection errors mean "temporarily unavailable" (503).
+// final admission and are never selected here), each re-checked in the
+// database (no owner, still an admin member, not listed) before use; no
+// sticky session read, write, renewal or clear. ErrMarketCountTokensUnsupported
+// when the tier has no platform account at all (404 like platforms without
+// count_tokens); otherwise selection errors mean "temporarily unavailable"
+// (503).
 func (s *GatewayService) SelectMarketTierCountTokensAccount(ctx context.Context, groupID *int64, model string) (*Account, error) {
 	ctx = context.WithValue(ctx, marketDispatchKey{}, (*MarketDispatch)(nil))
-	account, err := s.SelectAccountForModel(ctx, groupID, "", model)
-	if err == nil {
-		return account, nil
+	excluded := map[int64]struct{}{}
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		var account *Account
+		account, err = s.SelectAccountForModelWithExclusions(ctx, groupID, "", model, excluded)
+		if err != nil {
+			break
+		}
+		if s.verifyMarketTierPlatform(ctx, account, groupID) {
+			return account, nil
+		}
+		excluded[account.ID] = struct{}{}
+		err = ErrNoAvailableAccounts
 	}
-	if groupID != nil && s.market != nil && s.market.store != nil {
+	if groupID != nil && s.market != nil && s.market.store != nil && errors.Is(err, ErrNoAvailableAccounts) {
 		countCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		n, countErr := s.market.store.CountMarketTierPlatformMembers(countCtx, *groupID)
 		cancel()
@@ -1263,4 +1400,30 @@ func (s *GatewayService) SelectMarketTierCountTokensAccount(ctx context.Context,
 		}
 	}
 	return nil, err
+}
+
+// verifyMarketTierPlatform is the read-only authoritative platform check.
+func (s *GatewayService) verifyMarketTierPlatform(ctx context.Context, account *Account, groupID *int64) bool {
+	class, sel := s.classifyMarketCandidateInGroup(ctx, account, groupID, false)
+	if class != MarketClassPlatform || sel == nil {
+		return false
+	}
+	if s.market == nil || s.market.store == nil {
+		return true
+	}
+	req := &MarketAdmissionRequest{Class: MarketClassPlatform, AccountID: account.ID, GroupID: sel.GroupID, AuthUserID: authUserIDFromContext(ctx)}
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
+	defer cancel()
+	verdict, err := s.market.store.AdmitMarketCandidate(checkCtx, req, func(f *MarketAuthoritativeFacts) string {
+		return EvaluateMarketAdmission(sel, req, f)
+	})
+	if err != nil || verdict == nil || !verdict.Admitted {
+		reason := "db_error"
+		if verdict != nil {
+			reason = verdict.Reason
+		}
+		logMarketAdmission(ctx, sel, "count_tokens_"+reason, err)
+		return false
+	}
+	return true
 }

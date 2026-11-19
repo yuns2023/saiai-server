@@ -75,6 +75,9 @@ type UsageSettlementInput struct {
 	// nil for every other sale. Not part of the billing fingerprint. Whether
 	// the sale MUST settle as market is UsageBillingCommand.MarketPath.
 	Market *MarketSettlementProof
+	// MarketPrice: the price inputs/version the buyer admission was
+	// evaluated with before dispatch (audit; not part of the fingerprint).
+	MarketPrice *MarketPriceSnapshot
 }
 
 // UsageSettlementEvent is one row of usage_settlement_events.

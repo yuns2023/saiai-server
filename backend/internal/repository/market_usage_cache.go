@@ -13,9 +13,10 @@ import (
 // Per-window usage observations of listed accounts (market share caps).
 // One hash per account: field "5h" / "7d" = {"u","reset","at"}, field
 // "5h_absent" = {"absent","at"}. Writes are conditional in Lua so an older
-// observation never overwrites a newer one: a window value is replaced only
-// by a later window (larger reset) or by a later observation of the same
-// window; the absence flag only by a later observation.
+// observation never lowers a newer one: a window value is replaced by a later
+// window (larger reset); within one window the utilization keeps its maximum;
+// the absence flag is replaced only by a later observation ("has a 5h
+// window" wins a same-second tie).
 const (
 	marketUsageObsKeyPrefix = "market:usage_obs:"
 	marketUsageObsTTL       = 8 * 24 * 60 * 60 // seconds; longer than the weekly window
@@ -29,21 +30,11 @@ var recordMarketUsageScript = redis.NewScript(`
 	local key = KEYS[1]
 	local ttl = tonumber(ARGV[1])
 	local written = 0
-	local function newer_window(oldRaw, new)
-		if not oldRaw then return true end
-		local ok, old = pcall(cjson.decode, oldRaw)
-		if not ok or type(old) ~= 'table' then return true end
-		local oldReset = tonumber(old['reset']) or 0
-		local oldAt = tonumber(old['at']) or 0
-		if new['reset'] > oldReset then return true end
-		if new['reset'] == oldReset and new['at'] >= oldAt then return true end
-		return false
-	end
-	local function newer_flag(oldRaw, new)
-		if not oldRaw then return true end
-		local ok, old = pcall(cjson.decode, oldRaw)
-		if not ok or type(old) ~= 'table' then return true end
-		return new['at'] >= (tonumber(old['at']) or 0)
+	local function decode(raw)
+		if not raw then return nil end
+		local ok, v = pcall(cjson.decode, raw)
+		if not ok or type(v) ~= 'table' then return nil end
+		return v
 	end
 	for i = 2, #ARGV, 2 do
 		local field = ARGV[i]
@@ -51,14 +42,41 @@ var recordMarketUsageScript = redis.NewScript(`
 		local new = cjson.decode(raw)
 		local oldRaw = redis.call('HGET', key, field)
 		if oldRaw == false then oldRaw = nil end
-		local accept
+		local old = decode(oldRaw)
+		local out = nil
 		if field == '5h_absent' then
-			accept = newer_flag(oldRaw, new)
+			-- Later observation wins; at the same second "has a 5h window"
+			-- (absent=false) wins.
+			if old == nil then
+				out = raw
+			else
+				local oldAt = tonumber(old['at']) or 0
+				if new['at'] > oldAt or (new['at'] == oldAt and old['absent'] == true and new['absent'] == false) then
+					out = raw
+				end
+			end
 		else
-			accept = newer_window(oldRaw, new)
+			-- A later window (larger reset) replaces; within one window the
+			-- utilization only grows, so keep the maximum (an out-of-order low
+			-- value never lowers it).
+			if old == nil then
+				out = raw
+			else
+				local oldReset = tonumber(old['reset']) or 0
+				if new['reset'] > oldReset then
+					out = raw
+				elseif new['reset'] == oldReset then
+					local oldU = tonumber(old['u']) or 0
+					local oldAt = tonumber(old['at']) or 0
+					local merged = {u = math.max(oldU, new['u']), reset = oldReset, at = math.max(oldAt, new['at'])}
+					if merged['u'] ~= oldU or merged['at'] ~= oldAt then
+						out = cjson.encode(merged)
+					end
+				end
+			end
 		end
-		if accept then
-			redis.call('HSET', key, field, raw)
+		if out then
+			redis.call('HSET', key, field, out)
 			written = written + 1
 		end
 	end
