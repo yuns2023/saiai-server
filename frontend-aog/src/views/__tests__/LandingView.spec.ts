@@ -100,6 +100,7 @@ describe('LandingView', () => {
     expect(lines[1]).toContain('Arbitrum')
     expect(lines[1]).toContain('约 20 分钟')
     expect(lines[2]).toContain('兑换码')
+    expect(lines[2]).toContain('也可以用余额买兑换码，送人或代充')
     expect(pay.find('tfoot').text()).toContain('1 USDT / USDC = $1')
     expect(pay.text()).toContain('不支持跨链')
     expect(pay.findAllComponents(RouterLinkStub)).toHaveLength(0)
