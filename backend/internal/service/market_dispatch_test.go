@@ -672,7 +672,8 @@ func marketForwardEnv(t *testing.T) (*marketEnv, *queuedClaudeCodeUpstream, *Acc
 		return &MarketAuthoritativeFacts{AccountFound: true, Account: &a, MembershipSource: AccountGroupSourceMarket,
 			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic,
 			OwnerUserStatus: StatusActive, LatestOwnerEventID: 50, LatestOwnerEventOwner: &owner, MarketEnabled: true,
-			Listing: &MarketListing{AccountID: 1, OwnerUserID: mktOwner, SelectedGroupID: &selected, Status: MarketListingStatusListed, Version: 3, Protection: mktProtection()}}
+			Listing:   &MarketListing{AccountID: 1, OwnerUserID: mktOwner, SelectedGroupID: &selected, Status: MarketListingStatusListed, Version: 3, Protection: mktProtection()},
+			GroupRate: 1.2}
 	}
 	return env, upstream, acc
 }
@@ -803,6 +804,24 @@ func TestMarketForwardNeverDispatchesWithoutAdmission(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, ok)
 		}},
+		// The final price check reads the group rates of the admission
+		// snapshot, not the group captured when the request started.
+		{"model rate set to zero while waiting", func(env *marketEnv, _ *marketDeviceStub) {
+			inner := env.store.facts
+			env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+				f := inner(req)
+				f.GroupModelRates = map[string]float64{"claude-*": 0}
+				return f
+			}
+		}},
+		{"group rate unreadable in the snapshot", func(env *marketEnv, _ *marketDeviceStub) {
+			inner := env.store.facts
+			env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+				f := inner(req)
+				f.GroupRate = 0
+				return f
+			}
+		}},
 		{"device registry error", func(_ *marketEnv, dev *marketDeviceStub) {
 			dev.err = errors.New("redis down")
 		}},
@@ -827,6 +846,25 @@ func TestMarketForwardNeverDispatchesWithoutAdmission(t *testing.T) {
 			require.Nil(t, proof)
 		})
 	}
+
+	t.Run("snapshot model rate changed but positive dispatches", func(t *testing.T) {
+		env, upstream, acc := marketForwardEnv(t)
+		inner := env.store.facts
+		env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+			f := inner(req)
+			f.GroupModelRates = map[string]float64{"claude-*": 0.5}
+			return f
+		}
+		c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+		ctx, attempt := buyerForwardCtx(t, c.Request.Context())
+		_, err := env.svc.Forward(ctx, c, acc, parsed)
+		require.NoError(t, err)
+		require.Equal(t, 1, upstream.calls)
+		// Sellability only: the price snapshot (and the charge) keep the
+		// request-start group's factors.
+		require.NotNil(t, attempt.Price)
+		require.InDelta(t, 1.2, attempt.Price.GroupRate, 1e-9)
+	})
 
 	t.Run("unknown commit confirmed by attempt id dispatches", func(t *testing.T) {
 		env, upstream, acc := marketForwardEnv(t)

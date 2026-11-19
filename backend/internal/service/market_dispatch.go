@@ -213,6 +213,13 @@ type MarketAuthoritativeFacts struct {
 	OwnerGroupQualified bool
 	MarketEnabled       bool
 	Listing             *MarketListing
+	// GroupRate / GroupModelRates: the group's rate_multiplier and
+	// model_rate_multipliers in the same snapshot (buyer path only). The
+	// final price positivity check reads these, not the group captured at
+	// request start, so a rate an admin changed while the request waited
+	// is seen.
+	GroupRate       float64
+	GroupModelRates map[string]float64
 }
 
 type MarketAdmissionVerdict struct {
@@ -1118,6 +1125,24 @@ func (s *GatewayService) computeMarketPrice(ctx context.Context, d *MarketDispat
 	return snap, true
 }
 
+// marketSnapshotGroupPriced: the tier's rate and the model's rate factor as
+// stored in the admission snapshot are both positive. Sellability only: the
+// request-start price check (computeMarketPrice, the group the charge uses)
+// must also pass, and the charge itself follows ordinary billing. A user
+// rate override on a tier is kept > 0 by the database (market_tier_rate_guard).
+func marketSnapshotGroupPriced(f *MarketAuthoritativeFacts, model string) bool {
+	if f == nil {
+		return false
+	}
+	modelRate := (&Group{ModelRateMultipliers: f.GroupModelRates}).ModelRateFor(model)
+	for _, v := range []float64{f.GroupRate, modelRate} {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // ---------------------------------------------------------------------------
 // Leases
 
@@ -1359,6 +1384,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 	}
 	authUser := authUserIDFromContext(ctx)
 	dispatch := marketDispatchFromContext(ctx)
+	var priceModel string
 	req := &MarketAdmissionRequest{
 		Class:      sel.Class,
 		AccountID:  account.ID,
@@ -1379,6 +1405,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		if strings.TrimSpace(requestRef) == "" {
 			return ErrMarketAdmissionRejected
 		}
+		priceModel = claude.NormalizeModelID(strings.TrimSpace(mappedModel))
 		group := s.groupForMarket(ctx, &sel.GroupID)
 		if group == nil {
 			if g, err := s.resolveGroupByID(ctx, sel.GroupID); err == nil {
@@ -1386,11 +1413,12 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 			}
 		}
 		// Re-evaluated now (not the selection-time cache): a price or rate
-		// that changed while waiting is caught here.
+		// that changed while waiting is caught here. The group rates are
+		// re-checked once more against the admission snapshot below.
 		var price *MarketPriceSnapshot
 		ok := group != nil
 		if ok {
-			price, ok = s.computeMarketPrice(ctx, dispatch, group, claude.NormalizeModelID(strings.TrimSpace(mappedModel)))
+			price, ok = s.computeMarketPrice(ctx, dispatch, group, priceModel)
 		}
 		if !ok {
 			logMarketAdmission(ctx, sel, "not_priced", nil)
@@ -1414,6 +1442,9 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 	verdict, err := s.market.store.AdmitMarketCandidate(admitCtx, req, func(f *MarketAuthoritativeFacts) string {
 		if reason := EvaluateMarketAdmission(sel, req, f); reason != "" {
 			return reason
+		}
+		if sel.Class == MarketClassBuyer && !marketSnapshotGroupPriced(f, priceModel) {
+			return "not_priced"
 		}
 		// Trusted-only / user / Key allowlists as stored now (tightened
 		// while the request waited).

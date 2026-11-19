@@ -32,6 +32,10 @@ type SchedulerSnapshotService struct {
 	fallbackLimit *fallbackLimiter
 	lagMu         sync.Mutex
 	lagFailures   int
+	// pendingBuckets: rebuilds that met the bucket lock or failed to publish
+	// (see rebuildBucket).
+	pendingMu      sync.Mutex
+	pendingBuckets map[string]SchedulerBucket
 }
 
 func NewSchedulerSnapshotService(
@@ -196,6 +200,7 @@ func (s *SchedulerSnapshotService) runOutboxWorker(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			s.pollOutbox()
+			s.rebuildPendingBuckets()
 		case <-s.stopCh:
 			return
 		}
@@ -259,6 +264,41 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	}
 
 	s.checkOutboxLag(ctx, events[0], watermarkForCheck)
+}
+
+func (s *SchedulerSnapshotService) markBucketPending(bucket SchedulerBucket) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	if s.pendingBuckets == nil {
+		s.pendingBuckets = make(map[string]SchedulerBucket)
+	}
+	s.pendingBuckets[bucket.String()] = bucket
+}
+
+func (s *SchedulerSnapshotService) clearBucketPending(bucket SchedulerBucket) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	delete(s.pendingBuckets, bucket.String())
+}
+
+// rebuildPendingBuckets retries the buckets whose rebuild met the lock or
+// failed to publish (one SETNX per pending bucket per poll; still busy =
+// stays pending). In-memory only: a restart runs the startup rebuild instead.
+func (s *SchedulerSnapshotService) rebuildPendingBuckets() {
+	s.pendingMu.Lock()
+	buckets := make([]SchedulerBucket, 0, len(s.pendingBuckets))
+	for _, bucket := range s.pendingBuckets {
+		buckets = append(buckets, bucket)
+	}
+	s.pendingMu.Unlock()
+	if len(buckets) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), outboxEventTimeout)
+	defer cancel()
+	if err := s.rebuildBuckets(ctx, buckets, "pending"); err != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] pending rebuild failed: %v", err)
+	}
 }
 
 func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event SchedulerOutboxEvent) error {
@@ -341,13 +381,15 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 		return err
 	}
 
-	found := make(map[int64]struct{}, len(accounts))
-	rebuildGroupSet := make(map[int64]struct{}, len(preloadGroupIDs))
-	for _, gid := range preloadGroupIDs {
-		if gid > 0 {
-			rebuildGroupSet[gid] = struct{}{}
-		}
+	// The cached copies before this event: market tiers (and admin groups)
+	// the accounts left must be rebuilt too.
+	previous := make(map[int64]*Account, len(ids))
+	for _, id := range ids {
+		previous[id] = s.previousCachedAccount(ctx, id)
 	}
+
+	found := make(map[int64]struct{}, len(accounts))
+	rebuildGroupIDs := append([]int64(nil), preloadGroupIDs...)
 
 	for _, account := range accounts {
 		if account == nil || account.ID <= 0 {
@@ -359,11 +401,7 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 				return err
 			}
 		}
-		for _, gid := range account.GroupIDs {
-			if gid > 0 {
-				rebuildGroupSet[gid] = struct{}{}
-			}
-		}
+		rebuildGroupIDs = append(rebuildGroupIDs, s.accountEventGroupIDs(nil, account, previous[account.ID])...)
 	}
 
 	if s.cache != nil {
@@ -374,12 +412,8 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 			if err := s.cache.DeleteAccount(ctx, id); err != nil {
 				return err
 			}
+			rebuildGroupIDs = append(rebuildGroupIDs, s.accountEventGroupIDs(nil, nil, previous[id])...)
 		}
-	}
-
-	rebuildGroupIDs := make([]int64, 0, len(rebuildGroupSet))
-	for gid := range rebuildGroupSet {
-		rebuildGroupIDs = append(rebuildGroupIDs, gid)
 	}
 	return s.rebuildByGroupIDs(ctx, rebuildGroupIDs, "account_bulk_change")
 }
@@ -400,24 +434,71 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 	account, err := s.accountRepo.GetByID(ctx, *accountID)
 	if err != nil {
 		if errors.Is(err, ErrAccountNotFound) {
+			previous := s.previousCachedAccount(ctx, *accountID)
 			if s.cache != nil {
 				if err := s.cache.DeleteAccount(ctx, *accountID); err != nil {
 					return err
 				}
 			}
-			return s.rebuildByGroupIDs(ctx, groupIDs, "account_miss")
+			return s.rebuildByGroupIDs(ctx, s.accountEventGroupIDs(groupIDs, nil, previous), "account_miss")
 		}
 		return err
 	}
+	previous := s.previousCachedAccount(ctx, *accountID)
 	if s.cache != nil {
 		if err := s.cache.SetAccount(ctx, account); err != nil {
 			return err
 		}
 	}
-	if len(groupIDs) == 0 {
-		groupIDs = account.GroupIDs
+	return s.rebuildByAccount(ctx, account, s.accountEventGroupIDs(groupIDs, account, previous), "account_change")
+}
+
+// previousCachedAccount is the cached copy before an account event is
+// applied (nil when absent or unreadable: the event then rebuilds the
+// fresh copy's groups only, as before).
+func (s *SchedulerSnapshotService) previousCachedAccount(ctx context.Context, accountID int64) *Account {
+	if s.cache == nil || s.isRunModeSimple() {
+		// Simple mode rebuilds its single global bucket only.
+		return nil
 	}
-	return s.rebuildByAccount(ctx, account, groupIDs, "account_change")
+	account, err := s.cache.GetAccount(ctx, accountID)
+	if err != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] previous account read failed: id=%d err=%v", accountID, err)
+		return nil
+	}
+	return account
+}
+
+// accountEventGroupIDs is the bucket group set an account event rebuilds.
+// Admin part as before: the event's explicit group ids, else the account's
+// admin groups (plus the previous cached copy's), else the ungrouped bucket
+// 0. Market part, always: every market tier the account is listed in now or
+// was listed in per the previous cached copy, so a listed account that turns
+// (un)schedulable, changes or leaves a tier is reflected in the tier bucket
+// without waiting for a full rebuild. Simple run mode keeps its single
+// global bucket.
+func (s *SchedulerSnapshotService) accountEventGroupIDs(explicit []int64, current, previous *Account) []int64 {
+	if s.isRunModeSimple() {
+		return []int64{0}
+	}
+	ids := append([]int64(nil), explicit...)
+	if len(explicit) == 0 {
+		if current == nil || len(current.GroupIDs) == 0 {
+			ids = append(ids, 0)
+		}
+		if current != nil {
+			ids = append(ids, current.GroupIDs...)
+		}
+		if previous != nil {
+			ids = append(ids, previous.GroupIDs...)
+		}
+	}
+	for _, account := range []*Account{current, previous} {
+		if account != nil {
+			ids = append(ids, account.MarketGroupIDs...)
+		}
+	}
+	return ids
 }
 
 func (s *SchedulerSnapshotService) handleGroupEvent(ctx context.Context, groupID *int64) error {
@@ -502,8 +583,16 @@ func (s *SchedulerSnapshotService) rebuildBucket(ctx context.Context, bucket Sch
 		return err
 	}
 	if !ok {
+		// The lock (30 s, never released early) throttles rebuilds. The
+		// rebuild holding it may have read the database before the change
+		// that asked for this one, so the bucket is remembered and rebuilt
+		// once the lock is free (trailing rebuild) instead of being
+		// dropped: a re-enabled account must not stay missing from it.
+		s.markBucketPending(bucket)
 		return nil
 	}
+	// Any pending request is satisfied: this rebuild reads the database now.
+	s.clearBucketPending(bucket)
 
 	rebuildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -511,10 +600,14 @@ func (s *SchedulerSnapshotService) rebuildBucket(ctx context.Context, bucket Sch
 	accounts, err := s.loadAccountsFromDB(rebuildCtx, bucket, bucket.Mode == SchedulerModeMixed)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild failed: bucket=%s reason=%s err=%v", bucket.String(), reason, err)
+		// Not published: keep it pending (the request may have been the
+		// trailing rebuild of an event whose watermark already advanced).
+		s.markBucketPending(bucket)
 		return err
 	}
 	if err := s.cache.SetSnapshot(rebuildCtx, bucket, accounts); err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild cache failed: bucket=%s reason=%s err=%v", bucket.String(), reason, err)
+		s.markBucketPending(bucket)
 		return err
 	}
 	slog.Debug("[Scheduler] rebuild ok", "bucket", bucket.String(), "reason", reason, "size", len(accounts))
@@ -652,6 +745,8 @@ func (s *SchedulerSnapshotService) normalizeGroupID(groupID *int64) int64 {
 	return *groupID
 }
 
+// normalizeGroupIDs de-duplicates bucket group ids; 0 (the ungrouped
+// bucket) is kept when listed, and an empty set means the ungrouped bucket.
 func (s *SchedulerSnapshotService) normalizeGroupIDs(groupIDs []int64) []int64 {
 	if s.isRunModeSimple() {
 		return []int64{0}
@@ -662,7 +757,7 @@ func (s *SchedulerSnapshotService) normalizeGroupIDs(groupIDs []int64) []int64 {
 	seen := make(map[int64]struct{}, len(groupIDs))
 	out := make([]int64, 0, len(groupIDs))
 	for _, id := range groupIDs {
-		if id <= 0 {
+		if id < 0 {
 			continue
 		}
 		if _, ok := seen[id]; ok {
