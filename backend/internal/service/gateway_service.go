@@ -77,6 +77,48 @@ const (
 	ClaudeOAuthCarpoolDevicesFullAllAccountsMessage = "No available Claude OAuth carpool account has free device slots. Please retry later or contact your administrator."
 )
 
+// ClaudeOAuthCarpoolDevicesFullModelLimitedMessage replaces
+// ClaudeOAuthCarpoolDevicesFullAllAccountsMessage when the selection also
+// skipped accounts because the requested model's own usage limit is reached
+// there: the device slots are not the only reason, and switching models or
+// waiting for the reset helps. It keeps the "No available Claude OAuth carpool
+// account" prefix that Ops tooling groups by.
+func ClaudeOAuthCarpoolDevicesFullModelLimitedMessage(model string, wait time.Duration) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = "this model"
+	}
+	reset := ""
+	if wait > 0 {
+		reset = " (earliest reset in about " + formatApproxWait(wait) + ")"
+	}
+	return fmt.Sprintf("No available Claude OAuth carpool account can serve %s right now: its usage limit is reached on the other accounts%s, and the accounts that still have quota have no free device slots for this device. Please switch to another model or retry later.", model, reset)
+}
+
+// formatApproxWait renders a wait as "5d 10h", "3h 20m" or "12m", rounding up.
+func formatApproxWait(d time.Duration) string {
+	minutes := int64((d + time.Minute - 1) / time.Minute)
+	if minutes < 1 {
+		minutes = 1
+	}
+	if minutes < 60 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	hours := (minutes + 59) / 60
+	if hours < 24 {
+		h, m := minutes/60, minutes%60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	days, h := hours/24, hours%24
+	if h == 0 {
+		return fmt.Sprintf("%dd", days)
+	}
+	return fmt.Sprintf("%dd %dh", days, h)
+}
+
 // ForceCacheBillingContextKey 强制缓存计费上下文键
 // 用于粘性会话切换时，将 input_tokens 转为 cache_read_input_tokens 计费
 type forceCacheBillingKeyType struct{}
@@ -393,6 +435,35 @@ type noAvailableAccountsError string
 
 func (e noAvailableAccountsError) Error() string      { return string(e) }
 func (noAvailableAccountsError) Is(target error) bool { return target == ErrNoAvailableAccounts }
+
+// SelectionFailureError is the ErrNoAvailableAccounts returned when a
+// model-specific selection found no candidate. It keeps the established text
+// and exposes why accounts were skipped, so callers can explain the failure.
+type SelectionFailureError struct {
+	RequestedModel string
+	// ModelRateLimited counts accounts skipped because RequestedModel's own
+	// usage limit is reached on them (for example the Fable weekly window).
+	ModelRateLimited int
+	// ModelRateLimitMinRemaining is the shortest known wait until one of
+	// those limits resets (0 when unknown).
+	ModelRateLimitMinRemaining time.Duration
+	summary                    string
+}
+
+func newSelectionFailureError(requestedModel string, stats selectionFailureStats) *SelectionFailureError {
+	return &SelectionFailureError{
+		RequestedModel:             requestedModel,
+		ModelRateLimited:           stats.ModelRateLimited,
+		ModelRateLimitMinRemaining: stats.ModelRateLimitMinRemaining,
+		summary:                    summarizeSelectionFailureStats(stats),
+	}
+}
+
+func (e *SelectionFailureError) Error() string {
+	return fmt.Sprintf("%s supporting model: %s (%s)", ErrNoAvailableAccounts.Error(), e.RequestedModel, e.summary)
+}
+
+func (*SelectionFailureError) Is(target error) bool { return target == ErrNoAvailableAccounts }
 
 // ErrClaudeCodeOnly 表示分组仅允许 Claude Code 客户端访问
 var ErrClaudeCodeOnly = errors.New("this group only allows Claude Code clients")
@@ -2772,7 +2843,7 @@ func (s *GatewayService) selectAccountWithLoadAwareness(ctx context.Context, gro
 	if len(candidates) == 0 {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, platform, accounts, excludedIDs, useMixed)
 		if requestedModel != "" {
-			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
+			return nil, newSelectionFailureError(requestedModel, stats)
 		}
 		return nil, ErrNoAvailableAccounts
 	}
@@ -4327,7 +4398,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	if selected == nil {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, platform, accounts, excludedIDs, false)
 		if requestedModel != "" {
-			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
+			return nil, newSelectionFailureError(requestedModel, stats)
 		}
 		return nil, ErrNoAvailableAccounts
 	}
@@ -4522,7 +4593,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	if selected == nil {
 		stats := s.logDetailedSelectionFailure(ctx, groupID, sessionHash, requestedModel, nativePlatform, accounts, excludedIDs, true)
 		if requestedModel != "" {
-			return nil, fmt.Errorf("%w supporting model: %s (%s)", ErrNoAvailableAccounts, requestedModel, summarizeSelectionFailureStats(stats))
+			return nil, newSelectionFailureError(requestedModel, stats)
 		}
 		return nil, ErrNoAvailableAccounts
 	}
@@ -4553,6 +4624,9 @@ type selectionFailureStats struct {
 	SampleWindowIDs     []int64
 	SampleRPMIDs        []int64
 	SampleFiveHourIDs   []int64
+	// ModelRateLimitMinRemaining is the shortest positive model-scoped rate
+	// limit among ModelRateLimited accounts (0 when none is known).
+	ModelRateLimitMinRemaining time.Duration
 }
 
 type selectionFailureDiagnosis struct {
@@ -4661,6 +4735,9 @@ func (s *GatewayService) collectSelectionFailureStats(
 			stats.ModelRateLimited++
 			remaining := acc.GetRateLimitRemainingTimeWithContext(ctx, requestedModel).Truncate(time.Second)
 			stats.SampleRateLimitIDs = appendSelectionFailureRateSample(stats.SampleRateLimitIDs, acc.ID, remaining)
+			if remaining > 0 && (stats.ModelRateLimitMinRemaining == 0 || remaining < stats.ModelRateLimitMinRemaining) {
+				stats.ModelRateLimitMinRemaining = remaining
+			}
 		case "quota_limited":
 			stats.QuotaLimited++
 			stats.SampleQuotaIDs = appendSelectionFailureSampleID(stats.SampleQuotaIDs, acc.ID)

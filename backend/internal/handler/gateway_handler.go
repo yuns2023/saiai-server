@@ -1027,7 +1027,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
-						h.handleFailoverExhausted(c, fs.LastFailoverErr, platform, streamStarted)
+						h.handleFailoverExhaustedAfterSelection(c, fs.LastFailoverErr, err, platform, streamStarted)
 					} else {
 						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
 					}
@@ -2208,6 +2208,22 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 	markOpsUserConcurrency(c, err, slotType)
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
 		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", concurrencyLimitSlotType(err, slotType)), streamStarted)
+}
+
+// handleFailoverExhaustedAfterSelection is handleFailoverExhausted for the
+// point where the final reselection found no account. When the last failure
+// was a full carpool device registry but other accounts were skipped for the
+// requested model's own usage limit, the generic "no free device slots"
+// message hides the real constraint, so name the model limit as well.
+func (h *GatewayHandler) handleFailoverExhaustedAfterSelection(c *gin.Context, failoverErr *service.UpstreamFailoverError, selectionErr error, platform string, streamStarted bool) {
+	var selection *service.SelectionFailureError
+	if errors.Is(failoverErr, service.ErrClaudeOAuthCarpoolDevicesFull) &&
+		errors.As(selectionErr, &selection) && selection.ModelRateLimited > 0 {
+		h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
+			service.ClaudeOAuthCarpoolDevicesFullModelLimitedMessage(selection.RequestedModel, selection.ModelRateLimitMinRemaining), streamStarted)
+		return
+	}
+	h.handleFailoverExhausted(c, failoverErr, platform, streamStarted)
 }
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
