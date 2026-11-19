@@ -549,6 +549,14 @@ func registerSettlementRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		settlement.GET("/reconcile", h.Admin.Settlement.Reconcile)
 	}
+	// 共享市场收益：按号主总览、账本、冲正冻结中收益（P3a）
+	market := admin.Group("/market")
+	{
+		market.GET("/earnings", h.Admin.MarketEarnings.Owners)
+		market.GET("/earnings/entries", h.Admin.MarketEarnings.Entries)
+		market.POST("/earnings/reverse", h.Admin.MarketEarnings.Reverse)
+		market.GET("/admissions/:id", h.Admin.MarketEarnings.SaleAudit)
+	}
 }
 
 func registerHostedApplicationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

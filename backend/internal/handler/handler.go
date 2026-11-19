@@ -35,6 +35,8 @@ type AdminHandlers struct {
 	HostedApplication *admin.HostedApplicationHandler
 	// MarketListing: per-account sharing permission (P3a).
 	MarketListing *admin.MarketListingHandler
+	// MarketEarnings: owner earnings overview, ledger and reverse (P3a).
+	MarketEarnings *admin.MarketEarningsHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -65,6 +67,8 @@ type Handlers struct {
 	HostedSelfOnboard *HostedSelfOnboardHandler
 	// MarketListing: owner side of the sharing market (P3a).
 	MarketListing *MarketListingHandler
+	// MarketEarnings: the owner's own earnings and conversion (P3a).
+	MarketEarnings *MarketEarningsHandler
 }
 
 // BuildInfo contains build-time information

@@ -71,6 +71,10 @@ func RegisterUserRoutes(
 			// 共享市场：号主在允许档位内上架/下架（P3a，开关 market_enabled）
 			hosted.GET("/owned-accounts/:id/market", h.MarketListing.Get)
 			hosted.PUT("/owned-accounts/:id/market", h.MarketListing.Put)
+			// 共享市场收益：本人账本、冻结/可用、转入余额（P3a）
+			hosted.GET("/earnings", h.MarketEarnings.Summary)
+			hosted.GET("/earnings/entries", h.MarketEarnings.Entries)
+			hosted.POST("/earnings/convert", h.MarketEarnings.Convert)
 			// 自助上号（开关 hosted_self_onboard_enabled）
 			hosted.GET("/self-onboard/config", h.HostedSelfOnboard.Config)
 			hosted.POST("/applications/auth-url", h.HostedSelfOnboard.CreateAuthURL)

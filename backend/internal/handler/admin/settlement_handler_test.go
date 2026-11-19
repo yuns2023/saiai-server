@@ -33,6 +33,11 @@ func (s *settlementReconcileRepoStub) Reconcile(_ context.Context, q service.Set
 		Diffs:   []service.SettlementReconcileDiff{{RequestID: "r1", APIKeyID: 9, Kind: service.SettlementDiffLogOnly, Status: service.SettlementDiffStatusCoverageUnknown, Category: &cat}},
 		Counts:  []service.SettlementReconcileDiffCount{{Kind: service.SettlementDiffLogOnly, Status: service.SettlementDiffStatusCoverageUnknown, Count: 1}},
 		Total:   1,
+		Market: &service.SettlementMarketReconcile{
+			Summary:     service.SettlementMarketSummary{SaleCount: 1, ChargedAmount: "1.5", OwnerEarning: "1.2", PlatformAmount: "0.3", AccruedAmount: "1.2", ReversedAmount: "0", ConvertedAmount: "0"},
+			IssueCounts: []service.SettlementReconcileDiffCount{{Kind: service.SettlementMarketIssueAdmissionWithoutEvent, Status: service.SettlementMarketStatusUndetermined, Count: 1}},
+			Issues:      []service.SettlementMarketIssue{{Kind: service.SettlementMarketIssueAdmissionWithoutEvent, Status: service.SettlementMarketStatusUndetermined}},
+		},
 	}, nil
 }
 
@@ -63,8 +68,20 @@ func TestSettlementReconcileJSONFieldNames(t *testing.T) {
 		Data map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	require.Equal(t, []string{"coverage", "coverage_start", "diff_counts", "diffs", "from", "page", "page_size", "process_metrics", "status", "summary", "to", "total"}, sortedKeys(body.Data))
+	require.Equal(t, []string{"coverage", "coverage_start", "diff_counts", "diffs", "from", "market", "page", "page_size", "process_metrics", "status", "summary", "to", "total"}, sortedKeys(body.Data))
 	require.Equal(t, "ok", body.Data["status"])
+	market, ok := body.Data["market"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []string{"issue_counts", "issues", "scope", "summary"}, sortedKeys(market))
+	require.Equal(t, "owner_backed_sales", market["scope"])
+	marketSummary, ok := market["summary"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []string{"accrued_amount", "charged_amount", "converted_amount", "earning_sale_count", "owner_earning", "platform_amount", "reversed_amount", "sale_count"}, sortedKeys(marketSummary))
+	issues, ok := market["issues"].([]any)
+	require.True(t, ok)
+	issue, ok := issues[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []string{"account_id", "admission_id", "at", "entry_id", "event_id", "kind", "owner_user_id", "request_id", "status"}, sortedKeys(issue))
 	require.Equal(t, "partial", body.Data["coverage"])
 	summary, ok := body.Data["summary"].([]any)
 	require.True(t, ok)
@@ -83,7 +100,7 @@ func TestSettlementReconcileJSONFieldNames(t *testing.T) {
 	require.Equal(t, []string{"count", "kind", "status"}, sortedKeys(count))
 	metrics, ok := body.Data["process_metrics"].(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, []string{"skipped_low_budget", "write_failures"}, sortedKeys(metrics))
+	require.Equal(t, []string{"market_apply_rolled_back", "market_commit_unknown", "market_integrity_errors", "market_not_enqueued", "skipped_low_budget", "write_failures"}, sortedKeys(metrics))
 	require.Equal(t, 2, repo.lastQ.Page)
 	require.Equal(t, 50, repo.lastQ.PageSize)
 	require.False(t, repo.lastQ.Now.IsZero())

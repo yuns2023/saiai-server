@@ -8,6 +8,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 )
 
 type settlementReconcileRepository struct {
@@ -38,6 +39,9 @@ func (r *settlementReconcileRepository) Reconcile(ctx context.Context, q service
 		return nil, mapSettlementReconcileError(err)
 	}
 	if out.Diffs, out.Counts, out.Total, err = settlementDiffs(ctx, tx, q); err != nil {
+		return nil, mapSettlementReconcileError(err)
+	}
+	if out.Market, err = settlementMarketReconcile(ctx, tx, q); err != nil {
 		return nil, mapSettlementReconcileError(err)
 	}
 	return out, nil
@@ -223,4 +227,151 @@ func settlementDiffs(ctx context.Context, tx *sql.Tx, q service.SettlementReconc
 		return nil, nil, 0, err
 	}
 	return diffs, counts, total, nil
+}
+
+// settlementMarketIssuesCTE lists the shared_sale ↔ ledger findings of the
+// window ($1 from, $2 to; $3 = now − grace for admissions):
+//   - a positive earning without exactly one matching accrue (owner, amount,
+//     available_at), an accrue on a zero-earning or non-market event;
+//   - an event whose split is not charged = owner_earning + platform_amount;
+//   - a reverse whose original is not a matching accrue of the same owner
+//     and event;
+//   - a convert without its market_earning history row (code MKTEARN-<id>,
+//     used by the owner, value = amount) and such a row without a convert;
+//   - an admission without an event (pending within the grace, then
+//     undetermined; never a reason to pay).
+const settlementMarketIssuesCTE = `
+	WITH issues AS (
+		SELECT CASE WHEN a.id IS NULL THEN 'accrue_missing' ELSE 'accrue_mismatch' END AS kind, 'mismatch' AS status,
+			e.id AS event_id, a.id AS entry_id, e.admission_id, e.owner_user_id, e.account_id, e.request_id, e.created_at AS at
+		FROM usage_settlement_events e
+		LEFT JOIN owner_earning_entries a ON a.settlement_event_id = e.id AND a.kind = 'accrue'
+		WHERE e.category = 'shared_sale' AND e.created_at >= $1 AND e.created_at < $2 AND e.owner_earning > 0
+			AND (a.id IS NULL OR a.owner_user_id IS DISTINCT FROM e.owner_user_id OR a.amount <> e.owner_earning
+				OR a.available_at IS DISTINCT FROM e.earning_available_at)
+		UNION ALL
+		SELECT 'accrue_unexpected', 'mismatch', e.id, a.id, e.admission_id, a.owner_user_id, e.account_id, e.request_id, a.created_at
+		FROM owner_earning_entries a
+		JOIN usage_settlement_events e ON e.id = a.settlement_event_id
+		WHERE a.kind = 'accrue' AND a.created_at >= $1 AND a.created_at < $2
+			AND (e.category <> 'shared_sale' OR e.owner_earning = 0)
+		UNION ALL
+		SELECT 'split_mismatch', 'mismatch', e.id, NULL, e.admission_id, e.owner_user_id, e.account_id, e.request_id, e.created_at
+		FROM usage_settlement_events e
+		WHERE e.category = 'shared_sale' AND e.created_at >= $1 AND e.created_at < $2
+			AND e.charged_amount IS DISTINCT FROM e.owner_earning + e.platform_amount
+		UNION ALL
+		SELECT 'reverse_mismatch', 'mismatch', r.settlement_event_id, r.id, NULL, r.owner_user_id, NULL, NULL, r.created_at
+		FROM owner_earning_entries r
+		LEFT JOIN owner_earning_entries a ON a.id = r.reverses_entry_id
+		WHERE r.kind = 'reverse' AND r.created_at >= $1 AND r.created_at < $2
+			AND (a.id IS NULL OR a.kind <> 'accrue' OR a.owner_user_id <> r.owner_user_id OR a.amount <> -r.amount
+				OR a.available_at IS DISTINCT FROM r.available_at
+				OR r.settlement_event_id IS DISTINCT FROM a.settlement_event_id)
+		UNION ALL
+		SELECT 'convert_history_missing', 'mismatch', NULL, c.id, NULL, c.owner_user_id, NULL, NULL, c.created_at
+		FROM owner_earning_entries c
+		LEFT JOIN redeem_codes h ON h.code = 'MKTEARN-' || c.id::text
+		WHERE c.kind = 'convert' AND c.created_at >= $1 AND c.created_at < $2
+			AND (h.id IS NULL OR h.type <> 'market_earning' OR h.status <> 'used'
+				OR h.used_by IS DISTINCT FROM c.owner_user_id OR h.value <> -c.amount)
+		UNION ALL
+		SELECT 'convert_history_orphan', 'mismatch', NULL, NULL, NULL, h.used_by, NULL, NULL, h.created_at
+		FROM redeem_codes h
+		LEFT JOIN owner_earning_entries c ON c.kind = 'convert'
+			AND c.id = CASE WHEN h.code ~ '^MKTEARN-[1-9][0-9]{0,17}$' THEN substr(h.code, 9)::bigint END
+			AND h.code = 'MKTEARN-' || c.id::text
+		WHERE h.type = 'market_earning' AND h.created_at >= $1 AND h.created_at < $2 AND c.id IS NULL
+		UNION ALL
+		SELECT 'admission_without_event', CASE WHEN m.admitted_at > $3 THEN 'pending' ELSE 'undetermined' END,
+			NULL, NULL, m.id, m.owner_user_id, m.account_id, 'client:' || btrim(m.request_ref), m.admitted_at
+		FROM market_admissions m
+		WHERE m.admitted_at >= $1 AND m.admitted_at < $2
+			AND NOT EXISTS (SELECT 1 FROM usage_settlement_events e WHERE e.admission_id = m.id)
+	)
+`
+
+func settlementMarketReconcile(ctx context.Context, tx *sql.Tx, q service.SettlementReconcileQuery) (*service.SettlementMarketReconcile, error) {
+	out := &service.SettlementMarketReconcile{Scope: service.SettlementMarketScopeOwnerBacked}
+	s := &out.Summary
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE owner_earning > 0),
+			COALESCE(SUM(charged_amount), 0)::text, COALESCE(SUM(owner_earning), 0)::text, COALESCE(SUM(platform_amount), 0)::text
+		FROM usage_settlement_events
+		WHERE category = 'shared_sale' AND created_at >= $1 AND created_at < $2
+	`, q.From, q.To).Scan(&s.SaleCount, &s.EarningSaleCount, &s.ChargedAmount, &s.OwnerEarning, &s.PlatformAmount); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(amount) FILTER (WHERE kind = 'accrue'), 0)::text,
+			COALESCE(-SUM(amount) FILTER (WHERE kind = 'reverse'), 0)::text,
+			COALESCE(-SUM(amount) FILTER (WHERE kind = 'convert'), 0)::text
+		FROM owner_earning_entries
+		WHERE created_at >= $1 AND created_at < $2
+	`, q.From, q.To).Scan(&s.AccruedAmount, &s.ReversedAmount, &s.ConvertedAmount); err != nil {
+		return nil, err
+	}
+	for _, p := range []*string{&s.ChargedAmount, &s.OwnerEarning, &s.PlatformAmount, &s.AccruedAmount, &s.ReversedAmount, &s.ConvertedAmount} {
+		d, err := decimal.NewFromString(*p)
+		if err != nil {
+			return nil, err
+		}
+		*p = d.String()
+	}
+
+	args := []any{q.From, q.To, q.Now.Add(-service.SettlementReconcileLogGrace)}
+	countRows, err := tx.QueryContext(ctx, settlementMarketIssuesCTE+`
+		SELECT kind, status, COUNT(*) FROM issues GROUP BY kind, status ORDER BY kind, status
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	out.IssueCounts = []service.SettlementReconcileDiffCount{}
+	out.Issues = []service.SettlementMarketIssue{}
+	var issueTotal int64
+	for countRows.Next() {
+		var c service.SettlementReconcileDiffCount
+		if err := countRows.Scan(&c.Kind, &c.Status, &c.Count); err != nil {
+			_ = countRows.Close()
+			return nil, err
+		}
+		issueTotal += c.Count
+		out.IssueCounts = append(out.IssueCounts, c)
+	}
+	if err := countRows.Err(); err != nil {
+		_ = countRows.Close()
+		return nil, err
+	}
+	_ = countRows.Close()
+	if issueTotal == 0 {
+		return out, nil
+	}
+
+	// Money findings first, admissions awaiting a decision last.
+	rows, err := tx.QueryContext(ctx, settlementMarketIssuesCTE+`
+		SELECT kind, status, event_id, entry_id, admission_id, owner_user_id, account_id, request_id, at
+		FROM issues
+		ORDER BY (kind = 'admission_without_event'), at, kind, COALESCE(event_id, entry_id, admission_id)
+		LIMIT $4
+	`, append(args, service.SettlementMarketMaxIssues)...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var it service.SettlementMarketIssue
+		var eventID, entryID, admissionID, ownerID, accountID sql.NullInt64
+		var requestID sql.NullString
+		if err := rows.Scan(&it.Kind, &it.Status, &eventID, &entryID, &admissionID, &ownerID, &accountID, &requestID, &it.At); err != nil {
+			return nil, err
+		}
+		it.EventID = nullInt64Ptr(eventID)
+		it.EntryID = nullInt64Ptr(entryID)
+		it.AdmissionID = nullInt64Ptr(admissionID)
+		it.OwnerUserID = nullInt64Ptr(ownerID)
+		it.AccountID = nullInt64Ptr(accountID)
+		it.RequestID = nullStringPtr(requestID)
+		out.Issues = append(out.Issues, it)
+	}
+	return out, rows.Err()
 }
