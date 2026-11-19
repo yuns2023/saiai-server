@@ -5698,9 +5698,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	var resp *http.Response
 	retryStart := time.Now()
 	sameAccountHTTPReplayUsed := false
-	// The response that led to a same-account replay (for the late-listing
-	// guard: a replay round ends with that response's own outcome, never a
-	// failover to another account).
+	// The response that led to a same-account replay. If the account gets
+	// listed before the replay, the listing guard keeps that original
+	// response's outcome (only the cache-safe 502 is explicitly a client
+	// retry; a 5xx keeps its normal handling, which may fail over).
 	var replayResp *http.Response
 	var replayBody []byte
 	replayCacheSafe := false

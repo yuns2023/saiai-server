@@ -1617,4 +1617,9 @@ func TestMarketListedDuringSameAccount5xxReplaySendsOnce(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 1, upstream.calls, "no replay through the now-listed account")
 	require.NotErrorIs(t, err, ErrMarketAdmissionRejected, "the 503's own outcome, not the market refusal")
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, http.StatusServiceUnavailable, failover.StatusCode)
+	require.JSONEq(t, `{"type":"error","error":{"message":"temporary upstream failure"}}`, string(failover.ResponseBody),
+		"the original response body survives the rebuild")
 }
