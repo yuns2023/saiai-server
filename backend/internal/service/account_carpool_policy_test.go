@@ -174,6 +174,8 @@ func TestCarpoolEvictIdleHoursPolicy(t *testing.T) {
 		{name: "hex prefix keeps default", value: "0x10", set: true, want: DefaultCarpoolEvictIdleHours},
 		{name: "inf string keeps default", value: "inf", set: true, want: DefaultCarpoolEvictIdleHours},
 		{name: "decimal with exponent", value: " 1.2e1 ", set: true, want: 12},
+		{name: "BOM prefix keeps default", value: "\uFEFF0", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "NEL prefix keeps default", value: "\u00850", set: true, want: DefaultCarpoolEvictIdleHours},
 		{name: "boolean keeps default", value: false, set: true, want: DefaultCarpoolEvictIdleHours},
 		{name: "object keeps default", value: map[string]any{}, set: true, want: DefaultCarpoolEvictIdleHours},
 	}

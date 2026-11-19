@@ -81,7 +81,8 @@ func (a *Account) GetCarpoolEvictIdleHours() int {
 		// Only plain decimal strings count, matching the admin dialog; an
 		// unparseable, blank or prefixed (0x/0b/inf) value must not silently
 		// lift the restriction.
-		trimmed := strings.TrimSpace(v)
+		// ASCII whitespace only: Go and JS disagree on Unicode spaces.
+		trimmed := strings.Trim(v, " \t\n\r")
 		if !carpoolDecimalPattern.MatchString(trimmed) {
 			return DefaultCarpoolEvictIdleHours
 		}
