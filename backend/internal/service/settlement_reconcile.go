@@ -118,6 +118,64 @@ type SettlementReconcileResult struct {
 	PageSize      int                             `json:"page_size"`
 	// ProcessMetrics are counters of this server process only.
 	ProcessMetrics UsageSettlementMetricsSnapshot `json:"process_metrics"`
+	// Market reconciles shared_sale events with the owner earnings ledger
+	// (nil only in Simple mode).
+	Market *SettlementMarketReconcile `json:"market"`
+}
+
+// Market (shared_sale) reconcile: only owner-backed market sales write
+// events (a sale served by a platform account in a tier writes none), so
+// this covers owner-backed sales only.
+const (
+	SettlementMarketScopeOwnerBacked = "owner_backed_sales"
+	// SettlementMarketMaxIssues bounds the listed issues (counts are total).
+	SettlementMarketMaxIssues = 200
+
+	SettlementMarketIssueAccrueMissing         = "accrue_missing"
+	SettlementMarketIssueAccrueMismatch        = "accrue_mismatch"
+	SettlementMarketIssueAccrueUnexpected      = "accrue_unexpected"
+	SettlementMarketIssueSplitMismatch         = "split_mismatch"
+	SettlementMarketIssueReverseMismatch       = "reverse_mismatch"
+	SettlementMarketIssueConvertHistoryMissing = "convert_history_missing"
+	SettlementMarketIssueConvertHistoryOrphan  = "convert_history_orphan"
+	// SettlementMarketIssueAdmissionWithoutEvent is not an error by itself
+	// (failed candidate attempts and unbilled requests have admissions too)
+	// and never a reason to pay: pending within the grace period, then
+	// undetermined.
+	SettlementMarketIssueAdmissionWithoutEvent = "admission_without_event"
+	SettlementMarketStatusUndetermined         = "undetermined"
+)
+
+// SettlementMarketSummary: sales by event time, ledger by entry time, both
+// in [from, to). Amounts are exact decimal strings.
+type SettlementMarketSummary struct {
+	SaleCount        int64  `json:"sale_count"`
+	EarningSaleCount int64  `json:"earning_sale_count"`
+	ChargedAmount    string `json:"charged_amount"`
+	OwnerEarning     string `json:"owner_earning"`
+	PlatformAmount   string `json:"platform_amount"`
+	AccruedAmount    string `json:"accrued_amount"`
+	ReversedAmount   string `json:"reversed_amount"`
+	ConvertedAmount  string `json:"converted_amount"`
+}
+
+type SettlementMarketIssue struct {
+	Kind        string    `json:"kind"`
+	Status      string    `json:"status"`
+	EventID     *int64    `json:"event_id"`
+	EntryID     *int64    `json:"entry_id"`
+	AdmissionID *int64    `json:"admission_id"`
+	OwnerUserID *int64    `json:"owner_user_id"`
+	AccountID   *int64    `json:"account_id"`
+	RequestID   *string   `json:"request_id"`
+	At          time.Time `json:"at"`
+}
+
+type SettlementMarketReconcile struct {
+	Scope       string                         `json:"scope"`
+	Summary     SettlementMarketSummary        `json:"summary"`
+	IssueCounts []SettlementReconcileDiffCount `json:"issue_counts"`
+	Issues      []SettlementMarketIssue        `json:"issues"`
 }
 
 // SettlementReconcileData is one consistent read of the reconcile view.
@@ -126,6 +184,7 @@ type SettlementReconcileData struct {
 	Diffs   []SettlementReconcileDiff
 	Counts  []SettlementReconcileDiffCount
 	Total   int64
+	Market  *SettlementMarketReconcile
 }
 
 type SettlementReconcileRepository interface {
@@ -185,6 +244,17 @@ func (s *SettlementReconcileService) Reconcile(ctx context.Context, q Settlement
 	if diffs == nil {
 		diffs = []SettlementReconcileDiff{}
 	}
+	market := data.Market
+	if market == nil {
+		market = &SettlementMarketReconcile{}
+	}
+	market.Scope = SettlementMarketScopeOwnerBacked
+	if market.IssueCounts == nil {
+		market.IssueCounts = []SettlementReconcileDiffCount{}
+	}
+	if market.Issues == nil {
+		market.Issues = []SettlementMarketIssue{}
+	}
 	coverage := SettlementCoveragePartial
 	switch {
 	case !q.CoverageStart.After(q.From):
@@ -205,5 +275,6 @@ func (s *SettlementReconcileService) Reconcile(ctx context.Context, q Settlement
 		Page:           q.Page,
 		PageSize:       q.PageSize,
 		ProcessMetrics: GetUsageSettlementMetricsSnapshot(),
+		Market:         market,
 	}, nil
 }

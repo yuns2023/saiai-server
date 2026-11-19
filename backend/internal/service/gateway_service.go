@@ -9788,6 +9788,9 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
+	if err := refuseMarketWithoutLedger(cmd, repo); err != nil {
+		return false, err
+	}
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
 		// The non-transactional fallback writes no settlement event.
 		logger.L().Error("usage billing without transactional repository: settlement event not recorded",
@@ -9804,6 +9807,9 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	result, err := repo.Apply(billingCtx, cmd)
 	if err != nil {
+		if cmd.IsMarketSettlement() {
+			recordMarketApplyFailure(cmd, err)
+		}
 		return false, err
 	}
 
@@ -10319,6 +10325,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 			AccountRateMultiplier: accountRateMultiplier,
 			APIKeyService:         input.APIKeyService,
 			PriceMissing:          priceMissing,
+			MarketPath:            input.MarketPath,
 		}, s.billingDeps(), s.usageBillingRepo)
 		return err
 	}()

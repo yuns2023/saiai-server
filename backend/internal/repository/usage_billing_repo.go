@@ -31,6 +31,12 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
+	// The market branch is chosen from the command before anything else (in
+	// particular before the shadow event's low-budget skip): claim, effects,
+	// event and ledger entry commit or roll back together.
+	if cmd.IsMarketSettlement() {
+		return r.applyMarket(ctx, cmd)
+	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -51,7 +57,7 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	}
 
 	result := &service.UsageBillingApplyResult{Applied: true}
-	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
+	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result, nil); err != nil {
 		return nil, err
 	}
 	if err := recordUsageSettlementEvent(ctx, tx, cmd); err != nil {
@@ -108,7 +114,9 @@ func (r *usageBillingRepository) claimUsageBillingKey(ctx context.Context, tx *s
 	return true, nil
 }
 
-func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
+// applyUsageBillingEffects applies the charge effects. charge != nil (market
+// commands) captures the buyer balance around the deduction.
+func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult, charge *marketBuyerCharge) error {
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
 		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
 			return err
@@ -116,7 +124,13 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	if cmd.BalanceCost > 0 {
-		levelChanged, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+		var levelChanged bool
+		var err error
+		if charge != nil {
+			levelChanged, err = deductMarketBuyerBalance(ctx, tx, cmd.UserID, cmd.BalanceCost, charge)
+		} else {
+			levelChanged, err = deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+		}
 		if err != nil {
 			return err
 		}

@@ -682,6 +682,7 @@ var ProviderSet = wire.NewSet(
 	NewHostedOwnerService,
 	ProvideHostedSelfOnboardService,
 	ProvideMarketListingService,
+	NewOwnerEarningService,
 	ProvideHostedApplicationExpiryWorker,
 	NewSettlementReconcileService,
 	ProvideAccountTestService,

@@ -13,7 +13,9 @@ import (
 // classification, fee rate and charge input for reconciliation and for P3.
 // The write is best effort: an event failure never blocks the charge, so a
 // sale may lack an event. The non-transactional postUsageBilling fallback
-// writes no events.
+// writes no events. Market (shared_sale) events are not shadow events: see
+// market_settlement.go (atomic with the charge, never skipped, refused by
+// the fallback).
 
 const UsageSettlementRuleVersion = 1
 
@@ -105,7 +107,8 @@ type UsageSettlementEvent struct {
 
 // classifySettlement decides the event category from the priced group and
 // the account owner read at settlement. Platform sales without an owner get
-// no event. P3 adds shared_sale here.
+// no event. shared_sale events are built by BuildSharedSaleEvent from the
+// admission (market commands never reach this classification).
 func classifySettlement(hosted bool, owner *int64, buyer int64) (category string, anomaly bool, write bool) {
 	if hosted {
 		return SettlementCategoryHostedSelf, owner == nil || *owner != buyer, true
@@ -204,10 +207,18 @@ func settlementZeroReason(in *UsageSettlementInput, chargeOK bool) string {
 	}
 }
 
-// UsageSettlementMetricsSnapshot are process-local shadow event counters.
+// UsageSettlementMetricsSnapshot are process-local settlement counters:
+// shadow event failures/skips and the market (shared_sale) usage outcomes.
 type UsageSettlementMetricsSnapshot struct {
 	WriteFailures    uint64 `json:"write_failures"`
 	SkippedLowBudget uint64 `json:"skipped_low_budget"`
+	// Market sales: integrity errors (rolled back), usage tasks not enqueued,
+	// Apply rolled back (any error before COMMIT, integrity included) and
+	// COMMIT outcome unknown.
+	MarketIntegrityErrors uint64 `json:"market_integrity_errors"`
+	MarketNotEnqueued     uint64 `json:"market_not_enqueued"`
+	MarketApplyRolledBack uint64 `json:"market_apply_rolled_back"`
+	MarketCommitUnknown   uint64 `json:"market_commit_unknown"`
 }
 
 var (
@@ -225,7 +236,11 @@ func RecordUsageSettlementSkippedLowBudget() { usageSettlementSkippedLowBudget.A
 
 func GetUsageSettlementMetricsSnapshot() UsageSettlementMetricsSnapshot {
 	return UsageSettlementMetricsSnapshot{
-		WriteFailures:    usageSettlementWriteFailures.Load(),
-		SkippedLowBudget: usageSettlementSkippedLowBudget.Load(),
+		WriteFailures:         usageSettlementWriteFailures.Load(),
+		SkippedLowBudget:      usageSettlementSkippedLowBudget.Load(),
+		MarketIntegrityErrors: marketSettlementIntegrityErrors.Load(),
+		MarketNotEnqueued:     marketUsageNotEnqueued.Load(),
+		MarketApplyRolledBack: marketUsageApplyRolledBack.Load(),
+		MarketCommitUnknown:   marketUsageCommitUnknown.Load(),
 	}
 }
