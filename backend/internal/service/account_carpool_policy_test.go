@@ -151,3 +151,36 @@ func TestCarpoolAdmissionsExplicitZeroOverridesLegacy(t *testing.T) {
 		t.Fatal("explicit finite allowance must be preserved")
 	}
 }
+
+func TestCarpoolEvictIdleHoursPolicy(t *testing.T) {
+	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"claude_oauth_carpool_device_limit": 10}}
+	cases := []struct {
+		name  string
+		value any
+		set   bool
+		want  int
+	}{
+		{name: "absent defaults to 24", want: DefaultCarpoolEvictIdleHours},
+		{name: "null defaults to 24", value: nil, set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "explicit zero lifts the restriction", value: float64(0), set: true, want: 0},
+		{name: "positive", value: float64(6), set: true, want: 6},
+		{name: "numeric string", value: "12", set: true, want: 12},
+		{name: "unparseable string keeps default", value: "abc", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "negative clamps to zero", value: float64(-3), set: true, want: 0},
+		{name: "upper bound", value: float64(9999), set: true, want: 720},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			delete(a.Extra, CarpoolEvictIdleHoursKey)
+			if tc.set {
+				a.Extra[CarpoolEvictIdleHoursKey] = tc.value
+			}
+			if got := a.GetCarpoolEvictIdleHours(); got != tc.want {
+				t.Fatalf("GetCarpoolEvictIdleHours() = %d, want %d", got, tc.want)
+			}
+			if got := a.CarpoolAdmissionPolicy().EvictIdleHours; got != tc.want {
+				t.Fatalf("policy EvictIdleHours = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

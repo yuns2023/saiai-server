@@ -18,6 +18,12 @@ The account's `extra` fields are:
   admissions while retaining the fixed device capacity. The legacy
   `claude_oauth_carpool_maintenance_free_slots` is a read-only fallback only when
   the new field is absent; explicit zero overrides it.
+- `claude_oauth_carpool_maintenance_evict_idle_hours`: minimum idle time, in
+  hours (0–720), a registered device needs before a cycle adjustment may evict
+  it. Absent, null or unparseable means 24; an explicit 0 removes the
+  restriction (any least-recently-seen record may be evicted, the behavior
+  before this field existed). "Idle" is measured from the record's
+  `last_seen_at`, which every admitted request refreshes.
 - `claude_oauth_carpool_next_maintenance_at`: server-owned UTC RFC3339 timestamp.
 - `claude_oauth_carpool_initial_maintenance_at`: server-owned first reservation
   timestamp; the first pass preserves admissions already consumed in that cycle.
@@ -33,6 +39,14 @@ counts 10, 9, 8 and 0 cause 2, 1, 0 and 0 removals, but each new cycle permits
 at most 2 new registrations. Unused allowances never accumulate. Device
 registration and budget consumption share one Redis transaction, including
 cross-replica concurrency and repeat requests from the same device.
+
+With an idle threshold, the pass still picks least-recently-seen records
+first but only those unused for at least the threshold. If fewer qualify than
+needed, it removes only those (possibly none) and does not retry later in the
+same cycle: the next chance is the next due time. The allowance still resets,
+so a device can register in that cycle only if capacity is free (for example
+after a manual deletion). The first-cycle reservation after enabling follows
+the same rule.
 
 Each pass removes at most the configured allowance, even if a capacity reduction
 has left more registered devices than the limit. Existing free slots reduce the

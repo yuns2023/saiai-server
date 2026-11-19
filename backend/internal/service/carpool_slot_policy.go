@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -11,10 +13,20 @@ const CarpoolNextMaintenanceKey = "claude_oauth_carpool_next_maintenance_at"
 const CarpoolInitialMaintenanceKey = "claude_oauth_carpool_initial_maintenance_at"
 const CarpoolMaintenanceGenerationKey = "claude_oauth_carpool_maintenance_generation"
 
+// CarpoolEvictIdleHoursKey limits cycle evictions to devices unused for at
+// least this many hours. Absent means DefaultCarpoolEvictIdleHours; an
+// explicit 0 removes the restriction (the pre-existing behavior).
+const CarpoolEvictIdleHoursKey = "claude_oauth_carpool_maintenance_evict_idle_hours"
+const DefaultCarpoolEvictIdleHours = 24
+
 type CarpoolAdmissionPolicy struct {
 	Generation string
 	Admissions int
 	InitialDue string
+	// EvictIdleHours: a cycle reset only evicts records whose last use is at
+	// least this many hours old; when none qualify, nothing is evicted that
+	// cycle. 0 = any record may be evicted.
+	EvictIdleHours int
 }
 
 // CarpoolAdmissionCache keeps admission accounting atomic with device registration.
@@ -28,7 +40,31 @@ func (a *Account) CarpoolAdmissionPolicy() CarpoolAdmissionPolicy {
 	if generation == "" {
 		generation = "00000000000000000000"
 	}
-	return CarpoolAdmissionPolicy{Generation: generation, Admissions: a.GetCarpoolAdmissionsPerCycle(), InitialDue: a.getExtraString(CarpoolInitialMaintenanceKey)}
+	return CarpoolAdmissionPolicy{
+		Generation:     generation,
+		Admissions:     a.GetCarpoolAdmissionsPerCycle(),
+		InitialDue:     a.getExtraString(CarpoolInitialMaintenanceKey),
+		EvictIdleHours: a.GetCarpoolEvictIdleHours(),
+	}
+}
+
+// GetCarpoolEvictIdleHours returns the minimum idle time (hours, 0–720) a
+// registered device needs before a cycle reset may evict it.
+func (a *Account) GetCarpoolEvictIdleHours() int {
+	if a == nil || a.Extra == nil {
+		return DefaultCarpoolEvictIdleHours
+	}
+	v, ok := a.Extra[CarpoolEvictIdleHoursKey]
+	if !ok || v == nil {
+		return DefaultCarpoolEvictIdleHours
+	}
+	if str, isString := v.(string); isString {
+		// An unparseable value must not silently lift the restriction.
+		if _, err := strconv.ParseFloat(strings.TrimSpace(str), 64); err != nil {
+			return DefaultCarpoolEvictIdleHours
+		}
+	}
+	return min(max(0, int(parseExtraFloat64(v))), 720)
 }
 
 // The legacy enable flag remains wire-compatible; expansion is no longer performed.

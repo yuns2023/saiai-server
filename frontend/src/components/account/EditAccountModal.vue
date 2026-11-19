@@ -1168,7 +1168,7 @@
                   <span>
                     <span class="block text-sm font-medium text-gray-900 dark:text-white">定期开放新设备名额</span>
                     <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                      名额大于 0 时，每周期限制新设备接纳数量，并在周期调整时按需移除最久未使用的设备。0 表示不限制周期接纳数量，也不自动腾位。
+                      名额大于 0 时，每周期限制新设备接纳数量，并在周期调整时按需移除最久未使用、且闲置超过设定时长的设备。0 表示不限制周期接纳数量，也不自动腾位。
                     </span>
                   </span>
                 </label>
@@ -1177,6 +1177,9 @@
                   <input v-model.number="carpoolMaintenanceIntervalHours" data-testid="carpool-maintenance-interval" type="number" min="1" max="720" step="1" class="input" />
                   <label class="input-label mt-3">每周期新设备名额</label>
                   <input v-model.number="carpoolAdmissionsPerCycle" data-testid="carpool-admissions-per-cycle" type="number" min="0" :max="claudeOAuthCarpoolDeviceLimit" step="1" class="input" />
+                  <label class="input-label mt-3">仅移除闲置超过（小时）的设备</label>
+                  <input v-model.number="carpoolEvictIdleHours" data-testid="carpool-evict-idle-hours" type="number" min="0" max="720" step="1" class="input" />
+                  <p class="input-hint">默认 24。周期调整需要腾位时，只移除最近这么多小时内没有使用过的设备（仍从最久未使用的开始）；没有符合条件的设备就不移除，本周期不再重试，等下次调整。0 表示不限制闲置时长。</p>
                   <p class="input-hint">默认 0，表示不限周期接纳数量，仍受设备总上限约束。大于 0 时，首次启用后约一分钟内按需释放首轮设备位，此后按执行间隔调整；每轮最多移除配置数量的最久未使用设备，已有空位足够时不移除。已登记设备不消耗名额，未用完的名额不累计。修改名额保存后立即生效，保留本轮已用数量和重置时间。</p>
                   <p class="input-hint" data-testid="carpool-next-maintenance">下次调整：{{ carpoolNextMaintenanceLabel }}</p>
                 </div>
@@ -2015,6 +2018,7 @@ import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { normalizeCarpoolEvictIdleHours } from '@/utils/carpoolEvictIdle'
 import {
   formatAccountBlockedModelPatterns,
   parseAccountBlockedModelPatterns
@@ -2152,6 +2156,7 @@ const claudeOAuthCarpoolUnlimitedDevices = ref(false)
 const claudeOAuthCarpoolAutoExpand = ref(false)
 const carpoolMaintenanceIntervalHours = ref<number>(24)
 const carpoolAdmissionsPerCycle = ref<number>(0)
+const carpoolEvictIdleHours = ref<number>(24)
 const carpoolNextMaintenanceLabel = computed(() => {
   const extra = props.account?.extra || {}
   if (extra.claude_oauth_carpool_auto_expand_enabled !== true || extra.claude_oauth_carpool_unlimited_devices === true) {
@@ -2766,6 +2771,7 @@ function loadQuotaControlSettings(account: Account) {
   claudeOAuthCarpoolAutoExpand.value = false
   carpoolMaintenanceIntervalHours.value = 24
   carpoolAdmissionsPerCycle.value = 0
+  carpoolEvictIdleHours.value = 24
   claudeOAuthSharedBucketCount.value = 5
   claudeOAuthFiveHourRateLimitThresholdPercent.value = 0
   claudeOAuthDisableTokenRefresh.value = true
@@ -2846,6 +2852,7 @@ function loadQuotaControlSettings(account: Account) {
     account.claude_oauth_carpool_auto_expand_enabled === true || accountExtra.claude_oauth_carpool_auto_expand_enabled === true
   carpoolMaintenanceIntervalHours.value = Math.min(720, Math.max(1, Number(accountExtra.claude_oauth_carpool_maintenance_interval_hours) || 24))
   carpoolAdmissionsPerCycle.value = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(0, Number(accountExtra.claude_oauth_carpool_maintenance_admissions_per_cycle ?? accountExtra.claude_oauth_carpool_maintenance_free_slots) || 0))
+  carpoolEvictIdleHours.value = normalizeCarpoolEvictIdleHours(accountExtra.claude_oauth_carpool_maintenance_evict_idle_hours)
   claudeOAuthSharedBucketCount.value = Math.min(32, Math.max(1, account.claude_oauth_shared_bucket_count || 5))
   claudeOAuthFiveHourRateLimitThresholdPercent.value =
     typeof account.claude_oauth_5h_rate_limit_threshold_percent === 'number'
@@ -3528,6 +3535,7 @@ const handleSubmit = async () => {
         newExtra.claude_oauth_carpool_device_limit = Math.min(32, Math.max(1, claudeOAuthCarpoolDeviceLimit.value || 5))
         newExtra.claude_oauth_carpool_maintenance_interval_hours = Math.min(720, Math.max(1, Math.trunc(carpoolMaintenanceIntervalHours.value || 24)))
         newExtra.claude_oauth_carpool_maintenance_admissions_per_cycle = Math.min(claudeOAuthCarpoolDeviceLimit.value, Math.max(0, Math.trunc(carpoolAdmissionsPerCycle.value || 0)))
+        newExtra.claude_oauth_carpool_maintenance_evict_idle_hours = normalizeCarpoolEvictIdleHours(carpoolEvictIdleHours.value)
         delete newExtra.claude_oauth_carpool_auto_maintenance_target
         delete newExtra.claude_oauth_carpool_maintenance_free_slots
         if (claudeOAuthCarpoolUnlimitedDevices.value) {
