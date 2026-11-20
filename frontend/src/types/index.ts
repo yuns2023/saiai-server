@@ -1157,6 +1157,8 @@ export interface UpdateAccountRequest {
   expires_at?: number | null
   auto_pause_on_expired?: boolean
   confirm_mixed_channel_risk?: boolean
+  // Credentials come from a fresh authorization and replace the stored tokens.
+  reauthorize?: boolean
 }
 
 export interface CheckMixedChannelRequest {

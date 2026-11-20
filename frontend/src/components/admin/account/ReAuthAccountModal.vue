@@ -364,7 +364,8 @@ const handleExchangeCode = async () => {
       await adminAPI.accounts.update(props.account.id, {
         type: 'oauth', // OpenAI OAuth is always 'oauth' type
         credentials,
-        extra
+        extra,
+        reauthorize: true
       })
 
       // Clear error status after successful re-authorization
@@ -400,7 +401,8 @@ const handleExchangeCode = async () => {
     try {
       await adminAPI.accounts.update(props.account.id, {
         type: 'oauth',
-        credentials
+        credentials,
+        reauthorize: true
       })
       const updatedAccount = await adminAPI.accounts.clearError(props.account.id)
       appStore.showSuccess(t('admin.accounts.reAuthorizedSuccess'))
@@ -437,7 +439,8 @@ const handleExchangeCode = async () => {
       await adminAPI.accounts.update(props.account.id, {
         type: addMethod.value, // Update type based on selected method
         credentials: tokenInfo,
-        extra
+        extra,
+        reauthorize: true
       })
 
       // Clear error status after successful re-authorization
@@ -466,7 +469,8 @@ const handleImportClaudeSetupToken = async (raw: string) => {
 
     await adminAPI.accounts.update(props.account.id, {
       type: 'setup-token',
-      credentials
+      credentials,
+      reauthorize: true
     })
 
     const updatedAccount = await adminAPI.accounts.clearError(props.account.id)
@@ -510,7 +514,8 @@ const handleCookieAuth = async (sessionKey: string) => {
     await adminAPI.accounts.update(props.account.id, {
       type: addMethod.value, // Update type based on selected method
       credentials: tokenInfo,
-      extra
+      extra,
+      reauthorize: true
     })
 
     // Clear error status after successful re-authorization
