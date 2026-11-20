@@ -182,12 +182,9 @@ func TestClaudeDevicePlatformDedupe_NeverWaitsOnLock(t *testing.T) {
 	queued := 0
 	enqueue := func() bool { queued++; return true }
 	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(o, now, enqueue))
-	d.mu.Lock() // contention: admit and forget return at once
+	d.mu.Lock() // contention: the request-path admit returns at once
 	done := make(chan claudeDevicePlatformAdmit, 1)
-	go func() {
-		d.forget(o)
-		done <- d.admit(o, now, enqueue)
-	}()
+	go func() { done <- d.admit(o, now, enqueue) }()
 	select {
 	case got := <-done:
 		require.Equal(t, claudeDevicePlatformAdmitQueued, got, "enqueued without dedupe")
@@ -196,7 +193,11 @@ func TestClaudeDevicePlatformDedupe_NeverWaitsOnLock(t *testing.T) {
 	}
 	d.mu.Unlock()
 	require.Equal(t, 2, queued)
-	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(o, now, enqueue), "entries kept: forget skipped under contention")
+	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(o, now, enqueue), "deduped while entries exist")
+	// The worker-side forget waits for the lock and always clears, so the
+	// next identical observation after a failed write retries.
+	d.forget(o)
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(o, now, enqueue), "retried after forget")
 }
 
 func TestClaudeDevicePlatformService_ConcurrentObserve(t *testing.T) {

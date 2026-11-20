@@ -582,12 +582,12 @@ func (d *claudeDevicePlatformDedupe) admit(obs ClaudeDevicePlatformObservation, 
 	return claudeDevicePlatformAdmitQueued
 }
 
-// forget drops the device's and the device + user entries. It never waits:
-// under contention the entries stay (at most one interval of dedupe).
+// forget drops the device's and the device + user entries after a failed
+// write so the next identical observation retries. It runs only on the
+// background worker, so it may wait; the request path uses TryLock and never
+// waits on it.
 func (d *claudeDevicePlatformDedupe) forget(obs ClaudeDevicePlatformObservation) {
-	if !d.mu.TryLock() {
-		return
-	}
+	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, key := range []string{"d|" + obs.Digest, "u|" + obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10)} {
 		if el, ok := d.items[key]; ok {
