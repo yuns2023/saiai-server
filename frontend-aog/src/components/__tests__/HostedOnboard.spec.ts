@@ -61,13 +61,29 @@ describe('HostedOnboard', () => {
     expect((w.get('[data-testid=onboard-submit]').element as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('opens the link in a new tab and shows a countdown', async () => {
+  it('offers only a copy button for the link (no link to open) and shows a countdown', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      const w = await mountForm()
+      await generate(w)
+      const btn = w.get('[data-testid=onboard-link]')
+      expect(btn.element.tagName).toBe('BUTTON')
+      expect(btn.text()).toBe('复制授权链接')
+      expect(w.find(`a[href="${LINK.auth_url}"]`).exists()).toBe(false)
+      expect(w.html()).not.toContain(LINK.auth_url)
+      await btn.trigger('click')
+      await flushPromises()
+      expect(writeText).toHaveBeenCalledWith(LINK.auth_url)
+      expect(w.get('[data-testid=onboard-countdown]').text()).toMatch(/^(10:00|9:5\d) 后失效$/)
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
+  it('keeps showing the countdown after generating', async () => {
     const w = await mountForm()
     await generate(w)
-    const a = w.get('[data-testid=onboard-link]')
-    expect(a.attributes('href')).toBe(LINK.auth_url)
-    expect(a.attributes('target')).toBe('_blank')
-    expect(a.attributes('rel')).toContain('noopener')
     expect(w.get('[data-testid=onboard-countdown]').text()).toMatch(/^(10:00|9:5\d) 后失效$/)
   })
 

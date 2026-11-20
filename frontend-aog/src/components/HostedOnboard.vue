@@ -10,6 +10,7 @@
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { hostedApi, type HostedApplication, type SelfOnboardAuthUrl, type SelfOnboardConfig } from '@/api'
+import CopyButton from './CopyButton.vue'
 import {
   checkDisplayName,
   checkProxy,
@@ -194,7 +195,8 @@ onUnmounted(() => {
                 {{ linking ? t('onboard.generating') : link ? t('onboard.regenerate') : t('onboard.generate') }}
               </button>
               <template v-if="link && linkLive">
-                <a :href="link.auth_url" target="_blank" rel="noopener noreferrer" class="btn btn-primary" data-testid="onboard-link">{{ t('onboard.openLink') }}</a>
+                <!-- Copy only (no link to open here): the owner opens it in the browser they use for Claude. -->
+                <CopyButton :value="link.auth_url" :label="t('onboard.copyLink')" :guard="() => linkLive" data-testid="onboard-link" />
                 <span class="num text-sm text-ink-2" data-testid="onboard-countdown">{{ t('onboard.expiresIn', { time: countdown }) }}</span>
               </template>
               <span v-else-if="link" class="text-sm text-seal" role="alert" data-testid="onboard-expired">{{ t('onboard.linkExpired') }}</span>
