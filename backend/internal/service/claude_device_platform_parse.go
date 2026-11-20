@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Claude device platform observation: normalization of one inbound request
@@ -276,6 +277,7 @@ func extractClaudeEnvironmentPlatform(system any) (platform, osVersion string, o
 			overflow = true
 			break
 		}
+		consumed := min(len(text), budget)
 		if len(text) > budget {
 			// Never read a line cut by the budget as if it were complete.
 			text = text[:budget]
@@ -286,7 +288,7 @@ func extractClaudeEnvironmentPlatform(system any) (platform, osVersion string, o
 			}
 			overflow = true
 		}
-		budget -= len(text)
+		budget -= consumed
 		p, o, found, blockOverflow := scanClaudeEnvironmentSection(text)
 		overflow = overflow || blockOverflow
 		if found && (p != "" || o != "") {
@@ -323,7 +325,7 @@ func scanClaudeEnvironmentSection(text string) (platform, osVersion string, foun
 			overflow = true
 			break
 		}
-		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
+		if strings.HasPrefix(strings.TrimLeftFunc(line, unicode.IsSpace), "#") {
 			break
 		}
 		if len(line) > claudeDevicePlatformMaxLineBytes {

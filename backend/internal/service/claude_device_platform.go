@@ -321,21 +321,23 @@ func (s *ClaudeDevicePlatformService) ObserveRequest(deviceID string, headers ht
 			obs.APIKeyID = key.ID
 		}
 	}
-	if s.dedupe.recent(obs, s.now()) {
-		s.counters.dedupeSkipped.Add(1)
-		return
-	}
 	select {
 	case <-s.stopCh:
 		return
 	default:
 	}
-	select {
-	case s.queue <- obs:
+	switch s.dedupe.admit(obs, s.now(), func() bool {
+		select {
+		case s.queue <- obs:
+			return true
+		default:
+			return false
+		}
+	}) {
+	case claudeDevicePlatformAdmitQueued:
 		s.counters.enqueued.Add(1)
-		// Remembered at enqueue so identical requests racing the first
-		// write are not queued again; a failed write forgets it.
-		s.dedupe.remember(obs, s.now())
+	case claudeDevicePlatformAdmitSkipped:
+		s.counters.dedupeSkipped.Add(1)
 	default:
 		s.counters.queueFull.Add(1)
 	}
@@ -358,7 +360,6 @@ func (s *ClaudeDevicePlatformService) write(obs ClaudeDevicePlatformObservation)
 	defer cancel()
 	status, err := s.store.RecordClaudeDevicePlatform(ctx, obs, s.limits)
 	if err != nil {
-		s.dedupe.forget(obs)
 		if s.counters.writeErrors.Add(1)%100 == 1 {
 			logger.L().Debug("gateway.claude_device_platform_write_failed", zap.Error(err))
 		}
@@ -482,10 +483,17 @@ func (s *ClaudeDevicePlatformService) resolveUsers(ctx context.Context, items []
 	}
 }
 
-// claudeDevicePlatformDedupe is a bounded LRU keyed by device + user that
-// keeps the last queued state (family, arch, major). Only a repeat of that
-// last state within the interval is skipped, so 15 -> 26 -> 15 writes all
-// three observations.
+// claudeDevicePlatformDedupe skips repeats of a device's current state.
+// It keeps two bounded LRU maps: per device the last queued platform state
+// (family, arch, major), and per device + user the last queue time. An
+// observation is skipped only when the device's last platform state is the
+// same and both entries are younger than the interval, so a platform
+// switch (15 -> 26 -> 15, also across users) is always queued while a
+// shared device used alternately by two users at the same platform is
+// written at most once per interval per user. Check, enqueue and update run
+// under one lock so concurrent producers cannot reorder the state. A failed
+// write is not undone (at most one interval of last_seen precision lost
+// while Redis fails).
 type claudeDevicePlatformDedupe struct {
 	mu    sync.Mutex
 	max   int
@@ -499,33 +507,29 @@ type claudeDevicePlatformDedupeEntry struct {
 	at    time.Time
 }
 
+type claudeDevicePlatformAdmit int
+
+const (
+	claudeDevicePlatformAdmitQueued claudeDevicePlatformAdmit = iota
+	claudeDevicePlatformAdmitSkipped
+	claudeDevicePlatformAdmitFull
+)
+
 func newClaudeDevicePlatformDedupe(size int) *claudeDevicePlatformDedupe {
 	return &claudeDevicePlatformDedupe{max: size, order: list.New(), items: make(map[string]*list.Element, size)}
 }
 
-func claudeDevicePlatformDedupeKey(obs ClaudeDevicePlatformObservation) (key, state string) {
-	return obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10), obs.Family + "|" + obs.Arch + "|" + obs.Major
-}
-
-// recent reports that the device+user's last queued state equals this one
-// and was queued within the interval.
-func (d *claudeDevicePlatformDedupe) recent(obs ClaudeDevicePlatformObservation, now time.Time) bool {
-	key, state := claudeDevicePlatformDedupeKey(obs)
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (d *claudeDevicePlatformDedupe) freshLocked(key string, now time.Time) (*claudeDevicePlatformDedupeEntry, bool) {
 	el, ok := d.items[key]
 	if !ok {
-		return false
+		return nil, false
 	}
 	entry, _ := el.Value.(*claudeDevicePlatformDedupeEntry)
 	age := now.Sub(entry.at)
-	return entry.state == state && age >= 0 && age < claudeDevicePlatformDedupeInterval
+	return entry, age >= 0 && age < claudeDevicePlatformDedupeInterval
 }
 
-func (d *claudeDevicePlatformDedupe) remember(obs ClaudeDevicePlatformObservation, now time.Time) {
-	key, state := claudeDevicePlatformDedupeKey(obs)
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (d *claudeDevicePlatformDedupe) putLocked(key, state string, now time.Time) {
 	if el, ok := d.items[key]; ok {
 		entry, _ := el.Value.(*claudeDevicePlatformDedupeEntry)
 		entry.state, entry.at = state, now
@@ -544,15 +548,23 @@ func (d *claudeDevicePlatformDedupe) remember(obs ClaudeDevicePlatformObservatio
 	}
 }
 
-// forget drops the entry if it still holds this observation's state.
-func (d *claudeDevicePlatformDedupe) forget(obs ClaudeDevicePlatformObservation) {
-	key, state := claudeDevicePlatformDedupeKey(obs)
+// admit skips a repeat or calls enqueue (non-blocking) and records the
+// state only when it was queued.
+func (d *claudeDevicePlatformDedupe) admit(obs ClaudeDevicePlatformObservation, now time.Time, enqueue func() bool) claudeDevicePlatformAdmit {
+	deviceKey := "d|" + obs.Digest
+	userKey := "u|" + obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10)
+	state := obs.Family + "|" + obs.Arch + "|" + obs.Major
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if el, ok := d.items[key]; ok {
-		if entry, _ := el.Value.(*claudeDevicePlatformDedupeEntry); entry.state == state {
-			delete(d.items, key)
-			d.order.Remove(el)
-		}
+	device, deviceFresh := d.freshLocked(deviceKey, now)
+	_, userFresh := d.freshLocked(userKey, now)
+	if deviceFresh && userFresh && device.state == state {
+		return claudeDevicePlatformAdmitSkipped
 	}
+	if !enqueue() {
+		return claudeDevicePlatformAdmitFull
+	}
+	d.putLocked(deviceKey, state, now)
+	d.putLocked(userKey, "", now)
+	return claudeDevicePlatformAdmitQueued
 }

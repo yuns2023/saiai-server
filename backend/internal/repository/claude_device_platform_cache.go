@@ -64,8 +64,10 @@ local flaggedCap = tonumber(ARGV[14])
 local dailyTTL = tonumber(ARGV[15])
 local cutoff = now - retention
 
-redis.call('ZREMRANGEBYSCORE', tracked, '-inf', '(' .. cutoff)
-redis.call('ZREMRANGEBYSCORE', flagged, '-inf', '(' .. cutoff)
+-- Inclusive: a member at exactly the cutoff is gone, like its hash
+-- (EXPIREAT score + retention).
+redis.call('ZREMRANGEBYSCORE', tracked, '-inf', cutoff)
+redis.call('ZREMRANGEBYSCORE', flagged, '-inf', cutoff)
 
 local isNew = 0
 if redis.call('EXISTS', dev) == 0 and not redis.call('ZSCORE', tracked, digest) then
@@ -379,7 +381,6 @@ func (r *claudeDevicePlatformCache) nextMembers(ctx context.Context, cursor *cla
 	if cursor.score < minScore {
 		return nil, nil
 	}
-	scoreText := strconv.FormatInt(cursor.score, 10)
 	// Fast path: the cursor member still has its score, so the next members
 	// in (score desc, member desc) order follow its reverse rank.
 	if score, err := r.rdb.ZScore(ctx, claudeDevicePlatformFlaggedKey, cursor.digest).Result(); err == nil && int64(score) == cursor.score {
@@ -389,9 +390,17 @@ func (r *claudeDevicePlatformCache) nextMembers(ctx context.Context, cursor *cla
 			if err != nil {
 				return nil, err
 			}
+			// The three reads are not atomic: keep only members strictly
+			// after the cursor (a concurrent insert can at worst skip one).
 			out := members[:0]
 			for _, m := range members {
-				if int64(m.Score) >= minScore {
+				member, _ := m.Member.(string)
+				score := int64(m.Score)
+				if score > cursor.score || score == cursor.score && member >= cursor.digest {
+					// Shifted ahead of the cursor meanwhile: use the slow path.
+					return r.nextMembersSlow(ctx, cursor, minScore, n)
+				}
+				if score >= minScore {
 					out = append(out, m)
 				}
 			}
@@ -400,9 +409,15 @@ func (r *claudeDevicePlatformCache) nextMembers(ctx context.Context, cursor *cla
 	} else if err != nil && err != redis.Nil {
 		return nil, err
 	}
-	// Slow path (the cursor member was removed or re-scored): members tied
-	// with the cursor score that sort after it. The tie group is bounded by
-	// the zset cap.
+	return r.nextMembersSlow(ctx, cursor, minScore, n)
+}
+
+// nextMembersSlow is used when the cursor member was removed or re-scored:
+// members tied with the cursor score that sort after it (the tie group is
+// bounded by the zset cap), then lower scores.
+func (r *claudeDevicePlatformCache) nextMembersSlow(ctx context.Context, cursor *claudeDevicePlatformCursor, minScore int64, n int) ([]redis.Z, error) {
+	minText := strconv.FormatInt(minScore, 10)
+	scoreText := strconv.FormatInt(cursor.score, 10)
 	ties, err := r.rdb.ZRevRangeByScore(ctx, claudeDevicePlatformFlaggedKey, &redis.ZRangeBy{
 		Max: scoreText, Min: scoreText,
 	}).Result()

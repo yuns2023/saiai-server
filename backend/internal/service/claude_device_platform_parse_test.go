@@ -196,6 +196,15 @@ func TestClaudeDevicePlatformParse_Caps(t *testing.T) {
 	require.True(t, overflow)
 	require.Empty(t, p)
 
+	// The budget is shared by all blocks, also when a block has no newline.
+	twoBlocks := []any{
+		map[string]any{"type": "text", "text": strings.Repeat("x", claudeDevicePlatformMaxScanBytes+10)},
+		map[string]any{"type": "text", "text": cdpEnvBlock("darwin", "Darwin 24.3.0")},
+	}
+	p, _, overflow = extractClaudeEnvironmentPlatform(twoBlocks)
+	require.True(t, overflow)
+	require.Empty(t, p)
+
 	// Many heading candidates on one huge line stay linear (finishes fast).
 	start := time.Now()
 	p, _, _ = extractClaudeEnvironmentPlatform(strings.Repeat("# Environment ", claudeDevicePlatformMaxScanBytes/14))

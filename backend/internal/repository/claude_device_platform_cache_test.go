@@ -31,7 +31,10 @@ func cdpTestRedis(t *testing.T) *redis.Client {
 	return rdb
 }
 
-const cdpT0 = int64(1_800_000_000)
+// cdpT0 is 01:00 UTC today: hashes expire on the event clock (EXPIREAT), so
+// test times must be near the real clock, and cdpT0..cdpT0+hours stay on
+// one UTC day.
+var cdpT0 = time.Now().UTC().Truncate(24 * time.Hour).Add(time.Hour).Unix()
 
 func cdpDigest(name string) string {
 	sum := sha256.Sum256([]byte(name))
@@ -236,7 +239,7 @@ func TestClaudeDevicePlatformRedis_GlobalAndUserCaps(t *testing.T) {
 	// A device older than the retention leaves the tracked set (frees cap).
 	require.Equal(t, int64(4), h.rdb.ZCard(ctx, claudeDevicePlatformTrackedKey).Val())
 	h.record(cdpObs("late", "linux", "x64", "", 9, cdpT0+31*86400))
-	require.Equal(t, int64(2), h.rdb.ZCard(ctx, claudeDevicePlatformTrackedKey).Val(), "late + u1c (recorded on day 1)")
+	require.Equal(t, int64(1), h.rdb.ZCard(ctx, claudeDevicePlatformTrackedKey).Val(), "u1c (day 1) is exactly at the cutoff: pruned like its hash")
 	require.Zero(t, h.rdb.ZCard(ctx, claudeDevicePlatformFlaggedKey).Val())
 }
 
