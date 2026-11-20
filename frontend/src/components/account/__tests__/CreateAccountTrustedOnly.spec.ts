@@ -46,7 +46,7 @@ describe('new trusted-only carpool account', () => {
     } }))
     await flushPromises()
     expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
-      type: kind, extra: expect.objectContaining({ claude_oauth_carpool_trusted_only: true, claude_oauth_carpool_maintenance_admissions_per_cycle: 0 })
+      type: kind, extra: expect.objectContaining({ claude_oauth_carpool_trusted_only: true, claude_oauth_carpool_maintenance_admissions_per_cycle: 0, claude_oauth_carpool_maintenance_evict_idle_hours: 24 })
     }))
     await wrapper.setProps({ show: false })
     await wrapper.setProps({ show: true })

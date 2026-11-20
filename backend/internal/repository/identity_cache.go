@@ -979,7 +979,7 @@ func oldestCarpoolOverflowFields(items map[string]string, deleteCount int) ([]st
 // token. Retries and stale workers cannot evict again, even after new admissions.
 func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountID int64, limit int, policy service.CarpoolAdmissionPolicy, due string) (int, error) {
 	free := policy.Admissions
-	if accountID <= 0 || limit < 1 || free < 0 || free > limit {
+	if accountID <= 0 || limit < 1 || free < 0 || free > limit || policy.EvictIdleHours < 0 {
 		return 0, errors.New("invalid carpool slot policy")
 	}
 	if _, err := time.Parse(time.RFC3339, due); err != nil {
@@ -1025,6 +1025,17 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 				entries = append(entries, entry{field, record})
 			}
 			sort.Slice(entries, func(i, j int) bool { return carpoolDeviceRecordOlder(&entries[i].record, &entries[j].record) })
+			if count > 0 && policy.EvictIdleHours > 0 {
+				// Entries are sorted least-recently-seen first, so the idle
+				// ones form a prefix. Fewer idle records than needed means
+				// fewer (possibly zero) evictions; this cycle is not retried.
+				cutoff := carpoolNow().Add(-time.Duration(policy.EvictIdleHours) * time.Hour).Unix()
+				idle := 0
+				for idle < count && entries[idle].record.LastSeenAt <= cutoff {
+					idle++
+				}
+				count = idle
+			}
 			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 				for _, item := range entries[:count] {
 					pipe.HDel(ctx, recorded, item.field)
@@ -1059,6 +1070,9 @@ func (c *identityCache) ResetCarpoolAdmissionCycle(ctx context.Context, accountI
 	}
 	return 0, redis.TxFailedErr
 }
+
+// carpoolNow is the clock for idle-eviction cutoffs; tests may replace it.
+var carpoolNow = time.Now
 
 func carpoolAdmissionBudgetKey(accountID int64) string {
 	return fmt.Sprintf("claude_carpool_admission_budget_v1:%d", accountID)

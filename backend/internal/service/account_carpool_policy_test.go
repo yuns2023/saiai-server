@@ -151,3 +151,46 @@ func TestCarpoolAdmissionsExplicitZeroOverridesLegacy(t *testing.T) {
 		t.Fatal("explicit finite allowance must be preserved")
 	}
 }
+
+func TestCarpoolEvictIdleHoursPolicy(t *testing.T) {
+	a := &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: map[string]any{"claude_oauth_carpool_device_limit": 10}}
+	cases := []struct {
+		name  string
+		value any
+		set   bool
+		want  int
+	}{
+		{name: "absent defaults to 24", want: DefaultCarpoolEvictIdleHours},
+		{name: "null defaults to 24", value: nil, set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "explicit zero lifts the restriction", value: float64(0), set: true, want: 0},
+		{name: "positive", value: float64(6), set: true, want: 6},
+		{name: "numeric string", value: "12", set: true, want: 12},
+		{name: "unparseable string keeps default", value: "abc", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "negative clamps to zero", value: float64(-3), set: true, want: 0},
+		{name: "upper bound", value: float64(9999), set: true, want: 720},
+		{name: "huge value clamps without overflow", value: float64(1e300), set: true, want: 720},
+		{name: "blank string keeps default", value: "  ", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "binary prefix keeps default", value: "0b0", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "hex prefix keeps default", value: "0x10", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "inf string keeps default", value: "inf", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "decimal with exponent", value: " 1.2e1 ", set: true, want: 12},
+		{name: "BOM prefix keeps default", value: "\uFEFF0", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "NEL prefix keeps default", value: "\u00850", set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "boolean keeps default", value: false, set: true, want: DefaultCarpoolEvictIdleHours},
+		{name: "object keeps default", value: map[string]any{}, set: true, want: DefaultCarpoolEvictIdleHours},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			delete(a.Extra, CarpoolEvictIdleHoursKey)
+			if tc.set {
+				a.Extra[CarpoolEvictIdleHoursKey] = tc.value
+			}
+			if got := a.GetCarpoolEvictIdleHours(); got != tc.want {
+				t.Fatalf("GetCarpoolEvictIdleHours() = %d, want %d", got, tc.want)
+			}
+			if got := a.CarpoolAdmissionPolicy().EvictIdleHours; got != tc.want {
+				t.Fatalf("policy EvictIdleHours = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}

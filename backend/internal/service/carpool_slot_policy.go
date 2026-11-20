@@ -2,8 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -11,10 +16,24 @@ const CarpoolNextMaintenanceKey = "claude_oauth_carpool_next_maintenance_at"
 const CarpoolInitialMaintenanceKey = "claude_oauth_carpool_initial_maintenance_at"
 const CarpoolMaintenanceGenerationKey = "claude_oauth_carpool_maintenance_generation"
 
+// CarpoolEvictIdleHoursKey limits cycle evictions to devices unused for at
+// least this many hours. Absent means DefaultCarpoolEvictIdleHours; an
+// explicit 0 removes the restriction (the pre-existing behavior).
+const CarpoolEvictIdleHoursKey = "claude_oauth_carpool_maintenance_evict_idle_hours"
+const DefaultCarpoolEvictIdleHours = 24
+
+// carpoolDecimalPattern is the decimal number syntax shared with the frontend
+// normalizeCarpoolEvictIdleHours.
+var carpoolDecimalPattern = regexp.MustCompile(`^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$`)
+
 type CarpoolAdmissionPolicy struct {
 	Generation string
 	Admissions int
 	InitialDue string
+	// EvictIdleHours: a cycle reset only evicts records whose last use is at
+	// least this many hours old; when none qualify, nothing is evicted that
+	// cycle. 0 = any record may be evicted.
+	EvictIdleHours int
 }
 
 // CarpoolAdmissionCache keeps admission accounting atomic with device registration.
@@ -28,7 +47,58 @@ func (a *Account) CarpoolAdmissionPolicy() CarpoolAdmissionPolicy {
 	if generation == "" {
 		generation = "00000000000000000000"
 	}
-	return CarpoolAdmissionPolicy{Generation: generation, Admissions: a.GetCarpoolAdmissionsPerCycle(), InitialDue: a.getExtraString(CarpoolInitialMaintenanceKey)}
+	return CarpoolAdmissionPolicy{
+		Generation:     generation,
+		Admissions:     a.GetCarpoolAdmissionsPerCycle(),
+		InitialDue:     a.getExtraString(CarpoolInitialMaintenanceKey),
+		EvictIdleHours: a.GetCarpoolEvictIdleHours(),
+	}
+}
+
+// GetCarpoolEvictIdleHours returns the minimum idle time (hours, 0–720) a
+// registered device needs before a cycle reset may evict it.
+func (a *Account) GetCarpoolEvictIdleHours() int {
+	if a == nil || a.Extra == nil {
+		return DefaultCarpoolEvictIdleHours
+	}
+	var f float64
+	switch v := a.Extra[CarpoolEvictIdleHoursKey].(type) {
+	case float64:
+		f = v
+	case float32:
+		f = float64(v)
+	case int:
+		f = float64(v)
+	case int64:
+		f = float64(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		if err != nil {
+			return DefaultCarpoolEvictIdleHours
+		}
+		f = parsed
+	case string:
+		// Only plain decimal strings count, matching the admin dialog; an
+		// unparseable, blank or prefixed (0x/0b/inf) value must not silently
+		// lift the restriction.
+		// ASCII whitespace only: Go and JS disagree on Unicode spaces.
+		trimmed := strings.Trim(v, " \t\n\r")
+		if !carpoolDecimalPattern.MatchString(trimmed) {
+			return DefaultCarpoolEvictIdleHours
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return DefaultCarpoolEvictIdleHours
+		}
+		f = parsed
+	default:
+		// Absent, null, booleans and other JSON types keep the default.
+		return DefaultCarpoolEvictIdleHours
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return DefaultCarpoolEvictIdleHours
+	}
+	return int(math.Min(720, math.Max(0, f)))
 }
 
 // The legacy enable flag remains wire-compatible; expansion is no longer performed.

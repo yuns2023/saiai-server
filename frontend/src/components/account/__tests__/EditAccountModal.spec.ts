@@ -315,7 +315,8 @@ describe('EditAccountModal', () => {
       claude_oauth_carpool_device_limit: 20,
       claude_oauth_carpool_auto_expand_enabled: true,
       claude_oauth_carpool_maintenance_interval_hours: 6,
-      claude_oauth_carpool_maintenance_admissions_per_cycle: 2
+      claude_oauth_carpool_maintenance_admissions_per_cycle: 2,
+      claude_oauth_carpool_maintenance_evict_idle_hours: 24
     })
   })
 
@@ -341,6 +342,28 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra.claude_oauth_carpool_maintenance_admissions_per_cycle).toBe(0)
+  })
+
+  it('loads the idle-eviction threshold with a 24-hour default and saves an explicit zero', async () => {
+    updateAccountMock.mockReset()
+    const account = {
+      ...buildAccount(), type: 'oauth', credentials: { access_token: 'test-token' },
+      extra: { claude_oauth_mode: 'carpool', claude_oauth_carpool_auto_expand_enabled: true }
+    } as any
+    updateAccountMock.mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listClaudeCarpoolDevicesMock.mockResolvedValue({
+      unlimited_devices: false, recorded_limit: 9, recorded_count: 8, overflow_count: 0,
+      recorded_items: [], overflow_items: [], maintenance_enabled: true, admissions_remaining: 1
+    })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const input = wrapper.get('[data-testid="carpool-evict-idle-hours"]')
+    expect((input.element as HTMLInputElement).value).toBe('24')
+    await input.setValue(0)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.claude_oauth_carpool_maintenance_evict_idle_hours).toBe(0)
   })
 
   it('shows remaining cycle admissions and the next adjustment time when viewing devices', async () => {

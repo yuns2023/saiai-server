@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -390,4 +391,122 @@ func TestCarpoolInitialReservationRedis(t *testing.T) {
 			require.Equal(t, 1, remaining)
 		})
 	}
+}
+
+func TestCarpoolEvictIdleOnlyRedis(t *testing.T) {
+	socket := os.Getenv("SAIAI_TEST_CARPOOL_REDIS_SOCKET")
+	if socket == "" {
+		t.Skip("task-owned Redis Unix socket not supplied")
+	}
+	require.True(t, filepath.IsAbs(socket))
+	rdb := redis.NewClient(&redis.Options{Network: "unix", Addr: socket})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &identityCache{rdb: rdb}
+	ctx := context.Background()
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	original := carpoolNow
+	carpoolNow = func() time.Time { return now }
+	t.Cleanup(func() { carpoolNow = original })
+	hoursAgo := func(h float64) int64 { return now.Add(-time.Duration(h * float64(time.Hour))).Unix() }
+
+	type device struct {
+		key  string
+		seen int64
+	}
+	seed := func(t *testing.T, devices []device) int64 {
+		id := time.Now().UnixNano()
+		t.Cleanup(func() {
+			_ = rdb.Del(ctx, carpoolRecordedKey(id), carpoolOverflowKey(id), carpoolAdmissionBudgetKey(id)).Err()
+		})
+		for _, d := range devices {
+			raw, err := json.Marshal(service.CarpoolDeviceRecord{DeviceKey: d.key, CreatedAt: d.seen, LastSeenAt: d.seen})
+			require.NoError(t, err)
+			require.NoError(t, rdb.HSet(ctx, carpoolRecordedKey(id), d.key, raw).Err())
+		}
+		return id
+	}
+	remaining := func(t *testing.T, id int64) []string {
+		keys, err := rdb.HKeys(ctx, carpoolRecordedKey(id)).Result()
+		require.NoError(t, err)
+		sort.Strings(keys)
+		return keys
+	}
+
+	cases := []struct {
+		name       string
+		admissions int
+		idleHours  int
+		devices    []device
+		removed    int
+		kept       []string
+	}{
+		{
+			name: "evicts the oldest idle device", admissions: 1, idleHours: 24,
+			devices: []device{{"a", hoursAgo(48)}, {"b", hoursAgo(30)}, {"c", hoursAgo(2)}, {"d", hoursAgo(1)}, {"e", hoursAgo(0.1)}},
+			removed: 1, kept: []string{"b", "c", "d", "e"},
+		},
+		{
+			name: "no idle device means no eviction", admissions: 1, idleHours: 24,
+			devices: []device{{"a", hoursAgo(6.6)}, {"b", hoursAgo(6.4)}, {"c", hoursAgo(1)}, {"d", hoursAgo(0.5)}, {"e", hoursAgo(0)}},
+			removed: 0, kept: []string{"a", "b", "c", "d", "e"},
+		},
+		{
+			name: "fewer idle devices than needed evicts only those", admissions: 2, idleHours: 24,
+			devices: []device{{"a", hoursAgo(25)}, {"b", hoursAgo(23)}, {"c", hoursAgo(1)}, {"d", hoursAgo(1)}, {"e", hoursAgo(1)}},
+			removed: 1, kept: []string{"b", "c", "d", "e"},
+		},
+		{
+			name: "exactly at the threshold counts as idle", admissions: 1, idleHours: 24,
+			devices: []device{{"a", hoursAgo(24)}, {"b", hoursAgo(2)}, {"c", hoursAgo(1)}, {"d", hoursAgo(1)}, {"e", hoursAgo(1)}},
+			removed: 1, kept: []string{"b", "c", "d", "e"},
+		},
+		{
+			name: "zero keeps the old least-recently-seen behavior", admissions: 1, idleHours: 0,
+			devices: []device{{"a", hoursAgo(3)}, {"b", hoursAgo(2)}, {"c", hoursAgo(1)}, {"d", hoursAgo(1)}, {"e", hoursAgo(0)}},
+			removed: 1, kept: []string{"b", "c", "d", "e"},
+		},
+		{
+			name: "free capacity needs no eviction even when idle", admissions: 1, idleHours: 24,
+			devices: []device{{"a", hoursAgo(100)}, {"b", hoursAgo(1)}, {"c", hoursAgo(1)}, {"d", hoursAgo(1)}},
+			removed: 0, kept: []string{"a", "b", "c", "d"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := seed(t, tc.devices)
+			policy := service.CarpoolAdmissionPolicy{Generation: "00000000000000000001", Admissions: tc.admissions, EvictIdleHours: tc.idleHours}
+			removed, err := cache.ResetCarpoolAdmissionCycle(ctx, id, 5, policy, "2026-11-20T12:00:00Z")
+			require.NoError(t, err)
+			require.Equal(t, tc.removed, removed)
+			require.Equal(t, tc.kept, remaining(t, id))
+			// The cycle budget resets even when nothing could be evicted;
+			// physical capacity still gates admission.
+			left, err := cache.CarpoolAdmissionsRemaining(ctx, id, policy)
+			require.NoError(t, err)
+			require.Equal(t, tc.admissions, left)
+		})
+	}
+
+	t.Run("a skipped cycle is not retried until the next due time", func(t *testing.T) {
+		id := seed(t, []device{{"a", hoursAgo(20)}, {"b", hoursAgo(2)}, {"c", hoursAgo(1)}, {"d", hoursAgo(1)}, {"e", hoursAgo(1)}})
+		policy := service.CarpoolAdmissionPolicy{Generation: "00000000000000000001", Admissions: 1, EvictIdleHours: 24}
+		due := "2026-11-20T12:00:00Z"
+		removed, err := cache.ResetCarpoolAdmissionCycle(ctx, id, 5, policy, due)
+		require.NoError(t, err)
+		require.Zero(t, removed)
+		// Device "a" becomes idle long enough later in the same cycle; a
+		// retried pass for the same due time must not evict it.
+		now = now.Add(5 * time.Hour)
+		removed, err = cache.ResetCarpoolAdmissionCycle(ctx, id, 5, policy, due)
+		require.NoError(t, err)
+		require.Zero(t, removed)
+		require.Len(t, remaining(t, id), 5)
+		_, err = cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, id, "new", service.ClientHints{}, 5, now.Unix(), policy)
+		require.ErrorIs(t, err, service.ErrClaudeOAuthCarpoolDevicesFull)
+		// The next due time evicts it.
+		removed, err = cache.ResetCarpoolAdmissionCycle(ctx, id, 5, policy, "2026-11-21T12:00:00Z")
+		require.NoError(t, err)
+		require.Equal(t, 1, removed)
+		require.Equal(t, []string{"b", "c", "d", "e"}, remaining(t, id))
+	})
 }
