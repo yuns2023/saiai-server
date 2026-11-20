@@ -27,7 +27,7 @@ import (
 //   - buyer: the group is a market tier and the account is listed there
 //     (market membership + listing snapshot of that tier). Uses the buyer
 //     concurrency cap C - R (dual slot sets), class-aware device admission and
-//     the per-window share caps; a buyer lease is admitted only by the final
+//     a positive price; a buyer lease is admitted only by the final
 //     admission, which writes the immutable market_admissions row.
 //     Authenticated user = owner is still the buyer path (self purchase).
 //   - owner: a listed account used through the authenticated user's own
@@ -102,7 +102,6 @@ type MarketSelection struct {
 	BuyerMaxConcurrency int
 	ReservedDevices     int
 	ReservedAdmissions  int
-	Protection          MarketProtectionParams
 	SelfPurchase        bool
 	// LeaseID is the buyer lease (request id in both slot sets) currently
 	// held for this candidate; the final admission checks it is still held.
@@ -585,8 +584,8 @@ func marketSelectionGroupFromContext(ctx context.Context) (*int64, bool) {
 }
 
 // classifyMarketCandidate classifies a candidate for the current selection
-// context (scheduling group from context). The sellable checks (share caps,
-// price) are included for buyers.
+// context (scheduling group from context). The sellable check (price) is
+// included for buyers.
 func (s *GatewayService) classifyMarketCandidate(ctx context.Context, account *Account) (string, *MarketSelection) {
 	groupID, _ := marketSelectionGroupFromContext(ctx)
 	return s.classifyMarketCandidateInGroup(ctx, account, groupID, true)
@@ -681,7 +680,6 @@ func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Acco
 		BuyerMaxConcurrency: buyerMax,
 		ReservedDevices:     listing.Protection.ReservedDevices,
 		ReservedAdmissions:  listing.Protection.ReservedAdmissions,
-		Protection:          listing.Protection,
 		SelfPurchase:        dispatch.APIKey.UserID == listing.OwnerUserID,
 	}
 	sel.DeviceLimit, sel.CycleBudget, sel.CycleAdmissions, sel.CycleGeneration = marketDevicePolicy(account)

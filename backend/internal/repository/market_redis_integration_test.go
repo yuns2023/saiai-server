@@ -359,4 +359,3 @@ func TestMarketDeviceBudgetUnlistRelistSameCycle(t *testing.T) {
 	require.ErrorIs(t, marketDevice(t, cache, ctx, 66, "b1", 10, &p, buyer), full)
 	require.NoError(t, marketDevice(t, cache, ctx, 66, "o0", 10, &p, service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}))
 }
-

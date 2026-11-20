@@ -213,10 +213,16 @@ billed key ([BILLING_FACTORS.md](BILLING_FACTORS.md)). A zero or missing price
 excludes buyer candidates; platform candidates remain. The final admission
 re-reads the buyer's user rate override and the tier's rates in its own
 snapshot, so an override set to 0 while the request waited (or hidden by the
-gateway's rate cache) refuses the sale before any upstream send. This is
-why a zero override on a tier is safe: such a request never selects a
-listed account, writes no admission and no `shared_sale` event, and the
-owner earns nothing from it (it is a platform sale at price 0).
+gateway's user-rate cache, 30 s by default) refuses the sale before any
+upstream send. This is why a zero override on a tier is safe: a request
+whose override is 0 in the admission snapshot is never sent to a listed
+account, writes no admission and no `shared_sale` event, and the owner earns
+nothing from it; the tier's platform accounts serve it. Within the cache
+window after an override changes to 0, the listed account can still be
+picked, take a buyer lease and register the device before the final
+admission refuses it (see the device limitation below), and a platform
+account may still bill the old positive rate (the general override cache,
+same as on any group).
 
 **count_tokens in a tier** uses platform accounts only (anthropic, not
 Bedrock, not pinned), each re-checked in the database, with no Messages
@@ -455,9 +461,15 @@ turn the switch on.
 
 The binary before migration 136 runs against the 136 schema unchanged: it
 still reads and writes the kept share-cap columns (with the values stored
-there, so its share caps apply again), its own save-time check still refuses
-new zero overrides on a tier, and stored zero overrides only make that
-user's buyer price zero (no listed account is used).
+there, so its share caps and sample gate apply again: listed accounts sell
+only after a fresh observation) and its own save-time check refuses new
+zero overrides on a tier. Zero overrides stored on tiers meanwhile need
+attention before rolling back: the old binary refuses every save of a tier
+group that has one (`MARKET_TIER_RATE_OVERRIDE`), and its final admission
+does not re-read the buyer's override, so a stale cached positive rate
+could admit such a user to a listed account. Delete or raise the zero
+overrides on tiers (or demote the tiers, step 2) before deploying the old
+binary.
 
 **Pre-launch acceptance gates (on the target site, switch on, test
 accounts).**

@@ -457,8 +457,6 @@ func TestMarketBuyerLoadUsesTighterLimit(t *testing.T) {
 	require.Equal(t, 0, loads[2].LoadRate)
 }
 
-// ---- share caps ----
-
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
 
 // ---- authoritative evaluation ----
@@ -587,7 +585,7 @@ func buyerForwardCtx(t *testing.T, base context.Context) (context.Context, *Mark
 	ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: mktTier, Platform: PlatformAnthropic, Status: StatusActive, RateMultiplier: 1.2, MarketTier: true, Hydrated: true, ClaudeOAuthRequestGateDisabled: false})
 	ctx = WithMarketDispatch(ctx, key)
 	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3,
-		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, Protection: mktProtection(), DeviceLimit: 5,
+		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, DeviceLimit: 5,
 		LeaseID: "lease-1"}
 	return WithMarketAttempt(ctx, sel)
 }

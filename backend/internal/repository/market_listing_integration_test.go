@@ -823,7 +823,10 @@ func TestMarketListingAdminRevokeAndSelectedTierRemoval(t *testing.T) {
 	require.Equal(t, l.Version, again.Version)
 	// Protection params: merged and validated against the account.
 	p, err := f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: acc, AllowedGroupIDs: []int64{tier2}, Defaults: marketTestDefaults(),
-		Merge: func(b service.MarketProtectionParams) service.MarketProtectionParams { b.ReservedConcurrency = 0; return b }})
+		Merge: func(b service.MarketProtectionParams) service.MarketProtectionParams {
+			b.ReservedConcurrency = 0
+			return b
+		}})
 	require.NoError(t, err)
 	require.Equal(t, 0, p.Protection.ReservedConcurrency)
 	require.Equal(t, 2, p.Protection.ReservedDevices)
