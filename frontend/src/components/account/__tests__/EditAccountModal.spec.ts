@@ -155,6 +155,73 @@ describe('EditAccountModal', () => {
     })
   })
 
+  function buildOpenAIOAuthAccount(extra: Record<string, unknown>) {
+    return {
+      ...buildAccount(),
+      name: 'OpenAI OAuth',
+      platform: 'openai',
+      type: 'oauth',
+      credentials: { access_token: 'at', refresh_token: 'rt' },
+      extra
+    } as any
+  }
+
+  it('saves an OpenAI OAuth account without WS settings as passthrough', async () => {
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const account = buildOpenAIOAuthAccount({})
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_oauth_responses_websockets_v2_mode: 'passthrough',
+      openai_oauth_responses_websockets_v2_enabled: true
+    })
+  })
+
+  it('keeps an explicitly disabled OpenAI OAuth WS mode off', async () => {
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const account = buildOpenAIOAuthAccount({
+      openai_oauth_responses_websockets_v2_mode: 'off',
+      openai_oauth_responses_websockets_v2_enabled: false
+    })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_oauth_responses_websockets_v2_mode: 'off',
+      openai_oauth_responses_websockets_v2_enabled: false
+    })
+  })
+
+  it.each([
+    'openai_oauth_responses_websockets_v2_enabled',
+    'responses_websockets_v2_enabled',
+    'openai_ws_enabled'
+  ])('keeps OpenAI OAuth WS off when only %s is false', async (key) => {
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const account = buildOpenAIOAuthAccount({ [key]: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_oauth_responses_websockets_v2_mode: 'off',
+      openai_oauth_responses_websockets_v2_enabled: false
+    })
+  })
+
   it('shows the most recent user and Key on recorded and overflow carpool devices', async () => {
     const account = { ...buildAccount(), type: 'oauth', credentials: {}, extra: { claude_oauth_mode: 'carpool' }, claude_oauth_mode: 'carpool' } as any
     listClaudeCarpoolDevicesMock.mockResolvedValue({
