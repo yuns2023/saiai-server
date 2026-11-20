@@ -88,7 +88,7 @@ type ClaudeDevicePlatformObservation struct {
 	Major         string
 	UserID        int64
 	APIKeyID      int64
-	ObservedAt    int64 // unix seconds
+	ObservedAt    int64 // unix milliseconds (orders same-second switches)
 }
 
 // ClaudeDevicePlatformLimits are passed to the store on every write.
@@ -313,7 +313,7 @@ func (s *ClaudeDevicePlatformService) ObserveRequest(deviceID string, headers ht
 		Family:        sample.Family,
 		Arch:          sample.Arch,
 		Major:         sample.Major,
-		ObservedAt:    s.now().Unix(),
+		ObservedAt:    s.now().UnixMilli(),
 	}
 	if key != nil && key.UserID > 0 {
 		obs.UserID = key.UserID
@@ -489,7 +489,8 @@ func (s *ClaudeDevicePlatformService) resolveUsers(ctx context.Context, items []
 // last queued platform state (family, arch, major), and per device + user
 // the last queue time. An
 // observation is skipped only when the device's last platform state is the
-// same and both entries are younger than the interval, so a platform
+// same and both entries are younger than the interval (and only for
+// observations without a known major), so a platform
 // switch (15 -> 26 -> 15, also across users) is always queued while a
 // shared device used alternately by two users at the same platform is
 // written at most once per interval per user. Check, enqueue and update run
@@ -551,17 +552,27 @@ func (d *claudeDevicePlatformDedupe) putLocked(key, state string, now time.Time)
 }
 
 // admit skips a repeat or calls enqueue (non-blocking) and records the
-// state only when it was queued.
+// state only when it was queued. It never waits on the lock: under
+// contention the observation is simply enqueued without dedupe. An
+// observation with a known major version is never skipped (another replica
+// may have recorded a different major meanwhile), only recorded.
 func (d *claudeDevicePlatformDedupe) admit(obs ClaudeDevicePlatformObservation, now time.Time, enqueue func() bool) claudeDevicePlatformAdmit {
+	if !d.mu.TryLock() {
+		if enqueue() {
+			return claudeDevicePlatformAdmitQueued
+		}
+		return claudeDevicePlatformAdmitFull
+	}
+	defer d.mu.Unlock()
 	deviceKey := "d|" + obs.Digest
 	userKey := "u|" + obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10)
 	state := obs.Family + "|" + obs.Arch + "|" + obs.Major
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	device, deviceFresh := d.freshLocked(deviceKey, now)
-	_, userFresh := d.freshLocked(userKey, now)
-	if deviceFresh && userFresh && device.state == state {
-		return claudeDevicePlatformAdmitSkipped
+	if obs.Major == "" {
+		device, deviceFresh := d.freshLocked(deviceKey, now)
+		_, userFresh := d.freshLocked(userKey, now)
+		if deviceFresh && userFresh && device.state == state {
+			return claudeDevicePlatformAdmitSkipped
+		}
 	}
 	if !enqueue() {
 		return claudeDevicePlatformAdmitFull
@@ -571,9 +582,12 @@ func (d *claudeDevicePlatformDedupe) admit(obs ClaudeDevicePlatformObservation, 
 	return claudeDevicePlatformAdmitQueued
 }
 
-// forget drops the device's and the device + user entries.
+// forget drops the device's and the device + user entries. It never waits:
+// under contention the entries stay (at most one interval of dedupe).
 func (d *claudeDevicePlatformDedupe) forget(obs ClaudeDevicePlatformObservation) {
-	d.mu.Lock()
+	if !d.mu.TryLock() {
+		return
+	}
 	defer d.mu.Unlock()
 	for _, key := range []string{"d|" + obs.Digest, "u|" + obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10)} {
 		if el, ok := d.items[key]; ok {

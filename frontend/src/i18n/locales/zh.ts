@@ -4344,7 +4344,7 @@ export default {
         cross_family: '跨系统',
         version_alternation: '版本交替',
         cross_user: '跨用户',
-        arch_only: '仅架构不同',
+        arch_only: '同系统多种架构',
         sequential_upgrade: '先后升级'
       },
       families: {

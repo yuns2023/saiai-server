@@ -77,7 +77,7 @@ func TestClaudeDevicePlatformService_ObserveQueuesSmallValues(t *testing.T) {
 	digest, _, _ := claudeDeviceIdentity(cdpDeviceA)
 	require.Equal(t, ClaudeDevicePlatformObservation{
 		Digest: digest, DisplayPrefix: "abababab", Family: "macos", Arch: "arm64", Major: "15",
-		UserID: 3, APIKeyID: 7, ObservedAt: now.Unix(),
+		UserID: 3, APIKeyID: 7, ObservedAt: now.UnixMilli(),
 	}, got[0])
 
 	svc.ObserveRequest("not-a-device", nil, nil, key)
@@ -118,10 +118,14 @@ func TestClaudeDevicePlatformService_DedupeOnlySkipsSameState(t *testing.T) {
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 25.0.0"), key))
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
-	require.Equal(t, 0, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
+	// Known majors are never deduped (another replica may hold a different
+	// major); major-less repeats are.
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("Linux", "x64"), nil, key))
+	require.Equal(t, 0, observeAndWrite(cdpHeaders("Linux", "x64"), nil, key))
 	now = now.Add(claudeDevicePlatformDedupeInterval)
-	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key), "interval elapsed")
-	require.Equal(t, int64(8), svc.Stats().Written)
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("Linux", "x64"), nil, key), "interval elapsed")
+	require.Equal(t, int64(10), svc.Stats().Written)
 
 	// A failed write is forgotten: the next identical request retries.
 	store.err = context.DeadlineExceeded
@@ -153,41 +157,66 @@ func TestClaudeDevicePlatformDedupe_DeviceLevelSwitch(t *testing.T) {
 	d := newClaudeDevicePlatformDedupe(100)
 	now := time.Unix(1_800_000_000, 0)
 	queued := func() bool { return true }
-	obs := func(user int64, major string) ClaudeDevicePlatformObservation {
-		return ClaudeDevicePlatformObservation{Digest: "dev", Family: "macos", Arch: "arm64", Major: major, UserID: user}
+	obs := func(user int64, arch string) ClaudeDevicePlatformObservation {
+		return ClaudeDevicePlatformObservation{Digest: "dev", Family: "linux", Arch: arch, UserID: user}
 	}
-	// A/15 -> B/26 -> A/15: the switch back is queued.
-	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(1, "15"), now, queued))
-	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(2, "26"), now, queued))
-	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(1, "15"), now, queued))
-	// Both users now at the device's current platform: repeats skipped
-	// (both users and the platform were written within the interval).
-	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(obs(2, "15"), now, queued))
-	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(obs(1, "15"), now, queued))
+	// A/x64 -> B/arm64 -> A/x64: the switch back is queued.
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(1, "x64"), now, queued))
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(2, "arm64"), now, queued))
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(1, "x64"), now, queued))
+	// Both users at the device's current platform: repeats skipped.
+	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(obs(2, "x64"), now, queued))
+	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(obs(1, "x64"), now, queued))
 	// A third user at the same platform is new: queued.
-	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(3, "15"), now, queued))
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(obs(3, "x64"), now, queued))
+	// Known majors are always queued.
+	withMajor := ClaudeDevicePlatformObservation{Digest: "dev", Family: "macos", Arch: "arm64", Major: "15", UserID: 1}
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(withMajor, now, queued))
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(withMajor, now, queued))
 }
 
-func TestClaudeDevicePlatformService_ConcurrentObserveKeepsOrder(t *testing.T) {
+func TestClaudeDevicePlatformDedupe_NeverWaitsOnLock(t *testing.T) {
+	d := newClaudeDevicePlatformDedupe(100)
+	now := time.Unix(1_800_000_000, 0)
+	o := ClaudeDevicePlatformObservation{Digest: "dev", Family: "linux", Arch: "x64", UserID: 1}
+	queued := 0
+	enqueue := func() bool { queued++; return true }
+	require.Equal(t, claudeDevicePlatformAdmitQueued, d.admit(o, now, enqueue))
+	d.mu.Lock() // contention: admit and forget return at once
+	done := make(chan claudeDevicePlatformAdmit, 1)
+	go func() {
+		d.forget(o)
+		done <- d.admit(o, now, enqueue)
+	}()
+	select {
+	case got := <-done:
+		require.Equal(t, claudeDevicePlatformAdmitQueued, got, "enqueued without dedupe")
+	case <-time.After(2 * time.Second):
+		t.Fatal("admit waited for the lock")
+	}
+	d.mu.Unlock()
+	require.Equal(t, 2, queued)
+	require.Equal(t, claudeDevicePlatformAdmitSkipped, d.admit(o, now, enqueue), "entries kept: forget skipped under contention")
+}
+
+func TestClaudeDevicePlatformService_ConcurrentObserve(t *testing.T) {
 	svc := NewClaudeDevicePlatformService(&cdpStoreStub{}, nil)
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			version := "Darwin 24.3.0"
+			arch := "x64"
 			if i%2 == 1 {
-				version = "Darwin 25.0.0"
+				arch = "arm64"
 			}
-			svc.ObserveRequest(cdpDeviceA, cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", version), &APIKey{ID: 1, UserID: 1})
+			svc.ObserveRequest(cdpDeviceA, cdpHeaders("Linux", arch), nil, &APIKey{ID: 1, UserID: 1})
 		}(i)
 	}
 	wg.Wait()
-	got := drainCDPQueue(svc)
-	require.NotEmpty(t, got)
-	// The dedupe state equals the last queued observation.
-	last := got[len(got)-1]
-	require.Equal(t, claudeDevicePlatformAdmitSkipped, svc.dedupe.admit(last, svc.now(), func() bool { return true }))
+	stats := svc.Stats()
+	require.Equal(t, int64(50), stats.Enqueued+stats.DedupeSkipped+stats.QueueFull)
+	require.Len(t, drainCDPQueue(svc), int(stats.Enqueued))
 }
 
 func TestClaudeDevicePlatformService_WorkersWriteAndStop(t *testing.T) {

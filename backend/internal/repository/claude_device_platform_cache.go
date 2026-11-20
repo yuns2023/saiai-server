@@ -16,14 +16,20 @@ import (
 //
 //	claude_device_platform_v1:dev:<digest>   hash, TTL 30 d refreshed on write
 //	    p                     display prefix (first 8 hex of the device id)
-//	    fa:<family>|<arch>    "<first>,<last>"   (unix seconds)
+//	    fa:<family>|<arch>    "<first>,<last>"   (unix milliseconds)
 //	    fm:<family>|<major>   "<first>,<last>"   (only known majors)
 //	    u:<user_id>           "<last>,<api_key_id>"   (at most 20)
 //	    ut                    "1" once a user was dropped by the 20-user cap
 //	    r:<reason>            "<last_matched>,<evidence>"
-//	claude_device_platform_v1:tracked        zset digest -> last seen (cap 20,000)
+//	claude_device_platform_v1:tracked        zset digest -> last write (cap 20,000)
 //	claude_device_platform_v1:flagged        zset digest -> max last_matched
-//	claude_device_platform_v1:new:<uid>:<day> new devices of a user that UTC day
+//	claude_device_platform_v1:new:<uid>:d<n> new devices of a user on UTC day n
+//
+// Clocks: first/last of platforms, versions and users use the gateway event
+// time (ms, so same-second switches keep their order). Everything that
+// decides retention or capacity uses the Redis server clock (TIME): tracked
+// scores, pruning, reason last_matched, the daily counter day and all TTLs.
+// Both index zsets carry a key TTL too, refreshed on each write.
 const (
 	claudeDevicePlatformPrefix     = "claude_device_platform_v1:"
 	claudeDevicePlatformDevPrefix  = claudeDevicePlatformPrefix + "dev:"
@@ -39,18 +45,21 @@ const (
 
 // claudeDevicePlatformRecordScript records one observation atomically.
 //
-// KEYS: 1 device hash, 2 tracked zset, 3 flagged zset, 4 per-user daily counter
+// KEYS: 1 device hash, 2 tracked zset, 3 flagged zset, 4 per-user daily
+// counter key PREFIX (the Redis-clock day "d<n>" is appended in the script;
+// standalone Redis only, like the other multi-key scripts here)
 // ARGV: 1 digest, 2 display prefix, 3 family, 4 arch, 5 major ("" unknown),
-// 6 user id ("0" unknown), 7 api key id, 8 event time, 9 retention seconds,
-// 10 cross-family window seconds, 11 max devices, 12 max new devices per user
-// per day, 13 max users per device, 14 max flagged devices, 15 daily counter TTL
+// 6 user id ("0" unknown), 7 api key id, 8 event time ms, 9 retention ms,
+// 10 cross-family window ms, 11 max devices, 12 max new devices per user
+// per day, 13 max users per device, 14 max flagged devices, 15 daily counter
+// TTL ms, 16 write clock override ms ("0" = Redis TIME; tests only)
 //
 // Event times may arrive out of order: first/last are min/max merges and a
 // reason's last_matched never moves backwards. Flags are only removed when
 // their last match is older than the retention, so dropping a user at the
 // 20-user cap never erases an earlier cross_user flag.
 var claudeDevicePlatformRecordScript = redis.NewScript(`
-local dev, tracked, flagged, daily = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
+local dev, tracked, flagged, dailyPrefix = KEYS[1], KEYS[2], KEYS[3], KEYS[4]
 local digest, prefix = ARGV[1], ARGV[2]
 local family, arch, major = ARGV[3], ARGV[4], ARGV[5]
 local uid, kid = ARGV[6], ARGV[7]
@@ -62,21 +71,30 @@ local maxNew = tonumber(ARGV[12])
 local maxUsers = tonumber(ARGV[13])
 local flaggedCap = tonumber(ARGV[14])
 local dailyTTL = tonumber(ARGV[15])
-local cutoff = now - retention
+local wnow = tonumber(ARGV[16]) or 0
+if wnow <= 0 then
+  local t = redis.call('TIME')
+  wnow = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+end
+local cutoff = wnow - retention
+local indexTTL = retention + 86400000
 
 -- Inclusive: a member at exactly the cutoff is gone, like its hash
--- (EXPIREAT score + retention).
+-- (PEXPIRE retention at the same write clock).
 redis.call('ZREMRANGEBYSCORE', tracked, '-inf', cutoff)
 redis.call('ZREMRANGEBYSCORE', flagged, '-inf', cutoff)
 
+-- Admission is decided by the tracked index alone: a device missing from it
+-- (even with a leftover hash) passes the caps again before it is re-added.
 local isNew = 0
-if redis.call('EXISTS', dev) == 0 and not redis.call('ZSCORE', tracked, digest) then
+if not redis.call('ZSCORE', tracked, digest) then
   if redis.call('ZCARD', tracked) >= maxDevices then return {'global_cap'} end
   if uid == '0' then return {'no_owner'} end
+  local daily = dailyPrefix .. 'd' .. string.format('%d', math.floor(wnow / 86400000))
   local used = tonumber(redis.call('GET', daily) or '0') or 0
   if used >= maxNew then return {'user_cap'} end
   redis.call('INCR', daily)
-  redis.call('EXPIRE', daily, dailyTTL)
+  redis.call('PEXPIRE', daily, dailyTTL)
   isNew = 1
 end
 
@@ -194,9 +212,10 @@ for k, v in pairs(fields) do
 end
 
 local matched = {}
--- The window is anchored at the newest family sighting (never before this
--- event), so a late older event is not paired with a much newer one.
-local anchor = now
+-- The window is anchored at the write clock or the newest family sighting,
+-- whichever is later, so a late older event is not paired with a newer one.
+local anchor = wnow
+if now > anchor then anchor = now end
 for _, l in pairs(familyLast) do
   if l > anchor then anchor = l end
 end
@@ -230,7 +249,9 @@ for f, list in pairs(majors) do
     for j = i + 1, #list do
       local old, new = list[i], list[j]
       local pair = f .. ':' .. old.major .. '/' .. new.major
-      if old.last > new.first then
+      -- Ties (same millisecond) count as alternation: conservative, it is
+      -- in the default admin list.
+      if old.last >= new.first then
         table.insert(alternation, pair)
       else
         table.insert(sequential, pair)
@@ -251,8 +272,8 @@ if users >= 2 then matched['cross_user'] = tostring(users) end
 for reason, evidence in pairs(matched) do
   local field = 'r:' .. reason
   local l = head(fields[field])
-  if not l or now >= l then
-    local v = string.format('%d,%s', now, string.sub(evidence, 1, 48))
+  if not l or wnow >= l then
+    local v = string.format('%d,%s', wnow, string.sub(evidence, 1, 48))
     fields[field] = v
     redis.call('HSET', dev, field, v)
   end
@@ -276,16 +297,20 @@ if reasonCount > 0 then
 else
   redis.call('ZREM', flagged, digest)
 end
+redis.call('PEXPIRE', flagged, indexTTL)
 
-redis.call('ZADD', tracked, 'GT', now, digest)
--- The hash expires exactly when its tracked entry is pruned (same clock).
-local seen = tonumber(redis.call('ZSCORE', tracked, digest)) or now
-redis.call('EXPIREAT', dev, seen + retention)
+-- The only ZADD to tracked: reached after the admission above.
+redis.call('ZADD', tracked, 'GT', wnow, digest)
+redis.call('PEXPIRE', tracked, indexTTL)
+-- The hash expires when its tracked entry is pruned (same write clock).
+redis.call('PEXPIRE', dev, retention)
 return {'ok', isNew, reasonCount}
 `)
 
 type claudeDevicePlatformCache struct {
 	rdb *redis.Client
+	// writeClock overrides the Redis TIME write clock (ms); tests only.
+	writeClock func() int64
 }
 
 // NewClaudeDevicePlatformStore creates the Redis-backed observation store.
@@ -295,9 +320,10 @@ func NewClaudeDevicePlatformStore(rdb *redis.Client) service.ClaudeDevicePlatfor
 
 func claudeDevicePlatformDevKey(digest string) string { return claudeDevicePlatformDevPrefix + digest }
 
-func claudeDevicePlatformNewKey(userID int64, at int64) string {
-	day := time.Unix(at, 0).UTC().Format("20060102")
-	return claudeDevicePlatformNewPrefix + strconv.FormatInt(userID, 10) + ":" + day
+// claudeDevicePlatformNewKeyPrefix is the per-user daily counter prefix; the
+// script appends the Redis-clock UTC day ("d<days since epoch>").
+func claudeDevicePlatformNewKeyPrefix(userID int64) string {
+	return claudeDevicePlatformNewPrefix + strconv.FormatInt(userID, 10) + ":"
 }
 
 func (r *claudeDevicePlatformCache) RecordClaudeDevicePlatform(ctx context.Context, obs service.ClaudeDevicePlatformObservation, limits service.ClaudeDevicePlatformLimits) (service.ClaudeDevicePlatformWriteStatus, error) {
@@ -311,14 +337,18 @@ func (r *claudeDevicePlatformCache) RecordClaudeDevicePlatform(ctx context.Conte
 		claudeDevicePlatformDevKey(obs.Digest),
 		claudeDevicePlatformTrackedKey,
 		claudeDevicePlatformFlaggedKey,
-		claudeDevicePlatformNewKey(obs.UserID, obs.ObservedAt),
+		claudeDevicePlatformNewKeyPrefix(obs.UserID),
+	}
+	var writeClock int64
+	if r.writeClock != nil {
+		writeClock = r.writeClock()
 	}
 	res, err := claudeDevicePlatformRecordScript.Run(ctx, r.rdb, keys,
 		obs.Digest, obs.DisplayPrefix, obs.Family, obs.Arch, obs.Major,
 		obs.UserID, obs.APIKeyID, obs.ObservedAt,
-		int64(limits.Retention/time.Second), int64(limits.CrossFamilyWindow/time.Second),
+		limits.Retention.Milliseconds(), limits.CrossFamilyWindow.Milliseconds(),
 		limits.MaxDevices, limits.MaxNewPerUserDay, limits.MaxUsers, limits.MaxFlaggedDevices,
-		int64(limits.NewDeviceDayWindow/time.Second),
+		limits.NewDeviceDayWindow.Milliseconds(), writeClock,
 	).Slice()
 	if err != nil {
 		return "", err
@@ -355,7 +385,7 @@ func parseClaudeDevicePlatformCursor(raw string) (*claudeDevicePlatformCursor, e
 		return nil, nil
 	}
 	scoreText, digest, ok := strings.Cut(raw, ":")
-	if !ok || len(scoreText) == 0 || len(scoreText) > 12 || !isClaudeDevicePlatformDigest(digest) {
+	if !ok || len(scoreText) == 0 || len(scoreText) > 16 || !isClaudeDevicePlatformDigest(digest) {
 		return nil, service.ErrClaudeDevicePlatformInvalidQuery
 	}
 	score, err := strconv.ParseInt(scoreText, 10, 64)
@@ -464,7 +494,7 @@ func (r *claudeDevicePlatformCache) ListFlaggedClaudeDevicePlatforms(ctx context
 	if now.IsZero() {
 		now = time.Now()
 	}
-	cutoff := now.Add(-service.ClaudeDevicePlatformRetention).Unix()
+	cutoff := now.Add(-service.ClaudeDevicePlatformRetention).UnixMilli()
 
 	scanned := 0
 	for len(page.Items) < limit && scanned < claudeDevicePlatformScanBudget {
@@ -559,7 +589,7 @@ func decodeClaudeDevicePlatformDevice(fields map[string]string, cutoff int64) (s
 				maxMatched = at
 			}
 			device.Reasons = append(device.Reasons, service.ClaudeDevicePlatformReasonMatch{
-				Reason: strings.TrimPrefix(k, "r:"), LastMatchedAt: time.Unix(at, 0).UTC(), Evidence: evidence,
+				Reason: strings.TrimPrefix(k, "r:"), LastMatchedAt: time.UnixMilli(at).UTC(), Evidence: evidence,
 			})
 		case strings.HasPrefix(k, "fa:") || strings.HasPrefix(k, "fm:"):
 			first, lastText, ok := splitClaudeDevicePlatformValue(v)
@@ -574,7 +604,7 @@ func decodeClaudeDevicePlatformDevice(fields map[string]string, cutoff int64) (s
 			if last < cutoff {
 				continue // left the retention window since the last write
 			}
-			firstAt, lastAt := time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+			firstAt, lastAt := time.UnixMilli(first).UTC(), time.UnixMilli(last).UTC()
 			if k[1] == 'a' {
 				device.Platforms = append(device.Platforms, service.ClaudeDevicePlatformArchEntry{Family: family, Arch: second, FirstSeenAt: firstAt, LastSeenAt: lastAt})
 			} else {
@@ -587,13 +617,13 @@ func decodeClaudeDevicePlatformDevice(fields map[string]string, cutoff int64) (s
 				continue
 			}
 			keyID, _ := strconv.ParseInt(keyText, 10, 64)
-			device.Users = append(device.Users, service.ClaudeDevicePlatformUser{UserID: uid, APIKeyID: keyID, LastSeenAt: time.Unix(last, 0).UTC()})
+			device.Users = append(device.Users, service.ClaudeDevicePlatformUser{UserID: uid, APIKeyID: keyID, LastSeenAt: time.UnixMilli(last).UTC()})
 		}
 	}
 	if len(device.Reasons) == 0 {
 		return device, false
 	}
-	device.LastMatchedAt = time.Unix(maxMatched, 0).UTC()
+	device.LastMatchedAt = time.UnixMilli(maxMatched).UTC()
 	sort.Slice(device.Reasons, func(i, j int) bool { return device.Reasons[i].Reason < device.Reasons[j].Reason })
 	sort.Slice(device.Platforms, func(i, j int) bool {
 		a, b := device.Platforms[i], device.Platforms[j]

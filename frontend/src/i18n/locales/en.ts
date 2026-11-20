@@ -4188,7 +4188,7 @@ export default {
         cross_family: 'Cross-system',
         version_alternation: 'Version alternation',
         cross_user: 'Cross-user',
-        arch_only: 'Arch only',
+        arch_only: 'Multiple architectures',
         sequential_upgrade: 'Sequential upgrade'
       },
       families: {

@@ -44,7 +44,7 @@ func cdpDigest(name string) string {
 func cdpObs(device, family, arch, major string, user int64, at int64) service.ClaudeDevicePlatformObservation {
 	return service.ClaudeDevicePlatformObservation{
 		Digest: cdpDigest(device), DisplayPrefix: cdpDigest(device)[:8], Family: family, Arch: arch, Major: major,
-		UserID: user, APIKeyID: user * 10, ObservedAt: at,
+		UserID: user, APIKeyID: user * 10, ObservedAt: at * 1000,
 	}
 }
 
@@ -53,6 +53,9 @@ type cdpHarness struct {
 	rdb    *redis.Client
 	store  *claudeDevicePlatformCache
 	limits service.ClaudeDevicePlatformLimits
+	// writeAt overrides the Redis write clock (unix seconds) for the next
+	// records; 0 = the observation's own event time.
+	writeAt int64
 }
 
 func newCDPHarness(t *testing.T) *cdpHarness {
@@ -62,6 +65,12 @@ func newCDPHarness(t *testing.T) *cdpHarness {
 
 func (h *cdpHarness) record(obs service.ClaudeDevicePlatformObservation) service.ClaudeDevicePlatformWriteStatus {
 	h.t.Helper()
+	h.store.writeClock = func() int64 {
+		if h.writeAt > 0 {
+			return h.writeAt * 1000
+		}
+		return obs.ObservedAt
+	}
 	status, err := h.store.RecordClaudeDevicePlatform(context.Background(), obs, h.limits)
 	require.NoError(h.t, err)
 	return status
@@ -71,7 +80,7 @@ func (h *cdpHarness) device(name string, at int64) (service.ClaudeDevicePlatform
 	h.t.Helper()
 	fields, err := h.rdb.HGetAll(context.Background(), claudeDevicePlatformDevKey(cdpDigest(name))).Result()
 	require.NoError(h.t, err)
-	return decodeClaudeDevicePlatformDevice(fields, at-int64(service.ClaudeDevicePlatformRetention/time.Second))
+	return decodeClaudeDevicePlatformDevice(fields, (at-int64(service.ClaudeDevicePlatformRetention/time.Second))*1000)
 }
 
 func reasonSet(d service.ClaudeDevicePlatformDevice) map[string]bool {
@@ -100,11 +109,13 @@ func TestClaudeDevicePlatformRedis_CrossFamily(t *testing.T) {
 	require.Equal(t, "macos+windows", d.Reasons[0].Evidence)
 	score, err := h.rdb.ZScore(context.Background(), claudeDevicePlatformFlaggedKey, cdpDigest("a")).Result()
 	require.NoError(t, err)
-	require.Equal(t, float64(cdpT0+60), score)
+	require.Equal(t, float64((cdpT0+60)*1000), score)
 
 	// A late, much older event is not paired with a newer family.
 	h.record(cdpObs("late", "linux", "x64", "", 1, cdpT0+25*3600))
+	h.writeAt = cdpT0 + 25*3600 // written now, event 25 h old
 	h.record(cdpObs("late", "macos", "x64", "", 1, cdpT0))
+	h.writeAt = 0
 	_, flagged = h.device("late", cdpT0+25*3600)
 	require.False(t, flagged)
 
@@ -258,19 +269,72 @@ func TestClaudeDevicePlatformRedis_ReadDropsExpiredDetails(t *testing.T) {
 	require.Equal(t, "linux", d.Platforms[0].Family)
 }
 
+func cdpDailyKey(userID, atSec int64) string {
+	return claudeDevicePlatformNewKeyPrefix(userID) + fmt.Sprintf("d%d", atSec/86400)
+}
+
 func TestClaudeDevicePlatformRedis_TTLs(t *testing.T) {
 	h := newCDPHarness(t)
 	ctx := context.Background()
 	h.record(cdpObs("ttl", "linux", "x64", "", 1, cdpT0))
-	// The hash expires when its tracked entry would be pruned (event clock).
-	expireAt := h.rdb.ExpireTime(ctx, claudeDevicePlatformDevKey(cdpDigest("ttl"))).Val()
-	require.Equal(t, time.Duration(cdpT0)*time.Second+service.ClaudeDevicePlatformRetention, expireAt)
-	h.record(cdpObs("ttl", "linux", "x64", "", 1, cdpT0+100))
-	h.record(cdpObs("ttl", "linux", "x64", "", 1, cdpT0+50)) // late event never shortens it
-	expireAt = h.rdb.ExpireTime(ctx, claudeDevicePlatformDevKey(cdpDigest("ttl"))).Val()
-	require.Equal(t, time.Duration(cdpT0+100)*time.Second+service.ClaudeDevicePlatformRetention, expireAt)
-	dailyTTL := h.rdb.TTL(ctx, claudeDevicePlatformNewKey(1, cdpT0)).Val()
-	require.InDelta(t, (48 * time.Hour).Seconds(), dailyTTL.Seconds(), 5)
+	h.record(cdpObs("ttl", "linux", "x64", "", 2, cdpT0+10)) // flagged (cross_user)
+	// After the last write every key has a TTL (Redis clock, refreshed).
+	retention := service.ClaudeDevicePlatformRetention
+	keys := map[string]time.Duration{
+		claudeDevicePlatformDevKey(cdpDigest("ttl")): retention,
+		claudeDevicePlatformTrackedKey:               retention + 24*time.Hour,
+		claudeDevicePlatformFlaggedKey:               retention + 24*time.Hour,
+		cdpDailyKey(1, cdpT0):                        48 * time.Hour,
+	}
+	for key, want := range keys {
+		ttl := h.rdb.PTTL(ctx, key).Val()
+		require.Positive(t, ttl, key)
+		require.InDelta(t, want.Seconds(), ttl.Seconds(), 5, key)
+	}
+	var cursor uint64
+	all, _, err := h.rdb.Scan(ctx, cursor, claudeDevicePlatformPrefix+"*", 1000).Result()
+	require.NoError(t, err)
+	require.NotEmpty(t, all)
+	for _, key := range all {
+		require.Positive(t, h.rdb.PTTL(ctx, key).Val(), "every key expires: %s", key)
+	}
+}
+
+func TestClaudeDevicePlatformRedis_UntrackedHashRepassesCap(t *testing.T) {
+	h := newCDPHarness(t)
+	h.limits.MaxDevices = 1
+	require.Equal(t, service.ClaudeDevicePlatformWriteOK, h.record(cdpObs("first", "linux", "x64", "", 1, cdpT0)))
+	// 31 days later "first" left the tracked index (its hash may still
+	// exist on the real clock); "second" takes the only slot.
+	h.writeAt = cdpT0 + 31*86400
+	require.Equal(t, service.ClaudeDevicePlatformWriteOK, h.record(cdpObs("second", "linux", "x64", "", 2, cdpT0+31*86400)))
+	require.Equal(t, int64(1), h.rdb.Exists(context.Background(), claudeDevicePlatformDevKey(cdpDigest("first"))).Val())
+	// The leftover hash does not let "first" bypass the cap.
+	require.Equal(t, service.ClaudeDevicePlatformWriteGlobalCap, h.record(cdpObs("first", "linux", "x64", "", 1, cdpT0+31*86400)))
+	require.Equal(t, int64(1), h.rdb.ZCard(context.Background(), claudeDevicePlatformTrackedKey).Val())
+}
+
+func TestClaudeDevicePlatformRedis_MillisecondOrderAndTies(t *testing.T) {
+	h := newCDPHarness(t)
+	base := cdpT0 * 1000
+	obs := func(name, major string, ms int64) service.ClaudeDevicePlatformObservation {
+		o := cdpObs(name, "macos", "arm64", major, 1, 0)
+		o.ObservedAt = base + ms
+		return o
+	}
+	// Same second: 15 -> 26 -> 15 keeps its order (alternation).
+	h.record(obs("ms", "15", 100))
+	h.record(obs("ms", "26", 400))
+	d, _ := h.device("ms", cdpT0)
+	require.Equal(t, map[string]bool{"sequential_upgrade": true}, reasonSet(d))
+	h.record(obs("ms", "15", 700))
+	d, _ = h.device("ms", cdpT0)
+	require.True(t, reasonSet(d)["version_alternation"])
+	// An exact tie counts as alternation (conservative).
+	h.record(obs("tie", "15", 100))
+	h.record(obs("tie", "26", 100))
+	d, _ = h.device("tie", cdpT0)
+	require.True(t, reasonSet(d)["version_alternation"])
 }
 
 func TestClaudeDevicePlatformRedis_ConcurrentUsers(t *testing.T) {
@@ -294,8 +358,8 @@ func TestClaudeDevicePlatformRedis_ConcurrentUsers(t *testing.T) {
 	require.True(t, flagged)
 	require.Len(t, d.Users, 2)
 	// Exactly one of the two users created the device (one daily count).
-	c1, _ := h.rdb.Get(context.Background(), claudeDevicePlatformNewKey(1, cdpT0)).Int()
-	c2, _ := h.rdb.Get(context.Background(), claudeDevicePlatformNewKey(2, cdpT0)).Int()
+	c1, _ := h.rdb.Get(context.Background(), cdpDailyKey(1, cdpT0)).Int()
+	c2, _ := h.rdb.Get(context.Background(), cdpDailyKey(2, cdpT0)).Int()
 	require.Equal(t, 1, c1+c2)
 }
 

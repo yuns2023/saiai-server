@@ -27,7 +27,7 @@ const (
 	claudeDevicePlatformOther = "other"
 
 	claudeDevicePlatformMaxSystemBlocks = 16
-	claudeDevicePlatformMaxScanBytes    = 512 << 10
+	claudeDevicePlatformMaxScanBytes    = 128 << 10
 	claudeDevicePlatformMaxEnvLines     = 64
 	claudeDevicePlatformMaxLineBytes    = 512
 	claudeDevicePlatformMaxVersionDigit = 6
@@ -52,7 +52,10 @@ var claudeDevicePlatformDarwinMajors = map[int]string{
 type ClaudeDevicePlatformSample struct {
 	Family string // windows / macos / linux / unknown
 	Arch   string // x64 / arm64 / unknown
-	Major  string // "" when unknown (always "" for linux)
+	// Major is "" when unknown. Linux never has one (product decision):
+	// Linux is compared by family and arch only, because the kernel version
+	// ("Linux 7.0.0-43-generic") is not a distribution major version.
+	Major string
 }
 
 // claudeDeviceIdentity returns the sha256 digest (hex) of a valid Claude
