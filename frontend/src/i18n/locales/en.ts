@@ -4170,7 +4170,7 @@ export default {
     claudeDevicePlatform: {
       title: 'Claude Devices',
       description: 'Per original Claude Code device ID: which systems, versions and users used the same "device". Observe-only (nothing is blocked); use it to spot shared or copied ~/.claude.json files.',
-      notice: 'Data is per site and covers the last 30 days. Legitimate setups such as Docker mounting the same ~/.claude, Rosetta, or an OS upgrade can also appear here; judge by users and times.',
+      notice: 'Data is per site; the list shows devices flagged within the last 30 days (first-seen times may be earlier). Legitimate setups such as Docker mounting the same ~/.claude, Rosetta, or an OS upgrade can also appear here; judge by users and times.',
       prefixHint: 'First 8 hex digits of the device ID (the full ID is never shown)',
       empty: 'No devices match the filter.',
       failedToLoad: 'Failed to load devices',

@@ -4326,7 +4326,7 @@ export default {
     claudeDevicePlatform: {
       title: 'Claude 设备排查',
       description: '按 Claude Code 原始设备 ID 统计：同一台“设备”用过哪些系统、版本和用户。只记录、不拦截，用于排查共享或复制 ~/.claude.json 的情况。',
-      notice: '数据按站点统计，只保留最近 30 天。Docker 挂载同一个 ~/.claude、Rosetta 转译、系统升级等正常情况也可能出现在列表里，请结合用户和时间判断。',
+      notice: '数据按站点统计，列表展示最近 30 天内命中过标记的设备（首次出现时间可能更早）。Docker 挂载同一个 ~/.claude、Rosetta 转译、系统升级等正常情况也可能出现在列表里，请结合用户和时间判断。',
       prefixHint: '设备 ID 前 8 位（不显示完整 ID）',
       empty: '没有符合条件的设备。',
       failedToLoad: '加载设备列表失败',
