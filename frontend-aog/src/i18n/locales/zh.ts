@@ -409,7 +409,7 @@ export default {
     unlistedDone: '已停止共享。',
     loadFailed: '共享状态读取失败。',
     explain: '共享后，其他用户可以按所选档位的价格使用这个号；平台从实收中抽成，其余记为你的收益。收益先冻结一段时间，到期后可以转入余额。你随时可以停止共享，进行中的请求会正常完成。',
-    protection: '你自己使用时有保留：预留 {concurrency} 个并发、{devices} 台设备、每周期 {admissions} 个新设备名额；这个号 5 小时用量达到 {cap5h}% 或 7 天用量达到 {cap7d}% 时暂停出售。',
+    protection: '你自己使用时有保留：预留 {concurrency} 个并发、{devices} 台设备、每周期 {admissions} 个新设备名额。用量额度不预留：这个号的 5 小时或 7 天额度用完后，买家和你都要等额度恢复。',
     reasonSep: '：',
     reason_market_disabled: '共享市场暂未开放',
     reason_not_configured: '管理员还没有允许这个号共享',

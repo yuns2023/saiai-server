@@ -72,6 +72,10 @@ type MarketAdmissionState struct {
 	// price positivity check).
 	GroupRateMultiplier       float64
 	GroupModelRateMultipliers map[string]float64
+	// BuyerRateOverride is the buyer's user_group_rate_multipliers row on
+	// the group in the same snapshot (nil = none). A zero override is
+	// allowed on a tier (free self-use) and makes the buyer path unpriced.
+	BuyerRateOverride *float64
 	// Membership rows of (account, group).
 	AdminMember  bool
 	MarketMember bool

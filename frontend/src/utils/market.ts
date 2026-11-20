@@ -9,10 +9,7 @@ import type { MarketProtection } from '@/api/admin/market'
 export const MARKET_PROTECTION_BOUNDS: Record<keyof MarketProtection, { min: number; max: number }> = {
   reserved_concurrency: { min: 0, max: 100 },
   reserved_devices: { min: 0, max: 32 },
-  reserved_admissions: { min: 0, max: 32 },
-  cap_5h_pct: { min: 1, max: 100 },
-  cap_7d_pct: { min: 1, max: 100 },
-  sample_max_age_minutes: { min: 1, max: 1440 }
+  reserved_admissions: { min: 0, max: 32 }
 }
 
 /* ---------- Group tier ---------- */

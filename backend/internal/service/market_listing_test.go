@@ -84,11 +84,11 @@ func (s *marketTierGroupRepo) ListFallbackReferrers(_ context.Context, groupID i
 
 type marketTierRateRepo struct {
 	userGroupRateRepoStubForGroupRate
-	nonPositive map[int64][]int64
+	negative map[int64][]int64
 }
 
-func (s *marketTierRateRepo) ListNonPositiveRateUsers(_ context.Context, groupID int64) ([]int64, error) {
-	return s.nonPositive[groupID], nil
+func (s *marketTierRateRepo) ListNegativeRateUsers(_ context.Context, groupID int64) ([]int64, error) {
+	return s.negative[groupID], nil
 }
 
 func newMarketTierRepos() (*marketTierGroupRepo, *marketTierRateRepo) {
@@ -100,7 +100,7 @@ func newMarketTierRepos() (*marketTierGroupRepo, *marketTierRateRepo) {
 	tierPtr := int64(1)
 	groups[3].FallbackGroupID = &tierPtr // 3 → 1 (stored before 1 became a tier)
 	return &marketTierGroupRepo{groupRepoStubForFallbackCycle: groupRepoStubForFallbackCycle{groups: groups}, referrers: map[int64][]int64{}},
-		&marketTierRateRepo{nonPositive: map[int64][]int64{}}
+		&marketTierRateRepo{negative: map[int64][]int64{}}
 }
 
 func TestFallbackChainsMayNotEnterMarketTier(t *testing.T) {
@@ -137,9 +137,10 @@ func TestUpdateGroupMarketTierPromotionGuards(t *testing.T) {
 	groups.groups[3].FallbackGroupID = new(int64)
 	*groups.groups[3].FallbackGroupID = 2
 	requireMarketReason(t, promote(groups, rates, 3), "MARKET_TIER_FALLBACK")
-	// Existing zero (or rounds-to-zero) user override.
+	// Existing negative user override (a zero override is allowed: the
+	// repository lists only negative / NaN ones).
 	groups, rates = newMarketTierRepos()
-	rates.nonPositive[2] = []int64{42}
+	rates.negative[2] = []int64{42}
 	requireMarketReason(t, promote(groups, rates, 2), "MARKET_TIER_RATE_OVERRIDE")
 	require.Nil(t, groups.updated)
 	// Zero group rate.
@@ -156,11 +157,12 @@ func TestMarketTierRateOverrideSavePaths(t *testing.T) {
 	groups, rates := newMarketTierRepos()
 	svc := &adminServiceImpl{groupRepo: groups, userGroupRateRepo: rates}
 
-	// Group-side bulk save.
-	err := svc.BatchSetGroupRateMultipliers(ctx, 1, []GroupRateMultiplierInput{{UserID: 5, RateMultiplier: 1.1}, {UserID: 6, RateMultiplier: 0.00001}})
+	// Group-side bulk save: a negative override on a tier is refused.
+	err := svc.BatchSetGroupRateMultipliers(ctx, 1, []GroupRateMultiplierInput{{UserID: 5, RateMultiplier: 1.1}, {UserID: 6, RateMultiplier: -0.001}})
 	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	require.Zero(t, rates.syncedGroupID, "nothing written")
-	require.NoError(t, svc.BatchSetGroupRateMultipliers(ctx, 1, []GroupRateMultiplierInput{{UserID: 5, RateMultiplier: 0.0001}}))
+	// Zero (and rounds-to-zero) overrides on a tier are allowed (free self-use).
+	require.NoError(t, svc.BatchSetGroupRateMultipliers(ctx, 1, []GroupRateMultiplierInput{{UserID: 5, RateMultiplier: 0}, {UserID: 6, RateMultiplier: 0.00001}}))
 	require.Equal(t, int64(1), rates.syncedGroupID)
 	require.NoError(t, svc.BatchSetGroupRateMultipliers(ctx, 2, []GroupRateMultiplierInput{{UserID: 5, RateMultiplier: 0}}), "non-tier groups unchanged")
 
@@ -168,20 +170,23 @@ func TestMarketTierRateOverrideSavePaths(t *testing.T) {
 	users := &userRepoStub{user: &User{ID: 5, Role: RoleUser, Status: StatusActive}}
 	svc = &adminServiceImpl{groupRepo: groups, userGroupRateRepo: rates, userRepo: users}
 	zero := 0.0
-	_, err = svc.UpdateUser(ctx, 5, &UpdateUserInput{GroupRates: map[int64]*float64{2: &zero, 1: &zero}})
-	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	negative := -1.0
+	_, err = svc.UpdateUser(ctx, 5, &UpdateUserInput{GroupRates: map[int64]*float64{2: &zero, 1: &negative}})
+	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	_, err = svc.UpdateUser(ctx, 5, &UpdateUserInput{GroupRates: map[int64]*float64{1: &negative}})
 	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	require.Empty(t, userGroupRatesToCheck(map[int64]*float64{1: nil}), "deleting an override is always allowed")
 
-	// Positive-at-storage values need no lookup at all; the rest one batch.
+	// Values >= 0 at storage need no lookup at all (zero on a tier too); the
+	// rest one batch.
 	groups.tierLookups = 0
-	one, tiny := 1.5, 0.00001
-	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{1: &one, 2: &one, 3: &one})))
+	one, tiny, negTiny, negSmall := 1.5, 0.00001, -0.00001, -0.0001
+	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{1: &zero, 2: &one, 3: &tiny})))
+	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{1: &negTiny})), "rounds to 0 at storage")
 	require.Zero(t, groups.tierLookups)
-	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{2: &tiny, 3: &zero})))
+	require.NoError(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{2: &negSmall, 3: &negative})))
 	require.Equal(t, 1, groups.tierLookups)
+	requireMarketReason(t, svc.validateMarketTierRateOverrides(ctx, userGroupRatesToCheck(map[int64]*float64{1: &negSmall})), "MARKET_TIER_RATE_OVERRIDE")
 }
 
 func TestMarketAccountIneligibleReason(t *testing.T) {
@@ -218,18 +223,15 @@ func TestMarketAccountIneligibleReason(t *testing.T) {
 
 func TestValidateMarketProtectionForAccount(t *testing.T) {
 	unlimited := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Concurrency: 0, Extra: map[string]any{}}
-	requireMarketReason(t, validateMarketProtectionForAccount(unlimited, MarketProtectionParams{Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}), "MARKET_INVALID_PARAMS")
+	requireMarketReason(t, validateMarketProtectionForAccount(unlimited, MarketProtectionParams{}), "MARKET_INVALID_PARAMS")
 	acc := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Concurrency: 3,
 		Extra: map[string]any{"claude_oauth_carpool_device_limit": 5, "claude_oauth_carpool_maintenance_admissions_per_cycle": 2}}
-	p := MarketProtectionParams{ReservedConcurrency: 2, ReservedDevices: 4, ReservedAdmissions: 2, Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}
+	p := MarketProtectionParams{ReservedConcurrency: 2, ReservedDevices: 4, ReservedAdmissions: 2}
 	require.NoError(t, validateMarketProtectionForAccount(acc, p))
 	for name, mutate := range map[string]func(*MarketProtectionParams){
 		"concurrency": func(p *MarketProtectionParams) { p.ReservedConcurrency = 3 },
 		"devices":     func(p *MarketProtectionParams) { p.ReservedDevices = 5 },
 		"admissions":  func(p *MarketProtectionParams) { p.ReservedAdmissions = 3 },
-		"cap 0":       func(p *MarketProtectionParams) { p.Cap5hPct = 0 },
-		"cap 101":     func(p *MarketProtectionParams) { p.Cap7dPct = 101 },
-		"age 0":       func(p *MarketProtectionParams) { p.SampleMaxAgeMinutes = 0 },
 		"negative":    func(p *MarketProtectionParams) { p.ReservedDevices = -1 },
 	} {
 		q := p
@@ -245,7 +247,7 @@ func TestParseMarketSettings(t *testing.T) {
 	require.True(t, def.PlatformCutRate.Equal(decimal.RequireFromString("0.2")))
 	require.Equal(t, 7, def.EarningFreezeDays)
 	require.True(t, def.MinConvertUSD.Equal(decimal.NewFromInt(1)))
-	require.Equal(t, MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1, Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}, def.DefaultProtection)
+	require.Equal(t, MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1}, def.DefaultProtection)
 
 	for raw, want := range map[string]string{
 		"0":       "0", // explicit 0 kept, never the default
@@ -335,7 +337,7 @@ func (f *fakeMarketRepo) OwnerSet(_ context.Context, p MarketOwnerSetParams) (*M
 		return nil, err
 	}
 	if p.Listed && p.Validate != nil {
-		protection := MarketProtectionParams{Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}
+		protection := MarketProtectionParams{}
 		if f.listing != nil {
 			protection = f.listing.Protection
 		}
@@ -381,12 +383,12 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	requireMarketReason(t, err, "HOSTED_ACCOUNT_NOT_FOUND")
 
 	// Admin: defaults + partial override; validation against the account.
-	five := 5
-	admin, err := svc.AdminConfigure(ctx, 1, 11, AdminMarketListingInput{AllowedGroupIDs: []int64{4, 3, 4}, Cap5hPct: &five})
+	three := 3
+	admin, err := svc.AdminConfigure(ctx, 1, 11, AdminMarketListingInput{AllowedGroupIDs: []int64{4, 3, 4}, ReservedDevices: &three})
 	require.NoError(t, err)
 	require.Equal(t, []int64{3, 4}, repo.lastCfg.AllowedGroupIDs, "deduped and sorted")
-	require.Equal(t, 5, admin.Listing.Protection.Cap5hPct)
-	require.Equal(t, 60, admin.Listing.Protection.Cap7dPct)
+	require.Equal(t, 3, admin.Listing.Protection.ReservedDevices)
+	require.Equal(t, 1, admin.Listing.Protection.ReservedConcurrency)
 	tooMany := 3
 	_, err = svc.AdminConfigure(ctx, 1, 11, AdminMarketListingInput{AllowedGroupIDs: []int64{3}, ReservedConcurrency: &tooMany})
 	requireMarketReason(t, err, "MARKET_INVALID_PARAMS")
@@ -498,9 +500,9 @@ func TestUpdateUserReportsRaceRejectedOverrideAfterFinishingCommit(t *testing.T)
 	users := &marketUserRepo{userRepoStub: userRepoStub{user: &User{ID: 5, Role: RoleUser, Status: StatusActive}}}
 	invalidator := &authCacheInvalidatorStub{}
 	svc := &adminServiceImpl{groupRepo: groups, userGroupRateRepo: &rejectingRateRepo{}, userRepo: users, authCacheInvalidator: invalidator}
-	rate := 0.0
-	// The pre-check passes (group 2 is not a tier, 0 is allowed there); the
-	// database then rejects it (promoted meanwhile).
+	rate := -1.0
+	// The pre-check passes (group 2 is not a tier, a negative override is
+	// not refused there); the database then rejects it (promoted meanwhile).
 	_, err := svc.UpdateUser(context.Background(), 5, &UpdateUserInput{Status: StatusDisabled, GroupRates: map[int64]*float64{2: &rate}})
 	requireMarketReason(t, err, "MARKET_TIER_RATE_OVERRIDE")
 	require.Equal(t, 1, users.updates, "the user change was committed")

@@ -148,9 +148,6 @@ export interface SystemSettings {
   market_default_reserved_concurrency: number
   market_default_reserved_devices: number
   market_default_reserved_admissions: number
-  market_default_cap_5h_pct: number
-  market_default_cap_7d_pct: number
-  market_default_sample_max_age_minutes: number
 }
 
 export interface UpdateSettingsRequest {
@@ -245,9 +242,6 @@ export interface UpdateSettingsRequest {
   market_default_reserved_concurrency?: number
   market_default_reserved_devices?: number
   market_default_reserved_admissions?: number
-  market_default_cap_5h_pct?: number
-  market_default_cap_7d_pct?: number
-  market_default_sample_max_age_minutes?: number
 }
 
 /**

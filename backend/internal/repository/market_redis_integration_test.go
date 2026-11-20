@@ -327,64 +327,6 @@ func TestMarketDeviceCycleBudget(t *testing.T) {
 	})
 }
 
-func TestMarketUsageObservationsNeverGoBackwards(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMarketUsageCache(testRedis(t))
-	const account = int64(71)
-	now := time.Now().Unix()
-	week := now + 3*24*3600
-
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		SevenDay:       &service.MarketUsageObservation{Utilization: 0.40, ResetAt: week, ObservedAt: now},
-		FiveHour:       &service.MarketUsageObservation{Utilization: 0.30, ResetAt: now + 3600, ObservedAt: now},
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: false, ObservedAt: now},
-	}))
-	// A late (older) observation of the same window: ignored.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		SevenDay: &service.MarketUsageObservation{Utilization: 0.10, ResetAt: week, ObservedAt: now - 60},
-	}))
-	// A previous window (earlier reset) with a low value, observed later: ignored.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		FiveHour: &service.MarketUsageObservation{Utilization: 0.05, ResetAt: now - 10, ObservedAt: now + 5},
-	}))
-	// A stale Ultra flag: ignored.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now - 120},
-	}))
-	got, err := cache.GetMarketUsageObservations(ctx, []int64{account, 72})
-	require.NoError(t, err)
-	obs := got[account]
-	require.InDelta(t, 0.40, obs.SevenDay.Utilization, 1e-9)
-	require.InDelta(t, 0.30, obs.FiveHour.Utilization, 1e-9)
-	require.False(t, obs.FiveHourAbsent.Absent)
-	require.Nil(t, got[72].SevenDay, "unknown account = no observation")
-
-	// Same window, delivered out of order with a later timestamp but a lower
-	// value: the maximum stays.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		SevenDay: &service.MarketUsageObservation{Utilization: 0.20, ResetAt: week, ObservedAt: now + 10},
-	}))
-	// Same-second tie of the 5h-absence flag: "has a 5h window" wins.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now},
-	}))
-	got, err = cache.GetMarketUsageObservations(ctx, []int64{account})
-	require.NoError(t, err)
-	require.InDelta(t, 0.40, got[account].SevenDay.Utilization, 1e-9)
-	require.Equal(t, now+10, got[account].SevenDay.ObservedAt, "the observation time still advances")
-	require.False(t, got[account].FiveHourAbsent.Absent)
-
-	// A newer observation and a new window replace.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, account, service.MarketUsageObservations{
-		SevenDay: &service.MarketUsageObservation{Utilization: 0.45, ResetAt: week, ObservedAt: now + 30},
-		FiveHour: &service.MarketUsageObservation{Utilization: 0.02, ResetAt: now + 5*3600, ObservedAt: now + 30},
-	}))
-	got, err = cache.GetMarketUsageObservations(ctx, []int64{account})
-	require.NoError(t, err)
-	require.InDelta(t, 0.45, got[account].SevenDay.Utilization, 1e-9)
-	require.InDelta(t, 0.02, got[account].FiveHour.Utilization, 1e-9)
-}
-
 func TestMarketDeviceBudgetAfterMaintenanceThenPlainAdmissions(t *testing.T) {
 	cache, ctx := newMarketIdentityCache(t)
 	full := service.ErrClaudeOAuthCarpoolDevicesFull
@@ -400,25 +342,6 @@ func TestMarketDeviceBudgetAfterMaintenanceThenPlainAdmissions(t *testing.T) {
 	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
 	require.NoError(t, marketDevice(t, cache, ctx, 65, "b0", 10, &p, buyer))
 	require.ErrorIs(t, marketDevice(t, cache, ctx, 65, "b1", 10, &p, buyer), full, "plain admissions count as buyer ones: 2 + 1 = Q - Rq")
-}
-
-func TestMarketUsageLateResponseNeverSetsUltraFlag(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMarketUsageCache(testRedis(t))
-	now := time.Now().Unix()
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 73, service.MarketUsageObservations{
-		SevenDay:       &service.MarketUsageObservation{Utilization: 0.3, ResetAt: now + 6*24*3600, ObservedAt: now},
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: false, ObservedAt: now},
-	}))
-	// A late response from the previous weekly window claims "no 5h window".
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 73, service.MarketUsageObservations{
-		SevenDay:       &service.MarketUsageObservation{Utilization: 0.1, ResetAt: now - 3600, ObservedAt: now + 2},
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now + 2},
-	}))
-	got, err := cache.GetMarketUsageObservations(ctx, []int64{73})
-	require.NoError(t, err)
-	require.False(t, got[73].FiveHourAbsent.Absent)
-	require.InDelta(t, 0.3, got[73].SevenDay.Utilization, 1e-9)
 }
 
 func TestMarketDeviceBudgetUnlistRelistSameCycle(t *testing.T) {
@@ -437,44 +360,3 @@ func TestMarketDeviceBudgetUnlistRelistSameCycle(t *testing.T) {
 	require.NoError(t, marketDevice(t, cache, ctx, 66, "o0", 10, &p, service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}))
 }
 
-func TestMarketUsageReplayedHas5hClearsUltraDespiteOldWindow(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMarketUsageCache(testRedis(t))
-	now := time.Now().Unix()
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 74, service.MarketUsageObservations{
-		SevenDay:       &service.MarketUsageObservation{Utilization: 0.3, ResetAt: now + 6*24*3600, ObservedAt: now},
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: now},
-	}))
-	// A replayed old-week 7d merged with a fresh "has a 5h window" signal.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 74, service.MarketUsageObservations{
-		SevenDay:       &service.MarketUsageObservation{Utilization: 0.2, ResetAt: now - 3600, ObservedAt: now - 7200},
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: false, ObservedAt: now + 3},
-	}))
-	got, err := cache.GetMarketUsageObservations(ctx, []int64{74})
-	require.NoError(t, err)
-	require.False(t, got[74].FiveHourAbsent.Absent, "the conservative flag is never blocked by an old window")
-}
-
-func TestMarketUsageLateAbsenceDuringLiveWindowNotStored(t *testing.T) {
-	ctx := context.Background()
-	cache := NewMarketUsageCache(testRedis(t))
-	t0 := time.Now().Unix()
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 75, service.MarketUsageObservations{
-		FiveHour: &service.MarketUsageObservation{Utilization: 0.9, ResetAt: t0 + 4*3600, ObservedAt: t0},
-		SevenDay: &service.MarketUsageObservation{Utilization: 0.3, ResetAt: t0 + 3*24*3600, ObservedAt: t0},
-	}))
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 75, service.MarketUsageObservations{
-		SevenDay:       &service.MarketUsageObservation{Utilization: 0.3, ResetAt: t0 + 3*24*3600, ObservedAt: t0 + 300},
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: t0 + 300},
-	}))
-	got, err := cache.GetMarketUsageObservations(ctx, []int64{75})
-	require.NoError(t, err)
-	require.Nil(t, got[75].FiveHourAbsent, "an absence while the known 5h window runs is late and not stored")
-	// After that window ended, an absence is accepted.
-	require.NoError(t, cache.RecordMarketUsageObservations(ctx, 75, service.MarketUsageObservations{
-		FiveHourAbsent: &service.MarketFiveHourAbsence{Absent: true, ObservedAt: t0 + 4*3600 + 60},
-	}))
-	got, err = cache.GetMarketUsageObservations(ctx, []int64{75})
-	require.NoError(t, err)
-	require.True(t, got[75].FiveHourAbsent.Absent)
-}

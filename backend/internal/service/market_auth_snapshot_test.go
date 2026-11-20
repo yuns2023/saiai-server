@@ -55,7 +55,6 @@ func TestAuthSnapshotRoundTripsMarketTier(t *testing.T) {
 func TestMarketClassificationWithAuthSnapshotGroup(t *testing.T) {
 	env := newMarketEnv(t, nil)
 	listed := mktListedAccount(1)
-	env.usage.obs[1] = freshObservations()
 
 	classify := func(group *Group) string {
 		gid := group.ID

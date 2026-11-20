@@ -475,7 +475,7 @@ const handleSave = async () => {
     emit('success')
     emit('close')
   } catch (error) {
-    // A zero override on a sharing tier is refused (MARKET_TIER_RATE_OVERRIDE): say why.
+    // A negative override on a sharing tier is refused (MARKET_TIER_RATE_OVERRIDE): say why.
     appStore.showError(marketErrorCode(error) ? marketErrorText(error, t, t('admin.groups.failedToSave')) : t('admin.groups.failedToSave'))
     console.error('Error saving rate multipliers:', error)
   } finally {

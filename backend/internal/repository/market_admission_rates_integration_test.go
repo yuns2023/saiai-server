@@ -53,3 +53,54 @@ func TestMarketAdmissionReadsGroupRates(t *testing.T) {
 	require.ErrorContains(t, err, "model_rate_multipliers")
 	require.Equal(t, before, admissionCount(t, acc))
 }
+
+// The buyer admission also reads the buyer's own user rate override on the
+// tier in its snapshot (a zero override is allowed since migration 136 and
+// makes the sale unpriced; another user's override is never used).
+func TestMarketAdmissionReadsBuyerRateOverride(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	owner, buyer, other := f.user(t), f.user(t), f.user(t)
+	tier := f.group(t, true)
+	acc := f.account(t, owner)
+	f.configure(t, acc, tier)
+	_, err := f.list(acc, owner, tier)
+	require.NoError(t, err)
+	rates := &userGroupRateRepository{sql: integrationDB}
+	sel := buyerSelection(t, f, acc, tier, owner)
+
+	seen := func() *service.MarketAuthoritativeFacts {
+		t.Helper()
+		req := buyerRequest(acc, tier, buyer)
+		var facts *service.MarketAuthoritativeFacts
+		_, err := f.market.AdmitMarketCandidate(ctx, req, func(fa *service.MarketAuthoritativeFacts) string {
+			facts = fa
+			return "probe" // refuse: nothing inserted
+		})
+		require.NoError(t, err)
+		require.NotNil(t, facts)
+		return facts
+	}
+	require.Nil(t, seen().BuyerRateOverride, "no override row")
+
+	zero := 0.0
+	require.NoError(t, rates.SyncUserGroupRates(ctx, other, map[int64]*float64{tier: &zero}))
+	require.Nil(t, seen().BuyerRateOverride, "another user's override is not the buyer's")
+
+	require.NoError(t, rates.SyncUserGroupRates(ctx, buyer, map[int64]*float64{tier: &zero}))
+	got := seen().BuyerRateOverride
+	require.NotNil(t, got)
+	require.Zero(t, *got)
+
+	positive := 1.25
+	require.NoError(t, rates.SyncUserGroupRates(ctx, buyer, map[int64]*float64{tier: &positive}))
+	got = seen().BuyerRateOverride
+	require.NotNil(t, got)
+	require.InDelta(t, 1.25, *got, 1e-9)
+	req := buyerRequest(acc, tier, buyer)
+	verdict, err := f.market.AdmitMarketCandidate(ctx, req, func(facts *service.MarketAuthoritativeFacts) string {
+		return service.EvaluateMarketAdmission(sel, req, facts)
+	})
+	require.NoError(t, err)
+	require.True(t, verdict.Admitted, verdict.Reason)
+}

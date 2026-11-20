@@ -96,7 +96,7 @@ func jsonKeys(t *testing.T, raw json.RawMessage) []string {
 func TestOwnerMarketHandlerJSONAndAuth(t *testing.T) {
 	repo := &ownerMarketRepo{owner: 7, listing: &service.MarketListing{AccountID: 11, OwnerUserID: 7, AllowedGroupIDs: []int64{3},
 		Status: service.MarketListingStatusUnlisted, Version: 1,
-		Protection: service.MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1, Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}}}
+		Protection: service.MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1}}}
 
 	w := httptest.NewRecorder()
 	newOwnerMarketRouter(repo, 7).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/hosted/owned-accounts/11/market", nil))
@@ -116,8 +116,7 @@ func TestOwnerMarketHandlerJSONAndAuth(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body.Data, &view))
 	require.True(t, view.CanList)
 	require.Equal(t, []string{"admin_member", "available", "group_id", "name", "rate_multiplier"}, jsonKeys(t, view.AllowedTiers[0]))
-	require.Equal(t, []string{"cap_5h_pct", "cap_7d_pct", "reserved_admissions", "reserved_concurrency", "reserved_devices",
-		"sample_max_age_minutes"}, jsonKeys(t, view.Protection))
+	require.Equal(t, []string{"reserved_admissions", "reserved_concurrency", "reserved_devices"}, jsonKeys(t, view.Protection))
 
 	// Another user: 404 on read and write, nothing changed.
 	for _, req := range []*http.Request{

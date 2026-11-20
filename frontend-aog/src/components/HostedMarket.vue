@@ -187,9 +187,7 @@ const hasText = (key: string) => te(key)
             t('market.protection', {
               concurrency: protection.reserved_concurrency,
               devices: protection.reserved_devices,
-              admissions: protection.reserved_admissions,
-              cap5h: protection.cap_5h_pct,
-              cap7d: protection.cap_7d_pct
+              admissions: protection.reserved_admissions
             })
           }}
         </template>

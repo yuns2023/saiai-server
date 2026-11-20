@@ -28,9 +28,6 @@ type marketListingRequest struct {
 	ReservedConcurrency *int     `json:"reserved_concurrency"`
 	ReservedDevices     *int     `json:"reserved_devices"`
 	ReservedAdmissions  *int     `json:"reserved_admissions"`
-	Cap5hPct            *int     `json:"cap_5h_pct"`
-	Cap7dPct            *int     `json:"cap_7d_pct"`
-	SampleMaxAgeMinutes *int     `json:"sample_max_age_minutes"`
 }
 
 func marketListingAccountID(c *gin.Context) (int64, bool) {
@@ -79,9 +76,6 @@ func (h *MarketListingHandler) Put(c *gin.Context) {
 		ReservedConcurrency: req.ReservedConcurrency,
 		ReservedDevices:     req.ReservedDevices,
 		ReservedAdmissions:  req.ReservedAdmissions,
-		Cap5hPct:            req.Cap5hPct,
-		Cap7dPct:            req.Cap7dPct,
-		SampleMaxAgeMinutes: req.SampleMaxAgeMinutes,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

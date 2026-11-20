@@ -2010,10 +2010,7 @@ const form = reactive<SettingsForm>({
   market_min_convert_usd: 1,
   market_default_reserved_concurrency: 1,
   market_default_reserved_devices: 2,
-  market_default_reserved_admissions: 1,
-  market_default_cap_5h_pct: 70,
-  market_default_cap_7d_pct: 60,
-  market_default_sample_max_age_minutes: 30
+  market_default_reserved_admissions: 1
 })
 
 /* ---------- Sharing market ---------- */
@@ -2021,17 +2018,11 @@ type MarketDefaultKey =
   | 'market_default_reserved_concurrency'
   | 'market_default_reserved_devices'
   | 'market_default_reserved_admissions'
-  | 'market_default_cap_5h_pct'
-  | 'market_default_cap_7d_pct'
-  | 'market_default_sample_max_age_minutes'
 
 const MARKET_DEFAULT_PARAMS = [
   'reserved_concurrency',
   'reserved_devices',
-  'reserved_admissions',
-  'cap_5h_pct',
-  'cap_7d_pct',
-  'sample_max_age_minutes'
+  'reserved_admissions'
 ] as const
 
 const marketDefaultFields = computed<Array<{ key: MarketDefaultKey; label: string; min: number; max: number }>>(() =>
@@ -2048,10 +2039,7 @@ const MARKET_NUMBER_KEYS = [
   'market_min_convert_usd',
   'market_default_reserved_concurrency',
   'market_default_reserved_devices',
-  'market_default_reserved_admissions',
-  'market_default_cap_5h_pct',
-  'market_default_cap_7d_pct',
-  'market_default_sample_max_age_minutes'
+  'market_default_reserved_admissions'
 ] as const
 type MarketNumberKey = (typeof MARKET_NUMBER_KEYS)[number]
 /** Market values as last read from (or saved to) the server. */

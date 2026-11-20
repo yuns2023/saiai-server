@@ -74,8 +74,7 @@ func newMarketListingRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCa
 }
 
 const marketListingColumns = `account_id, owner_user_id, allowed_group_ids, selected_group_id, status, version,
-	reserved_concurrency, reserved_devices, reserved_admissions, cap_5h_pct, cap_7d_pct,
-	sample_max_age_minutes, listed_at, created_at, updated_at`
+	reserved_concurrency, reserved_devices, reserved_admissions, listed_at, created_at, updated_at`
 
 func scanMarketListing(rows *sql.Rows) (*service.MarketListing, error) {
 	var (
@@ -86,7 +85,6 @@ func scanMarketListing(rows *sql.Rows) (*service.MarketListing, error) {
 	)
 	if err := rows.Scan(&l.AccountID, &l.OwnerUserID, &allowed, &selected, &l.Status, &l.Version,
 		&l.Protection.ReservedConcurrency, &l.Protection.ReservedDevices, &l.Protection.ReservedAdmissions,
-		&l.Protection.Cap5hPct, &l.Protection.Cap7dPct, &l.Protection.SampleMaxAgeMinutes,
 		&listedAt, &l.CreatedAt, &l.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -293,6 +291,10 @@ func lockMarketAccountTx(ctx context.Context, q sqlQueryer, accountID int64) (*s
 }
 
 // insertMarketListingEventTx appends the current row as a history entry.
+// The retired share-cap columns (cap_5h_pct, cap_7d_pct,
+// sample_max_age_minutes) are NOT NULL without a default in the event table,
+// so they are still copied from the listing row (kept for rollback to the
+// previous binary; nothing reads them).
 func insertMarketListingEventTx(ctx context.Context, exec sqlExecutor, accountID int64, action, actorRole string, actorUserID int64) error {
 	var actor any
 	if actorUserID > 0 {
@@ -579,12 +581,10 @@ func (r *marketListingRepository) AdminConfigure(ctx context.Context, p service.
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO account_market_listings (
 				account_id, owner_user_id, allowed_group_ids, status, version,
-				reserved_concurrency, reserved_devices, reserved_admissions,
-				cap_5h_pct, cap_7d_pct, sample_max_age_minutes)
-			VALUES ($1, $2, $3, 'unlisted', 1, $4, $5, $6, $7, $8, $9)`,
+				reserved_concurrency, reserved_devices, reserved_admissions)
+			VALUES ($1, $2, $3, 'unlisted', 1, $4, $5, $6)`,
 			p.AccountID, owner, pq.Array(p.AllowedGroupIDs),
-			params.ReservedConcurrency, params.ReservedDevices, params.ReservedAdmissions,
-			params.Cap5hPct, params.Cap7dPct, params.SampleMaxAgeMinutes); err != nil {
+			params.ReservedConcurrency, params.ReservedDevices, params.ReservedAdmissions); err != nil {
 			return nil, err
 		}
 	} else {
@@ -621,12 +621,10 @@ func (r *marketListingRepository) AdminConfigure(ctx context.Context, p service.
 			UPDATE account_market_listings SET
 				owner_user_id = $2, allowed_group_ids = $3, selected_group_id = $4, status = $5,
 				reserved_concurrency = $6, reserved_devices = $7, reserved_admissions = $8,
-				cap_5h_pct = $9, cap_7d_pct = $10, sample_max_age_minutes = $11,
 				version = version + 1, updated_at = NOW()
 			WHERE account_id = $1`,
 			p.AccountID, owner, pq.Array(p.AllowedGroupIDs), selectedArg, status,
-			params.ReservedConcurrency, params.ReservedDevices, params.ReservedAdmissions,
-			params.Cap5hPct, params.Cap7dPct, params.SampleMaxAgeMinutes); err != nil {
+			params.ReservedConcurrency, params.ReservedDevices, params.ReservedAdmissions); err != nil {
 			return nil, err
 		}
 	}
@@ -1006,6 +1004,17 @@ func (r *marketListingRepository) admitMarketOnce(ctx context.Context, in *servi
 				return nil, fmt.Errorf("market admission: decode model_rate_multipliers of group %d: %w", in.GroupID, err)
 			}
 		}
+	}
+	// The buyer's own rate override on the group (a 0 override on a tier is
+	// allowed and makes the sale unpriced).
+	var override sql.NullFloat64
+	if err := scanSingleRow(ctx, tx, `SELECT rate_multiplier FROM user_group_rate_multipliers
+		WHERE user_id = $1 AND group_id = $2`, []any{in.BuyerUserID, in.GroupID}, &override); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if override.Valid {
+		v := override.Float64
+		state.BuyerRateOverride = &v
 	}
 	if err := scanSingleRow(ctx, tx, `SELECT
 			COALESCE(bool_or(source = 'admin'), FALSE), COALESCE(bool_or(source = 'market'), FALSE), clock_timestamp()

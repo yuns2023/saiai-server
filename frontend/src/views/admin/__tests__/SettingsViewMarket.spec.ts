@@ -58,10 +58,7 @@ const market = {
   market_min_convert_usd: 1,
   market_default_reserved_concurrency: 1,
   market_default_reserved_devices: 2,
-  market_default_reserved_admissions: 1,
-  market_default_cap_5h_pct: 70,
-  market_default_cap_7d_pct: 60,
-  market_default_sample_max_age_minutes: 30
+  market_default_reserved_admissions: 1
 }
 
 function stored(over: Record<string, unknown> = {}) {
@@ -141,7 +138,7 @@ describe('admin settings: sharing market', () => {
     await w.get('[data-testid=market-min-convert]').setValue('1.005')
     await save(w)
     await w.get('[data-testid=market-min-convert]').setValue('1')
-    await w.get('[data-testid=market-default-market_default_cap_5h_pct]').setValue('0')
+    await w.get('[data-testid=market-default-market_default_reserved_devices]').setValue('33')
     await save(w)
     expect(settingsApi.updateSettings).not.toHaveBeenCalled()
     expect(appStore.showError).toHaveBeenCalledWith('market.settings.invalidField')

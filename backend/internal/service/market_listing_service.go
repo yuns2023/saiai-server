@@ -77,9 +77,6 @@ type AdminMarketListingInput struct {
 	ReservedConcurrency *int
 	ReservedDevices     *int
 	ReservedAdmissions  *int
-	Cap5hPct            *int
-	Cap7dPct            *int
-	SampleMaxAgeMinutes *int
 }
 
 func (in AdminMarketListingInput) merge(base MarketProtectionParams) MarketProtectionParams {
@@ -91,9 +88,6 @@ func (in AdminMarketListingInput) merge(base MarketProtectionParams) MarketProte
 	set(&base.ReservedConcurrency, in.ReservedConcurrency)
 	set(&base.ReservedDevices, in.ReservedDevices)
 	set(&base.ReservedAdmissions, in.ReservedAdmissions)
-	set(&base.Cap5hPct, in.Cap5hPct)
-	set(&base.Cap7dPct, in.Cap7dPct)
-	set(&base.SampleMaxAgeMinutes, in.SampleMaxAgeMinutes)
 	return base
 }
 

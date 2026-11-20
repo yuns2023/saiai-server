@@ -62,7 +62,6 @@ const (
 	marketRegistryPollInterval   = 2 * time.Second
 	marketAdmissionTimeout       = 3 * time.Second
 	marketAdmissionConfirmWindow = 2 * time.Second
-	marketObservationReadTimeout = 500 * time.Millisecond
 )
 
 var (
@@ -123,33 +122,6 @@ func (m *MarketSelection) IsBuyer() bool { return m != nil && m.Class == MarketC
 type MarketDispatchState struct {
 	Enabled          bool
 	ListedAccountIDs []int64
-}
-
-// MarketUsageObservation is one window observation (utilization ratio, the
-// window end and the observation time, unix seconds).
-type MarketUsageObservation struct {
-	Utilization float64
-	ResetAt     int64
-	ObservedAt  int64
-}
-
-// MarketFiveHourAbsence is the latest "no 5h window" observation (Ultra).
-type MarketFiveHourAbsence struct {
-	Absent     bool
-	ObservedAt int64
-}
-
-type MarketUsageObservations struct {
-	FiveHour       *MarketUsageObservation
-	SevenDay       *MarketUsageObservation
-	FiveHourAbsent *MarketFiveHourAbsence
-}
-
-// MarketUsageObservationCache stores observations per window; writes never
-// replace a newer observation with an older one.
-type MarketUsageObservationCache interface {
-	RecordMarketUsageObservations(ctx context.Context, accountID int64, obs MarketUsageObservations) error
-	GetMarketUsageObservations(ctx context.Context, accountIDs []int64) (map[int64]*MarketUsageObservations, error)
 }
 
 // MarketSlotCache is the dual slot set (total + buyer) of listed accounts.
@@ -220,6 +192,9 @@ type MarketAuthoritativeFacts struct {
 	// is seen.
 	GroupRate       float64
 	GroupModelRates map[string]float64
+	// BuyerRateOverride: the buyer's user rate override on the group in the
+	// same snapshot (nil = none); it replaces GroupRate when present.
+	BuyerRateOverride *float64
 }
 
 type MarketAdmissionVerdict struct {
@@ -243,7 +218,6 @@ type MarketDispatchStore interface {
 // MarketRuntime holds the process-wide market dispatch state.
 type MarketRuntime struct {
 	store MarketDispatchStore
-	usage MarketUsageObservationCache
 
 	mu       sync.RWMutex
 	enabled  bool
@@ -252,19 +226,15 @@ type MarketRuntime struct {
 	lastWarn time.Time
 	// pending: listings started in this process and not yet confirmed by a
 	// poll that began after they ended (treated as listed meanwhile).
-	pending map[int64]map[uint64]*marketPendingListing
-	// usageDirty: observations whose write failed, kept (merged) and
-	// replayed with the next write; the account is not sellable until a
-	// write that includes them succeeds.
-	usageDirty map[int64]*marketDirtyUsage
-	stopOnce   sync.Once
-	stop       chan struct{}
+	pending  map[int64]map[uint64]*marketPendingListing
+	stopOnce sync.Once
+	stop     chan struct{}
 }
 
 // NewMarketRuntime creates the runtime; Start begins polling.
-func NewMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
-	return &MarketRuntime{store: store, usage: usage, listed: map[int64]struct{}{}, stop: make(chan struct{}),
-		pending: map[int64]map[uint64]*marketPendingListing{}, usageDirty: map[int64]*marketDirtyUsage{}}
+func NewMarketRuntime(store MarketDispatchStore) *MarketRuntime {
+	return &MarketRuntime{store: store, listed: map[int64]struct{}{}, stop: make(chan struct{}),
+		pending: map[int64]map[uint64]*marketPendingListing{}}
 }
 
 // marketPendingListing: one entry per listing transaction (token); the
@@ -322,100 +292,10 @@ func (r *MarketRuntime) EndListing(accountID int64, token uint64) {
 	r.mu.Unlock()
 }
 
-type marketDirtyUsage struct {
-	obs MarketUsageObservations
-	gen uint64
-}
-
-// marketDirtyGen is monotonic across entries (a cleared and re-created
-// entry never reuses a generation an in-flight write captured).
-var marketDirtyGen atomic.Uint64
-
-// takeUsageForWrite merges the failed observations of the account into obs
-// and returns the dirty generation included.
-func (r *MarketRuntime) takeUsageForWrite(accountID int64, obs MarketUsageObservations) (MarketUsageObservations, uint64) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	d := r.usageDirty[accountID]
-	if d == nil {
-		return obs, 0
-	}
-	return mergeMarketObservations(d.obs, obs), d.gen
-}
-
-// usageWriteDone records a write outcome: a failure keeps (merges) the
-// observations for replay; a success clears them only if no newer failure
-// was recorded meanwhile.
-func (r *MarketRuntime) usageWriteDone(accountID int64, obs MarketUsageObservations, includedGen uint64, err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	d := r.usageDirty[accountID]
-	if err != nil {
-		if d == nil {
-			d = &marketDirtyUsage{}
-			r.usageDirty[accountID] = d
-		}
-		d.obs = mergeMarketObservations(d.obs, obs)
-		d.gen = marketDirtyGen.Add(1)
-		return
-	}
-	if d != nil && d.gen == includedGen {
-		delete(r.usageDirty, accountID)
-	}
-}
-
-// mergeMarketObservations keeps, per window, the later window or the higher
-// utilization of the same window, and the later absence observation.
-func mergeMarketObservations(a, b MarketUsageObservations) MarketUsageObservations {
-	pick := func(x, y *MarketUsageObservation) *MarketUsageObservation {
-		switch {
-		case x == nil:
-			return y
-		case y == nil:
-			return x
-		case x.ResetAt != y.ResetAt:
-			if x.ResetAt > y.ResetAt {
-				return x
-			}
-			return y
-		}
-		out := *x
-		out.Utilization = math.Max(x.Utilization, y.Utilization)
-		out.ObservedAt = max64(x.ObservedAt, y.ObservedAt)
-		return &out
-	}
-	out := MarketUsageObservations{FiveHour: pick(a.FiveHour, b.FiveHour), SevenDay: pick(a.SevenDay, b.SevenDay)}
-	// The merged 7d may come from another response than an "absent" flag;
-	// only the conservative "has a 5h window" survives a merge.
-	for _, f := range []*MarketFiveHourAbsence{a.FiveHourAbsent, b.FiveHourAbsent} {
-		if f != nil && !f.Absent && (out.FiveHourAbsent == nil || f.ObservedAt > out.FiveHourAbsent.ObservedAt) {
-			out.FiveHourAbsent = f
-		}
-	}
-	return out
-}
-
-func max64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func (r *MarketRuntime) usageIsDirty(accountID int64) bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	_, ok := r.usageDirty[accountID]
-	r.mu.RUnlock()
-	return ok
-}
-
 // ProvideMarketRuntime loads the registry (retrying briefly) and starts the
 // poller.
-func ProvideMarketRuntime(store MarketDispatchStore, usage MarketUsageObservationCache) *MarketRuntime {
-	rt := NewMarketRuntime(store, usage)
+func ProvideMarketRuntime(store MarketDispatchStore) *MarketRuntime {
+	rt := NewMarketRuntime(store)
 	for attempt := 0; attempt < 10 && !rt.Refresh(context.Background()); attempt++ {
 		time.Sleep(2 * time.Second)
 	}
@@ -551,11 +431,6 @@ func (r *MarketRuntime) marketAccountListed(account *Account) bool {
 	return !r.loaded && account.OwnerUserID != nil
 }
 
-// ShouldRecordUsage: observations are kept only for listed accounts.
-func (r *MarketRuntime) ShouldRecordUsage(account *Account) bool {
-	return r != nil && r.usage != nil && account != nil && account.IsAnthropicOAuthOrSetupToken() && r.marketAccountListed(account)
-}
-
 // ---------------------------------------------------------------------------
 // Request context
 
@@ -570,7 +445,6 @@ type MarketDispatch struct {
 
 	mu        sync.Mutex
 	leases    map[int64]string
-	obs       map[int64]*MarketUsageObservations
 	priceKey  string
 	priceSnap *MarketPriceSnapshot
 	priceDone bool
@@ -817,10 +691,6 @@ func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Acco
 	if _, ok := s.marketPrice(ctx, dispatch, group, marketRequestedModelFromContext(ctx)); !ok {
 		return nil, "not_priced"
 	}
-	obs := s.marketObservations(ctx, dispatch, account.ID, false)
-	if reason := evaluateMarketShareCaps(obs, listing.Protection, time.Now()); reason != "" {
-		return nil, reason
-	}
 	return sel, ""
 }
 
@@ -834,9 +704,9 @@ func marketDevicePolicy(a *Account) (limit int, budget bool, admissions int, gen
 	return limit, false, 0, ""
 }
 
-// marketFilterCandidates drops excluded candidates (and prefetches buyer
-// observations in one round trip). Accounts with class none pass untouched;
-// when no candidate is market-related the input slice is returned as is.
+// marketFilterCandidates drops excluded candidates. Accounts with class none
+// pass untouched; when no candidate is market-related the input slice is
+// returned as is.
 func (s *GatewayService) marketFilterCandidates(ctx context.Context, accounts []Account, groupID *int64) []Account {
 	if len(accounts) == 0 {
 		return accounts
@@ -854,15 +724,6 @@ func (s *GatewayService) marketFilterCandidates(ctx context.Context, accounts []
 		if !anyListed {
 			return accounts
 		}
-	}
-	if dispatch := marketDispatchFromContext(ctx); dispatch != nil && tier {
-		var buyers []int64
-		for i := range accounts {
-			if slices.Contains(accounts[i].MarketGroupIDs, group.ID) {
-				buyers = append(buyers, accounts[i].ID)
-			}
-		}
-		s.prefetchMarketObservations(ctx, dispatch, buyers)
 	}
 	countTokens := tier && marketCountTokensSelection(ctx)
 	out := make([]Account, 0, len(accounts))
@@ -921,131 +782,6 @@ func (s *GatewayService) marketSelectionChanged(ctx context.Context, selected, f
 func mustMarketGroup(ctx context.Context) *int64 {
 	id, _ := marketSelectionGroupFromContext(ctx)
 	return id
-}
-
-// ---------------------------------------------------------------------------
-// Share caps
-
-// evaluateMarketShareCaps returns "" when the observations allow selling:
-// 7d always, 5h unless the latest reliable observation says the account has
-// no 5h window (Ultra). Unknown, stale (> sample max age), future-dated or
-// non-finite observations stop selling, and so does utilization >= cap.
-// A window whose reset has passed (while its observation is still fresh)
-// counts as a new, empty window.
-func evaluateMarketShareCaps(obs *MarketUsageObservations, p MarketProtectionParams, now time.Time) string {
-	if obs == nil {
-		return "sample_unknown"
-	}
-	maxAge := time.Duration(p.SampleMaxAgeMinutes) * time.Minute
-	if maxAge <= 0 {
-		return "sample_unknown"
-	}
-	fresh := func(at int64) bool {
-		if at <= 0 {
-			return false
-		}
-		t := time.Unix(at, 0)
-		return !t.After(now) && now.Sub(t) <= maxAge
-	}
-	window := func(w *MarketUsageObservation, capPct int, name string) string {
-		if w == nil {
-			return name + "_unknown"
-		}
-		if !fresh(w.ObservedAt) {
-			return name + "_stale"
-		}
-		u := w.Utilization
-		if math.IsNaN(u) || math.IsInf(u, 0) || u < 0 || u > anthropicUtilizationMaxRatio {
-			return name + "_invalid"
-		}
-		if w.ResetAt > 0 && !time.Unix(w.ResetAt, 0).After(now) {
-			u = 0
-		}
-		if u >= float64(capPct)/100 {
-			return name + "_cap"
-		}
-		return ""
-	}
-	if reason := window(obs.SevenDay, p.Cap7dPct, "7d"); reason != "" {
-		return reason
-	}
-	// Ultra ("no 5h window") counts only while no fresh 5h sample of a
-	// still-running window contradicts it (a late absence report never
-	// overrides a known 5h window).
-	// An absence observed while a known 5h window was still running (its
-	// reset after the absence) is a late report: ignored, so a stale 5h
-	// sample keeps the account unsellable until a new observation.
-	if a := obs.FiveHourAbsent; a != nil && a.Absent && fresh(a.ObservedAt) &&
-		(obs.FiveHour == nil || (a.ObservedAt > obs.FiveHour.ObservedAt && obs.FiveHour.ResetAt <= a.ObservedAt)) &&
-		(obs.FiveHour == nil || !fresh(obs.FiveHour.ObservedAt) || !time.Unix(obs.FiveHour.ResetAt, 0).After(now)) {
-		return ""
-	}
-	return window(obs.FiveHour, p.Cap5hPct, "5h")
-}
-
-func (s *GatewayService) prefetchMarketObservations(ctx context.Context, d *MarketDispatch, ids []int64) {
-	if s.market == nil || s.market.usage == nil || d == nil || len(ids) == 0 {
-		return
-	}
-	d.mu.Lock()
-	missing := make([]int64, 0, len(ids))
-	for _, id := range ids {
-		if _, ok := d.obs[id]; !ok {
-			missing = append(missing, id)
-		}
-	}
-	d.mu.Unlock()
-	if len(missing) == 0 {
-		return
-	}
-	readCtx, cancel := context.WithTimeout(ctx, marketObservationReadTimeout)
-	defer cancel()
-	got, err := s.market.usage.GetMarketUsageObservations(readCtx, missing)
-	if err != nil {
-		logger.LegacyPrintf("service.market", "Warning: market usage observations read failed: %v", err)
-		return
-	}
-	d.mu.Lock()
-	if d.obs == nil {
-		d.obs = make(map[int64]*MarketUsageObservations, len(got))
-	}
-	for id, v := range got {
-		d.obs[id] = v
-	}
-	d.mu.Unlock()
-}
-
-// marketObservations returns the account's observations; fresh bypasses the
-// per-request cache (final admission).
-func (s *GatewayService) marketObservations(ctx context.Context, d *MarketDispatch, accountID int64, fresh bool) *MarketUsageObservations {
-	if s.market == nil || s.market.usage == nil || s.market.usageIsDirty(accountID) {
-		return nil
-	}
-	if !fresh && d != nil {
-		d.mu.Lock()
-		v, ok := d.obs[accountID]
-		d.mu.Unlock()
-		if ok {
-			return v
-		}
-	}
-	readCtx, cancel := context.WithTimeout(ctx, marketObservationReadTimeout)
-	defer cancel()
-	got, err := s.market.usage.GetMarketUsageObservations(readCtx, []int64{accountID})
-	if err != nil {
-		logger.LegacyPrintf("service.market", "Warning: market usage observations read failed: %v", err)
-		return nil
-	}
-	v := got[accountID]
-	if !fresh && d != nil {
-		d.mu.Lock()
-		if d.obs == nil {
-			d.obs = map[int64]*MarketUsageObservations{}
-		}
-		d.obs[accountID] = v
-		d.mu.Unlock()
-	}
-	return v
 }
 
 // ---------------------------------------------------------------------------
@@ -1125,17 +861,24 @@ func (s *GatewayService) computeMarketPrice(ctx context.Context, d *MarketDispat
 	return snap, true
 }
 
-// marketSnapshotGroupPriced: the tier's rate and the model's rate factor as
-// stored in the admission snapshot are both positive. Sellability only: the
-// request-start price check (computeMarketPrice, the group the charge uses)
-// must also pass, and the charge itself follows ordinary billing. A user
-// rate override on a tier is kept > 0 by the database (market_tier_rate_guard).
+// marketSnapshotGroupPriced: the buyer's effective group rate (the user rate
+// override if one exists, else the tier's rate) and the model's rate factor
+// as stored in the admission snapshot are both positive. Sellability only:
+// the request-start price check (computeMarketPrice, the group the charge
+// uses) must also pass, and the charge itself follows ordinary billing. A
+// user rate override of 0 on a tier is allowed (free self-use, migration
+// 136); it is re-read here so a cached positive rate at request start never
+// admits a sale.
 func marketSnapshotGroupPriced(f *MarketAuthoritativeFacts, model string) bool {
 	if f == nil {
 		return false
 	}
+	rate := f.GroupRate
+	if f.BuyerRateOverride != nil {
+		rate = *f.BuyerRateOverride
+	}
 	modelRate := (&Group{ModelRateMultipliers: f.GroupModelRates}).ModelRateFor(model)
-	for _, v := range []float64{f.GroupRate, modelRate} {
+	for _, v := range []float64{rate, modelRate} {
 		if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
 			return false
 		}
@@ -1422,9 +1165,6 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		}
 		if !ok {
 			logMarketAdmission(ctx, sel, "not_priced", nil)
-			return ErrMarketAdmissionRejected
-		}
-		if reason := evaluateMarketShareCaps(s.marketObservations(ctx, dispatch, account.ID, true), sel.Protection, time.Now()); reason != "" {
 			return ErrMarketAdmissionRejected
 		}
 		attempt.Price = price

@@ -15,9 +15,6 @@ type marketSettingsRequest struct {
 	MarketDefaultReservedConcurrency *int     `json:"market_default_reserved_concurrency"`
 	MarketDefaultReservedDevices     *int     `json:"market_default_reserved_devices"`
 	MarketDefaultReservedAdmissions  *int     `json:"market_default_reserved_admissions"`
-	MarketDefaultCap5hPct            *int     `json:"market_default_cap_5h_pct"`
-	MarketDefaultCap7dPct            *int     `json:"market_default_cap_7d_pct"`
-	MarketDefaultSampleMaxAgeMinutes *int     `json:"market_default_sample_max_age_minutes"`
 }
 
 func (r *marketSettingsRequest) present() bool {
@@ -39,9 +36,6 @@ func (r *marketSettingsRequest) providedKeys() []string {
 	add(r.MarketDefaultReservedConcurrency != nil, service.SettingKeyMarketDefaultReservedConcurrency)
 	add(r.MarketDefaultReservedDevices != nil, service.SettingKeyMarketDefaultReservedDevices)
 	add(r.MarketDefaultReservedAdmissions != nil, service.SettingKeyMarketDefaultReservedAdmissions)
-	add(r.MarketDefaultCap5hPct != nil, service.SettingKeyMarketDefaultCap5hPct)
-	add(r.MarketDefaultCap7dPct != nil, service.SettingKeyMarketDefaultCap7dPct)
-	add(r.MarketDefaultSampleMaxAgeMinutes != nil, service.SettingKeyMarketDefaultSampleMaxAgeMinutes)
 	return keys
 }
 
@@ -81,9 +75,6 @@ func resolveMarketSettings(req *marketSettingsRequest, prev *service.SystemSetti
 		{"market_default_reserved_concurrency", req.MarketDefaultReservedConcurrency, &v.DefaultProtection.ReservedConcurrency, 0, service.MaxMarketReservedConcurrency},
 		{"market_default_reserved_devices", req.MarketDefaultReservedDevices, &v.DefaultProtection.ReservedDevices, 0, service.MaxMarketReservedDevices},
 		{"market_default_reserved_admissions", req.MarketDefaultReservedAdmissions, &v.DefaultProtection.ReservedAdmissions, 0, service.MaxMarketReservedAdmissions},
-		{"market_default_cap_5h_pct", req.MarketDefaultCap5hPct, &v.DefaultProtection.Cap5hPct, 1, 100},
-		{"market_default_cap_7d_pct", req.MarketDefaultCap7dPct, &v.DefaultProtection.Cap7dPct, 1, 100},
-		{"market_default_sample_max_age_minutes", req.MarketDefaultSampleMaxAgeMinutes, &v.DefaultProtection.SampleMaxAgeMinutes, 1, service.MaxMarketSampleMaxAgeMinutes},
 	}
 	for _, f := range ints {
 		if f.in == nil {

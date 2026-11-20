@@ -28,7 +28,9 @@ pricing (P3b) are not part of P3a.
 
 Code: Server #230 (schema, listing lifecycle, migration 134), #232
 (selection, reservations, final admission), #233 (atomic settlement, earnings
-wallet, reconcile, migration 135), #234 (UI). Design:
+wallet, reconcile, migration 135), #234 (UI), and the change that removed the
+share caps and allows zero user rate overrides on tiers (migration 136; see
+Quota and Price under [Buyer and dispatch](#buyer-and-dispatch)). Design:
 `merry-rolling-ladybug-p3-design.md` (sections R1/R2 override the body).
 Builds on [HOSTED_SELF_ONBOARD.md](HOSTED_SELF_ONBOARD.md) (P2c owner groups)
 and the P2b settlement events (migration 131).
@@ -63,16 +65,22 @@ and the P2b settlement events (migration 131).
    `rate_multiplier` > 0. It may not have its own `claude_code_only` or
    invalid-request fallback, and no other group's fallback may point into it
    (saving, promoting and every runtime hop are checked). Smart switch may
-   enter a tier; the sale is then priced at the tier. User rate overrides on
-   a tier must be > 0 at 4 decimal places. Tiers may be exclusive or public,
-   like any group; buyers bind keys to them as usual.
+   enter a tier; the sale is then priced at the tier. A user rate override
+   on a tier may be 0 (free self-use, for example the admin's own key): that
+   user's price is then zero, so their requests never use a listed account
+   and only the tier's platform accounts serve them (see Price under
+   [Buyer and dispatch](#buyer-and-dispatch)).
+   Negative overrides on a tier are refused (`MARKET_TIER_RATE_OVERRIDE`).
+   Tiers may be exclusive or public, like any group; buyers bind keys to
+   them as usual.
 2. **Allow an account.** Account action → 共享设置
    (`PUT /api/v1/admin/accounts/:id/market-listing`). The account needs an
    owner (`MARKET_ACCOUNT_NO_OWNER`) and must be eligible: anthropic
    setup-token, carpool mode with a finite device limit and finite
    concurrency, no account-level `max_sessions`, and for a self-onboarded
    account a live, active proxy. The admin sets the allowed tiers (up to 32)
-   and the protection parameters; omitted fields keep the stored value (site
+   and the protection parameters (`reserved_concurrency`, `reserved_devices`,
+   `reserved_admissions`); omitted fields keep the stored value (site
    defaults on create), explicit 0 is kept. Reservations must leave buyers at
    least one slot and one device: `reserved_concurrency ≤ C − 1`,
    `reserved_devices ≤ device limit − 1`, `reserved_admissions ≤` admissions
@@ -143,9 +151,8 @@ another user; every live member account (any source) is owned by the owner
 (an ownerless platform account fails). P2c groups (mapped by self-onboard
 approval) qualify, and so does an exclusive hosted group an admin builds for
 an admin-assigned (P1) owner: allow only the owner, put only that owner's
-accounts in it, and the owner's key of that group bootstraps the listed
-account (the owner's own use records the 5h/7d samples selling needs). An
-owner may have several such groups, each with its own fee rate. The check
+accounts in it, and the owner's key of that group uses the listed account
+through the owner path. An owner may have several such groups, each with its own fee rate. The check
 runs before the owner device registration (a refused candidate registers
 no device and uses no cycle admission) and again before the first send; a
 refusal or DB error fails over and is never downgraded to another path.
@@ -157,7 +164,9 @@ on, market membership, listing still listed in this tier with the same
 version, same owner and owner version, owner user active, account eligible
 and schedulable (status, expiry, rate limit, overload, pause/withdraw,
 proxy), same concurrency, reservations and device policy, the trusted-user
-and key allowlists, and the billed key group = the tier. It then inserts the
+and key allowlists, the billed key group = the tier, and a positive
+effective rate (the buyer's user rate override on the tier if there is one,
+else the tier rate) and model rate factor. It then inserts the
 `market_admissions` row. Owner and platform attempts run the same reads
 without writing a row. Any refusal fails over before upstream work; a DB
 error or unknown commit is confirmed by attempt id or the candidate is
@@ -182,21 +191,32 @@ add a device this cycle. An unidentified device or a registry error makes the
 buyer candidate fail over; on the owner path a registry error fails open (see
 limitations).
 
-**Share caps.** Per listed account the gateway stores 5h and 7d
-observations (utilization, reset, observed-at, plus a "no 5h window" flag)
-from the rate-limit headers of success and 429 responses. Selling stops when
-a needed sample is unknown, older than `sample_max_age_minutes`, in the
-future or non-finite, or when `utilization ≥ cap_5h_pct` / `cap_7d_pct`.
-Accounts with a reliable "no 5h window" signal (Ultra) need only 7d. A window
-whose reset has passed while its sample is still fresh counts as empty. Old
-`passive_usage_*` data is ignored, so a newly listed account sells only after
-a response on it (normally the owner's own use) produced a fresh observation.
+**Quota (no share caps).** No usage quota is reserved for the owner: a
+listed, otherwise eligible account sells as soon as it is listed, and its
+5h/7d quota is shared by the owner and the buyers. When the quota is used
+up, upstream answers 429 and the ordinary rate-limit handling takes the
+account out of scheduling until the reset, for buyers and owner alike, like
+any platform account. The owner keeps only the slot and device reservations
+above. (P3a first shipped 5h/7d share caps and a usage-sample freshness gate;
+they were removed. The columns `cap_5h_pct`, `cap_7d_pct` and
+`sample_max_age_minutes` of `account_market_listings` and
+`account_market_listing_events` stay in the schema, unused, so the previous
+binary still works after a rollback; the server no longer reads or sets
+them: new listings take the column defaults, history rows copy the row.
+The old Redis keys `market:usage_obs:{account}` are no longer written and
+expire on their own, at most 8 days after their last write.)
 
 **Price.** Before dispatch the buyer candidate needs a positive price: model
 as the setup-token account sends it, positive input/output price, effective
 group rate (user override included), model factor and user discount of the
 billed key ([BILLING_FACTORS.md](BILLING_FACTORS.md)). A zero or missing price
-excludes buyer candidates; platform candidates remain.
+excludes buyer candidates; platform candidates remain. The final admission
+re-reads the buyer's user rate override and the tier's rates in its own
+snapshot, so an override set to 0 while the request waited (or hidden by the
+gateway's rate cache) refuses the sale before any upstream send. This is
+why a zero override on a tier is safe: such a request never selects a
+listed account, writes no admission and no `shared_sale` event, and the
+owner earns nothing from it (it is a platform sale at price 0).
 
 **count_tokens in a tier** uses platform accounts only (anthropic, not
 Bedrock, not pinned), each re-checked in the database, with no Messages
@@ -223,12 +243,12 @@ reads as its default; an explicit 0 is kept wherever 0 is in range.
 | `market_default_reserved_concurrency` | 1 | 0–100 | Default `reserved_concurrency` (R) for new listings |
 | `market_default_reserved_devices` | 2 | 0–32 | Default `reserved_devices` |
 | `market_default_reserved_admissions` | 1 | 0–32 | Default `reserved_admissions` per cycle |
-| `market_default_cap_5h_pct` | 70 | 1–100 | Default 5h share cap (stop selling at ≥) |
-| `market_default_cap_7d_pct` | 60 | 1–100 | Default 7d share cap |
-| `market_default_sample_max_age_minutes` | 30 | 1–1440 | Default maximum sample age |
 
 The `market_default_*` values only seed new listings; per-listing values have
-the same static bounds plus the per-account bounds above.
+the same static bounds plus the per-account bounds above. Stored values of
+the removed keys `market_default_cap_5h_pct`, `market_default_cap_7d_pct`
+and `market_default_sample_max_age_minutes` are ignored (a request that
+still sends them is not an error; they are simply not read).
 
 ## API
 
@@ -280,7 +300,7 @@ purged by retention; the event columns are always present.
 | `HOSTED_ACCOUNT_NOT_FOUND` | 404 | Owner endpoint on an account the user does not currently own |
 | `INVALID_MARKET_TIER` | 400 | Group cannot be a tier (not standard / hosted / rate ≤ 0 / not anthropic) |
 | `MARKET_TIER_FALLBACK` | 400 | A fallback chain would enter or leave a tier |
-| `MARKET_TIER_RATE_OVERRIDE` | 400 | User rate override on a tier ≤ 0 at 4 decimals |
+| `MARKET_TIER_RATE_OVERRIDE` | 400 | Negative user rate override on a tier (0 is allowed) |
 | `MARKET_TIER_GUARD_UNAVAILABLE` | 503 | Tier checks could not run |
 | `MARKET_EARNING_INVALID_AMOUNT` | 400 | Convert amount not positive or > 2 decimals |
 | `MARKET_EARNING_INVALID_REQUEST_ID` | 400 | `request_id` is not a non-nil UUID |
@@ -376,6 +396,11 @@ earnings on one account. Each accrue can be reversed once.
   `owner_earning_entries`, insert-only and tier-guard triggers.
 - `135_market_admission_price.sql`: `usage_settlement_events.admission_price`
   JSONB, catalog-only (no default, no CHECK).
+- `136_market_tier_allow_zero_override.sql`: `CREATE OR REPLACE FUNCTION`
+  of the two tier-guard trigger functions from 134 so that only negative or
+  NaN user rate overrides are refused on a tier (0 is allowed). Function
+  bodies only: no table, trigger, lock on user tables or scan; safe on the
+  large sites.
 - A site still on 131 (ccyou.dev at the time of writing) also applies
   `132_redeem_code_purchases.sql` and `133_hosted_self_onboard.sql` in the
   same upgrade; 133 aborts on duplicate upstream UUIDs, run its pre-check
@@ -428,6 +453,12 @@ turn the switch on.
 3. Drain and deploy the old binary. The additive schema, the ledger and the
    admission history stay.
 
+The binary before migration 136 runs against the 136 schema unchanged: it
+still reads and writes the kept share-cap columns (with the values stored
+there, so its share caps apply again), its own save-time check still refuses
+new zero overrides on a tier, and stored zero overrides only make that
+user's buyer price zero (no listed account is used).
+
 **Pre-launch acceptance gates (on the target site, switch on, test
 accounts).**
 - Stale snapshot write-back: write back an old cached copy of a listed
@@ -437,8 +468,8 @@ accounts).**
   listed in a tier, an Ops client-mode retry must skip it, and a pinned retry
   must refuse it.
 - Also from the plan: C = 4, R = 1 with the owner busy (owner 1 + buyers 3);
-  share cap stops selling; settlement to the original owner after the owner
-  is cleared; convert/reverse across the maturity instant; count_tokens
+  a user with a 0 override on the tier is served by a platform account
+  only; settlement to the original owner after the owner is cleared; convert/reverse across the maturity instant; count_tokens
   200/404/503 with the pilot's Claude Code version.
 
 ## Known limitations (accepted)
@@ -467,10 +498,9 @@ Dispatch
   whose cached copy predates both the listing and the owner assignment could
   be dispatched as an ordinary account until the first successful poll.
   Until then only accounts with an owner are treated as listed.
-- A share-cap window whose reset has passed counts as 0 while its sample is
-  fresh; usage outside the gateway is invisible until the next observation.
-  After a failed observation write the higher value is kept only in memory,
-  so a restart can sell again on the stored lower value.
+- No usage quota is reserved for the owner (user decision): buyers can use
+  up the account's 5h/7d quota, after which the owner waits for the reset
+  like the buyers.
 - Owner count_tokens is never served by a listed account; if the owner's
   hosted group has no other account, the owner's count_tokens returns 503
   and Claude Code uses its local estimate.
@@ -499,4 +529,3 @@ Money
 Not implemented
 - P3b free pricing (owner minimum rate, buyer maximum rate, session price
   lock) is not implemented.
-- No owner reason for "waiting for a first usage sample".
