@@ -2463,7 +2463,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			applyClaudeOAuthSingleDeviceDefaults(account.Platform, account.Type, withDefaults)
 			added := map[string]any{}
 			for key, value := range withDefaults {
-				if previous, ok := targetExtra[key]; !ok || previous == nil {
+				if previous, ok := targetExtra[key]; value != nil && (!ok || previous == nil) {
 					added[key] = value
 				}
 			}
@@ -2473,6 +2473,17 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 		if allSingleDevice {
 			singleDeviceDefaults = perAccount
+			// A key the admin sent as null resolves to the same constant
+			// default for every row, so it belongs in the shared patch;
+			// otherwise the bulk write would put the null back.
+			for _, defaults := range perAccount {
+				for key, value := range defaults {
+					if _, ok := input.Extra[key]; ok {
+						input.Extra[key] = value
+						delete(defaults, key)
+					}
+				}
+			}
 		}
 	}
 	if input.GroupIDs != nil {
@@ -2604,18 +2615,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			}
 		}
 	}
-	// Defaults only fill keys absent from both the account and input.Extra,
-	// so the shared bulk patch below cannot overwrite them.
+	// Run bulk update for column/jsonb fields first.
+	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
+		return nil, err
+	}
+	// Per-account defaults hold only keys absent from input.Extra, so order
+	// does not change values. They go after the bulk write: if one fails,
+	// the row is single-device without the keys, which the runtime already
+	// reads as these same defaults (IsClaudeOAuthTokenRefreshDisabled).
 	for _, accountID := range input.AccountIDs {
 		if defaults := singleDeviceDefaults[accountID]; len(defaults) > 0 {
 			if err := s.accountRepo.UpdateExtra(ctx, accountID, defaults); err != nil {
 				return nil, err
 			}
 		}
-	}
-	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
 	}
 
 	// Handle group bindings per account (requires individual operations).

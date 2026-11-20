@@ -154,3 +154,27 @@ func TestAdminService_BulkUpdateAccounts_SingleDeviceOneAccountGetsDefaults(t *t
 		"claude_oauth_token_disable_before_expiry_minutes": DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes,
 	}, repo.finalExtra(original)[1])
 }
+
+func TestAdminService_BulkUpdateAccounts_SingleDeviceExplicitNullGetsDefault(t *testing.T) {
+	a := newSingleDeviceBulkAccount(1, "11111111-2222-4333-8444-555555555555", "device-a")
+	b := newSingleDeviceBulkAccount(2, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "device-b")
+	// An unrelated stored null must not be rewritten.
+	b.Extra["runtime_marker"] = nil
+	original := cloneAccounts([]*Account{a, b})
+	repo := &singleDeviceBulkRepo{accountRepoStubForBulkUpdate: accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{a, b}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1, 2},
+		Extra:      map[string]any{"claude_oauth_disable_token_refresh": nil},
+	})
+	require.NoError(t, err)
+	final := repo.finalExtra(original)
+	for _, id := range []int64{1, 2} {
+		require.Equal(t, true, final[id]["claude_oauth_disable_token_refresh"])
+		require.Equal(t, DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes, final[id]["claude_oauth_token_disable_before_expiry_minutes"])
+	}
+	for _, write := range repo.writes {
+		require.NotContains(t, write.patch, "runtime_marker")
+	}
+}
