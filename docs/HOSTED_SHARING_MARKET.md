@@ -28,8 +28,8 @@ pricing (P3b) are not part of P3a.
 
 Code: Server #230 (schema, listing lifecycle, migration 134), #232
 (selection, reservations, final admission), #233 (atomic settlement, earnings
-wallet, reconcile, migration 135), #234 (UI), and the change that removed the
-share caps and allows zero user rate overrides on tiers (migration 136; see
+wallet, reconcile, migration 135), #234 (UI), #246 (removed the
+share caps, allows zero user rate overrides on tiers, migration 136; see
 Quota and Price under [Buyer and dispatch](#buyer-and-dispatch)). Design:
 `merry-rolling-ladybug-p3-design.md` (sections R1/R2 override the body).
 Builds on [HOSTED_SELF_ONBOARD.md](HOSTED_SELF_ONBOARD.md) (P2c owner groups)
