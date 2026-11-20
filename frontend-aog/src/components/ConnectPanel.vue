@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** How to point Claude Code at this key: one AITP command, with the raw values tucked away. */
+/** How to point Claude Code at this key: one AITP command (no manual environment-variable setup). */
 import { computed, onBeforeUnmount, ref, watch, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { keysApi } from '@/api'
@@ -30,7 +30,6 @@ const shells: Array<{ id: Shell; label: string }> = [
 ]
 
 const snippet = computed(() => connectSnippet(app.apiBaseUrl, props.apiKey, shell.value))
-const envText = computed(() => snippet.value.envLines.join('\n'))
 
 // ---- one-time install codes (admin switch; off = the panel exactly as before) ----
 
@@ -264,21 +263,5 @@ async function generate(): Promise<void> {
       {{ snippet.badBaseUrl ? t('connect.badBaseUrl') : t('connect.noOneLine', { client: CLIENT.displayName }) }}
     </p>
 
-    <details class="group" :open="!snippet.command" data-testid="connect-manual">
-      <summary class="cursor-pointer select-none text-sm text-ink-2 hover:text-ink">
-        {{ snippet.command ? t('connect.manual', { client: CLIENT.displayName }) : t('connect.manualOnly') }}
-      </summary>
-      <div class="mt-3">
-        <div class="flex items-baseline justify-between gap-3">
-          <p class="text-xs text-ink-3">{{ t('connect.manualHint') }}</p>
-          <CopyButton :value="envText" small />
-        </div>
-        <pre class="mt-2 overflow-x-auto rounded border border-rule bg-shell px-3 py-2.5 font-mono text-xs leading-5 text-ink">{{ envText }}</pre>
-        <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-          <dt class="label self-center">Base URL</dt>
-          <dd class="truncate font-mono text-xs">{{ snippet.baseUrl }}</dd>
-        </dl>
-      </div>
-    </details>
   </div>
 </template>
