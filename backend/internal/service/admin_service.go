@@ -2439,11 +2439,14 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 
+	// When every selected account is single-device, each one also receives
+	// the single-device defaults it is missing. The defaults depend on each
+	// account's own extra, so they are computed and written per account;
+	// input.Extra stays the admin patch shared by all rows.
+	var singleDeviceDefaults map[int64]map[string]any
 	if input.Extra != nil {
 		allSingleDevice := true
-		var mergedSingleDeviceExtra map[string]any
-		targetPlatform := ""
-		targetType := ""
+		perAccount := make(map[int64]map[string]any, len(input.AccountIDs))
 		for _, accountID := range input.AccountIDs {
 			account := accountByID[accountID]
 			if account == nil {
@@ -2456,15 +2459,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				allSingleDevice = false
 				break
 			}
-			if mergedSingleDeviceExtra == nil {
-				mergedSingleDeviceExtra = targetExtra
-				targetPlatform = account.Platform
-				targetType = account.Type
+			withDefaults := maps.Clone(targetExtra)
+			applyClaudeOAuthSingleDeviceDefaults(account.Platform, account.Type, withDefaults)
+			added := map[string]any{}
+			for key, value := range withDefaults {
+				if previous, ok := targetExtra[key]; !ok || previous == nil {
+					added[key] = value
+				}
+			}
+			if len(added) > 0 {
+				perAccount[accountID] = added
 			}
 		}
-		if allSingleDevice && mergedSingleDeviceExtra != nil {
-			applyClaudeOAuthSingleDeviceDefaults(targetPlatform, targetType, mergedSingleDeviceExtra)
-			input.Extra = mergedSingleDeviceExtra
+		if allSingleDevice {
+			singleDeviceDefaults = perAccount
 		}
 	}
 	if input.GroupIDs != nil {
@@ -2509,7 +2517,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			}
 			targetExtra := account.Extra
 			if input.Extra != nil {
-				targetExtra = input.Extra
+				targetExtra = mergedExtraMap(account.Extra, input.Extra)
+				maps.Copy(targetExtra, singleDeviceDefaults[account.ID])
 			}
 			if err := s.checkClaudeOAuthModeConsistency(ctx, account.ID, account.Platform, account.Type, targetExtra, *input.GroupIDs); err != nil {
 				return nil, err
@@ -2592,6 +2601,15 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				if err := s.accountRepo.UpdateExtra(ctx, previous.ID, changes); err != nil {
 					return nil, err
 				}
+			}
+		}
+	}
+	// Defaults only fill keys absent from both the account and input.Extra,
+	// so the shared bulk patch below cannot overwrite them.
+	for _, accountID := range input.AccountIDs {
+		if defaults := singleDeviceDefaults[accountID]; len(defaults) > 0 {
+			if err := s.accountRepo.UpdateExtra(ctx, accountID, defaults); err != nil {
+				return nil, err
 			}
 		}
 	}
