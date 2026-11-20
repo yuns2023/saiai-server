@@ -47,6 +47,25 @@ func TestApplyUpdateAccountInput_NonEditorWritesTokens(t *testing.T) {
 	require.Equal(t, "r2", current.Credentials["refresh_token"])
 }
 
+// The re-authorize dialog saves fresh tokens through the editor endpoint:
+// they replace the stored ones, while runtime extra keys stay protected.
+func TestApplyUpdateAccountInput_ReauthorizeWritesTokens(t *testing.T) {
+	current := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
+		Credentials: map[string]any{"access_token": "a1", "refresh_token": "invalidated", "_token_version": int64(1)},
+		Extra:       map[string]any{"codex_7d_used_percent": 40.0, "privacy_mode": "on"}}
+	require.NoError(t, applyUpdateAccountInput(current, &UpdateAccountInput{
+		Type:        AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "a2", "refresh_token": "fresh", "id_token": "id2"},
+		Extra:       map[string]any{"email": "user@example.com"},
+		EditorSave:  true,
+		Reauthorize: true,
+	}, nil, time.Now()))
+	require.Equal(t, map[string]any{"access_token": "a2", "refresh_token": "fresh", "id_token": "id2"}, current.Credentials)
+	require.Equal(t, 40.0, current.Extra["codex_7d_used_percent"], "runtime extra still comes from the row")
+	require.Equal(t, "on", current.Extra["privacy_mode"])
+	require.Equal(t, "user@example.com", current.Extra["email"])
+}
+
 // API-key style accounts edit their secrets on the page; those are not
 // protected.
 func TestApplyUpdateAccountInput_EditorWritesAPIKey(t *testing.T) {

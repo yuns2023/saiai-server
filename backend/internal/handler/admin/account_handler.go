@@ -146,6 +146,10 @@ type UpdateAccountRequest struct {
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	// Reauthorize: credentials come from a fresh authorization (re-authorize
+	// dialog) and replace the stored tokens instead of being treated as a
+	// stale page snapshot.
+	Reauthorize bool `json:"reauthorize"`
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
@@ -651,7 +655,8 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		ExpiresAt:             req.ExpiresAt,
 		AutoPauseOnExpired:    req.AutoPauseOnExpired,
 		SkipMixedChannelCheck: skipCheck,
-		EditorSave:            true, // config save: token and runtime keys keep their current values
+		EditorSave:            true, // config save: runtime keys (and tokens, unless re-authorizing) keep their current values
+		Reauthorize:           req.Reauthorize && len(req.Credentials) > 0,
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误

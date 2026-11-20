@@ -242,3 +242,32 @@ func TestAccountHandlerUpdateMarksEditorSave(t *testing.T) {
 	require.NotNil(t, adminSvc.lastUpdateAccount)
 	require.True(t, adminSvc.lastUpdateAccount.EditorSave)
 }
+
+// The re-authorize dialog saves through the same endpoint; its flag lets the
+// fresh tokens through (only together with credentials).
+func TestAccountHandlerUpdatePassesReauthorize(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		want bool
+	}{
+		{"reauthorize with credentials", map[string]any{"credentials": map[string]any{"refresh_token": "fresh"}, "reauthorize": true}, true},
+		{"reauthorize without credentials", map[string]any{"name": "x", "reauthorize": true}, false},
+		{"plain editor save", map[string]any{"credentials": map[string]any{"refresh_token": "page-load"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adminSvc := newStubAdminService()
+			router := setupAccountMixedChannelRouter(adminSvc)
+			body, _ := json.Marshal(tc.body)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/accounts/3", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.NotNil(t, adminSvc.lastUpdateAccount)
+			require.True(t, adminSvc.lastUpdateAccount.EditorSave)
+			require.Equal(t, tc.want, adminSvc.lastUpdateAccount.Reauthorize)
+		})
+	}
+}

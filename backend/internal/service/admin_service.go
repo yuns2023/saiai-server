@@ -320,9 +320,14 @@ type UpdateAccountInput struct {
 	// and extra are a snapshot from when the page loaded. OAuth/setup-token
 	// token keys and runtime extra keys are then taken from the current row
 	// (see account_edit_protection.go). Set by the server-side handler only,
-	// never from the request body. Refresh/re-auth callers leave it false:
-	// they intend to write those keys.
+	// never from the request body. Refresh callers leave it false: they
+	// intend to write those keys.
 	EditorSave bool
+	// Reauthorize marks an editor save whose credentials come from a fresh
+	// OAuth / setup-token authorization (the re-authorize dialog): the
+	// submitted credentials replace the stored ones, token keys included.
+	// Runtime extra keys stay protected.
+	Reauthorize bool
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.
@@ -2268,7 +2273,7 @@ func applyUpdateAccountInput(account *Account, input *UpdateAccountInput, carpoo
 	}
 	if len(input.Credentials) > 0 {
 		credentials := input.Credentials
-		if input.EditorSave && (storedType == AccountTypeOAuth || storedType == AccountTypeSetupToken) {
+		if input.EditorSave && !input.Reauthorize && (storedType == AccountTypeOAuth || storedType == AccountTypeSetupToken) {
 			// The page never edits tokens; a rotated refresh_token must not be
 			// replaced by the one the page loaded.
 			credentials = keepCurrentKeys(credentials, currentCredentials, isEditorProtectedAuthCredentialKey)
