@@ -213,16 +213,13 @@ billed key ([BILLING_FACTORS.md](BILLING_FACTORS.md)). A zero or missing price
 excludes buyer candidates; platform candidates remain. The final admission
 re-reads the buyer's user rate override and the tier's rates in its own
 snapshot, so an override set to 0 while the request waited (or hidden by the
-gateway's user-rate cache, 30 s by default) refuses the sale before any
-upstream send. This is why a zero override on a tier is safe: a request
-whose override is 0 in the admission snapshot is never sent to a listed
-account, writes no admission and no `shared_sale` event, and the owner earns
-nothing from it; the tier's platform accounts serve it. Within the cache
-window after an override changes to 0, the listed account can still be
-picked, take a buyer lease and register the device before the final
-admission refuses it (see the device limitation below), and a platform
-account may still bill the old positive rate (the general override cache,
-same as on any group).
+gateway's user-rate cache) refuses the sale before any upstream send. This
+is why a zero override on a tier is safe: a request whose override is 0 in
+the admission snapshot is never sent to a listed account, writes no
+admission and no `shared_sale` event, and the owner earns nothing from it;
+the tier's platform accounts serve it. Admins do not need to unlist anything
+before setting a zero override (optional). See the limitation on the cache
+window below.
 
 **count_tokens in a tier** uses platform accounts only (anthropic, not
 Bedrock, not pinned), each re-checked in the database, with no Messages
@@ -467,9 +464,13 @@ zero overrides on a tier. Zero overrides stored on tiers meanwhile need
 attention before rolling back: the old binary refuses every save of a tier
 group that has one (`MARKET_TIER_RATE_OVERRIDE`), and its final admission
 does not re-read the buyer's override, so a stale cached positive rate
-could admit such a user to a listed account. Delete or raise the zero
-overrides on tiers (or demote the tiers, step 2) before deploying the old
-binary.
+could admit such a user to a listed account. Before deploying the old
+binary, delete or raise the zero overrides on tiers (or demote the tiers,
+step 2, or keep `market_enabled` off). Right after the rollback the old
+binary may briefly refuse all sales: the scheduler snapshots in Redis
+(`sched:acc:*`) written by the new binary carry listings without
+`sample_max_age_minutes`, which the old binary reads as 0 (sample gate
+refuses) until it rebuilds the snapshots from the database.
 
 **Pre-launch acceptance gates (on the target site, switch on, test
 accounts).**
@@ -516,6 +517,19 @@ Dispatch
 - Owner count_tokens is never served by a listed account; if the owner's
   hosted group has no other account, the owner's count_tokens returns 503
   and Claude Code uses its local estimate.
+- Zero-override cache window: the gateway caches user rate overrides
+  (default TTL 30 s, configurable; a lookup failure falls back to the group
+  rate). For that long after an override is changed to 0, candidate
+  selection may still use the old positive rate: a listed account can be
+  picked, take a buyer lease, register a buyer device and use a cycle
+  admission before the final admission re-reads the database value and
+  refuses (no sale, no upstream send, no owner earning; the request fails
+  over to a platform account). These side effects happen per candidate
+  attempt and can accumulate across concurrent requests and candidates, but
+  stay within the buyer-side limits (the owner's reservations hold); the
+  refusal does not give back registered devices or used cycle admissions.
+  In the same window a platform account may still bill that user at the old
+  positive rate (the general override cache, as on any group).
 - On the owner path a device-registry error fails open (logged, dispatched
   without a recorded device), like plain carpool.
 - A refusal after the device admission leaves that device and its cycle

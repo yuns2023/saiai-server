@@ -104,3 +104,53 @@ func TestMarketAdmissionReadsBuyerRateOverride(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, verdict.Admitted, verdict.Reason)
 }
+
+// The production final-admission judgement on the real SQL snapshot: the
+// request started with a positive (cached) rate, but the buyer's override
+// on the tier is 0 in the database. The callback runs, refuses, and no
+// market_admissions row is written (so there is no settlement credential
+// and nothing an owner accrue could be written for). The positive control
+// admits the same candidate once the override is positive again.
+func TestMarketFinalAdmissionRefusesZeroBuyerOverrideInSnapshot(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	owner, buyer := f.user(t), f.user(t)
+	tier := f.group(t, true)
+	acc := f.account(t, owner)
+	f.configure(t, acc, tier)
+	_, err := f.list(acc, owner, tier)
+	require.NoError(t, err)
+	rates := &userGroupRateRepository{sql: integrationDB}
+	sel := buyerSelection(t, f, acc, tier, owner)
+
+	admit := func() (*service.MarketAdmissionVerdict, bool) {
+		t.Helper()
+		req := buyerRequest(acc, tier, buyer)
+		entered := false
+		verdict, err := f.market.AdmitMarketCandidate(ctx, req, func(facts *service.MarketAuthoritativeFacts) string {
+			entered = true
+			return service.MarketFinalAdmissionReason(ctx, sel, req, facts, "claude-fable-5")
+		})
+		require.NoError(t, err)
+		require.NotNil(t, verdict)
+		return verdict, entered
+	}
+
+	zero := 0.0
+	require.NoError(t, rates.SyncUserGroupRates(ctx, buyer, map[int64]*float64{tier: &zero}))
+	before := admissionCount(t, acc)
+	verdict, entered := admit()
+	require.True(t, entered, "the final-admission judgement ran on the snapshot")
+	require.False(t, verdict.Admitted)
+	require.Equal(t, "not_priced", verdict.Reason)
+	require.Nil(t, verdict.Admission, "no settlement credential")
+	require.Equal(t, before, admissionCount(t, acc), "no market_admissions row")
+
+	positive := 1.5
+	require.NoError(t, rates.SyncUserGroupRates(ctx, buyer, map[int64]*float64{tier: &positive}))
+	verdict, entered = admit()
+	require.True(t, entered)
+	require.True(t, verdict.Admitted, verdict.Reason)
+	require.NotNil(t, verdict.Admission)
+	require.Equal(t, before+1, admissionCount(t, acc))
+}

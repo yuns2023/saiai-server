@@ -859,6 +859,24 @@ func (s *GatewayService) computeMarketPrice(ctx context.Context, d *MarketDispat
 	return snap, true
 }
 
+// MarketFinalAdmissionReason is the judgement the final admission runs on
+// the authoritative snapshot (inside the admission transaction): "" admits.
+// priceModel is the model the buyer is priced with (buyer class only).
+func MarketFinalAdmissionReason(ctx context.Context, sel *MarketSelection, req *MarketAdmissionRequest, f *MarketAuthoritativeFacts, priceModel string) string {
+	if reason := EvaluateMarketAdmission(sel, req, f); reason != "" {
+		return reason
+	}
+	if sel.Class == MarketClassBuyer && !marketSnapshotGroupPriced(f, priceModel) {
+		return "not_priced"
+	}
+	// Trusted-only / user / Key allowlists as stored now (tightened while
+	// the request waited).
+	if !accountAllowsUser(ctx, f.Account) {
+		return "not_allowed"
+	}
+	return ""
+}
+
 // marketSnapshotGroupPriced: the buyer's effective group rate (the user rate
 // override if one exists, else the tier's rate) and the model's rate factor
 // as stored in the admission snapshot are both positive. Sellability only:
@@ -1178,18 +1196,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 
 	admitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
 	verdict, err := s.market.store.AdmitMarketCandidate(admitCtx, req, func(f *MarketAuthoritativeFacts) string {
-		if reason := EvaluateMarketAdmission(sel, req, f); reason != "" {
-			return reason
-		}
-		if sel.Class == MarketClassBuyer && !marketSnapshotGroupPriced(f, priceModel) {
-			return "not_priced"
-		}
-		// Trusted-only / user / Key allowlists as stored now (tightened
-		// while the request waited).
-		if !accountAllowsUser(ctx, f.Account) {
-			return "not_allowed"
-		}
-		return ""
+		return MarketFinalAdmissionReason(ctx, sel, req, f, priceModel)
 	})
 	cancel()
 	if err != nil {

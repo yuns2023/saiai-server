@@ -105,3 +105,32 @@ func TestMarketZeroUserOverrideRefusedAtFinalAdmission(t *testing.T) {
 	require.False(t, cmd.MarketPath)
 	require.Nil(t, cmd.Settlement.Market)
 }
+
+// The request-start price used a positive rate (no override seen, e.g. the
+// rate cache), but the admission snapshot has the buyer's override at 0:
+// the final-admission judgement is entered and refuses; no admission row,
+// no upstream send, no settlement credential.
+func TestMarketZeroUserOverrideInSnapshotRefusedByFinalJudgement(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	inner := env.store.facts
+	entered := 0
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		entered++
+		f := inner(req)
+		zero := 0.0
+		f.BuyerRateOverride = &zero
+		return f
+	}
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx, attempt := buyerForwardCtx(t, c.Request.Context())
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, 1, entered, "the final-admission judgement ran")
+	require.Len(t, env.store.requests, 1)
+	require.Empty(t, env.store.inserted, "no admission row")
+	require.Zero(t, upstream.calls, "no upstream send")
+	marketPath, proof := attempt.SettlementFields()
+	require.False(t, marketPath)
+	require.Nil(t, proof, "no settlement credential")
+}
