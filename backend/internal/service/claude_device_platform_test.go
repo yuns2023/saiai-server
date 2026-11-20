@@ -123,12 +123,12 @@ func TestClaudeDevicePlatformService_DedupeOnlySkipsSameState(t *testing.T) {
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key), "interval elapsed")
 	require.Equal(t, int64(8), svc.Stats().Written)
 
-	// A failed write is counted (and not retried within the interval).
+	// A failed write is forgotten: the next identical request retries.
 	store.err = context.DeadlineExceeded
 	now = now.Add(claudeDevicePlatformDedupeInterval)
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), nil, key))
-	require.Equal(t, 0, observeAndWrite(cdpHeaders("MacOS", "arm64"), nil, key))
-	require.Equal(t, int64(1), svc.Stats().WriteErrors)
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), nil, key))
+	require.Equal(t, int64(2), svc.Stats().WriteErrors)
 }
 
 func TestClaudeDevicePlatformDedupe_Bounded(t *testing.T) {

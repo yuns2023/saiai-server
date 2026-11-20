@@ -360,6 +360,7 @@ func (s *ClaudeDevicePlatformService) write(obs ClaudeDevicePlatformObservation)
 	defer cancel()
 	status, err := s.store.RecordClaudeDevicePlatform(ctx, obs, s.limits)
 	if err != nil {
+		s.dedupe.forget(obs)
 		if s.counters.writeErrors.Add(1)%100 == 1 {
 			logger.L().Debug("gateway.claude_device_platform_write_failed", zap.Error(err))
 		}
@@ -484,16 +485,17 @@ func (s *ClaudeDevicePlatformService) resolveUsers(ctx context.Context, items []
 }
 
 // claudeDevicePlatformDedupe skips repeats of a device's current state.
-// It keeps two bounded LRU maps: per device the last queued platform state
-// (family, arch, major), and per device + user the last queue time. An
+// One bounded LRU (shared capacity) holds two kinds of keys: per device the
+// last queued platform state (family, arch, major), and per device + user
+// the last queue time. An
 // observation is skipped only when the device's last platform state is the
 // same and both entries are younger than the interval, so a platform
 // switch (15 -> 26 -> 15, also across users) is always queued while a
 // shared device used alternately by two users at the same platform is
 // written at most once per interval per user. Check, enqueue and update run
 // under one lock so concurrent producers cannot reorder the state. A failed
-// write is not undone (at most one interval of last_seen precision lost
-// while Redis fails).
+// write forgets the device's entries; forgetting only ever causes an extra
+// write, never a skipped one, so it is safe in any order.
 type claudeDevicePlatformDedupe struct {
 	mu    sync.Mutex
 	max   int
@@ -567,4 +569,16 @@ func (d *claudeDevicePlatformDedupe) admit(obs ClaudeDevicePlatformObservation, 
 	d.putLocked(deviceKey, state, now)
 	d.putLocked(userKey, "", now)
 	return claudeDevicePlatformAdmitQueued
+}
+
+// forget drops the device's and the device + user entries.
+func (d *claudeDevicePlatformDedupe) forget(obs ClaudeDevicePlatformObservation) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, key := range []string{"d|" + obs.Digest, "u|" + obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10)} {
+		if el, ok := d.items[key]; ok {
+			delete(d.items, key)
+			d.order.Remove(el)
+		}
+	}
 }

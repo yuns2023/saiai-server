@@ -369,6 +369,22 @@ func TestClaudeDevicePlatformRedis_ListPagination(t *testing.T) {
 		}
 	}
 
+	// Members ahead of the cursor vanish (its rank shifts by two) while the
+	// cursor itself is unchanged: nothing after it is skipped.
+	all2, err := h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 10, Reasons: []string{"cross_user"}, Now: now})
+	require.NoError(t, err)
+	require.Len(t, all2.Items, 4)
+	firstTwo, err := h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 2, Reasons: []string{"cross_user"}, Now: now})
+	require.NoError(t, err)
+	for _, name := range []string{"arch-0"} {
+		require.NoError(t, h.rdb.ZRem(ctx, claudeDevicePlatformFlaggedKey, cdpDigest(name)).Err())
+	}
+	require.NoError(t, h.rdb.ZRem(ctx, claudeDevicePlatformFlaggedKey, cdpDigestByPrefix(t, firstTwo.Items[0].DisplayPrefix)).Err())
+	tail, err := h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 10, Cursor: firstTwo.NextCursor, Reasons: []string{"cross_user"}, Now: now})
+	require.NoError(t, err)
+	require.Len(t, tail.Items, 2)
+	require.Equal(t, all2.Items[2].DisplayPrefix, tail.Items[0].DisplayPrefix)
+
 	_, err = h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 10, Cursor: "garbage", Now: now})
 	require.ErrorIs(t, err, service.ErrClaudeDevicePlatformInvalidQuery)
 }

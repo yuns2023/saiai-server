@@ -386,21 +386,22 @@ func (r *claudeDevicePlatformCache) nextMembers(ctx context.Context, cursor *cla
 	if score, err := r.rdb.ZScore(ctx, claudeDevicePlatformFlaggedKey, cursor.digest).Result(); err == nil && int64(score) == cursor.score {
 		rank, err := r.rdb.ZRevRank(ctx, claudeDevicePlatformFlaggedKey, cursor.digest).Result()
 		if err == nil {
-			members, err := r.rdb.ZRevRangeWithScores(ctx, claudeDevicePlatformFlaggedKey, rank+1, rank+int64(n)).Result()
+			// Read from the cursor's own rank in one call: the first member
+			// must still be the cursor, otherwise the rank moved meanwhile
+			// and the slow path (by score/member) is used.
+			members, err := r.rdb.ZRevRangeWithScores(ctx, claudeDevicePlatformFlaggedKey, rank, rank+int64(n)).Result()
 			if err != nil {
 				return nil, err
 			}
-			// The three reads are not atomic: keep only members strictly
-			// after the cursor (a concurrent insert can at worst skip one).
-			out := members[:0]
-			for _, m := range members {
-				member, _ := m.Member.(string)
-				score := int64(m.Score)
-				if score > cursor.score || score == cursor.score && member >= cursor.digest {
-					// Shifted ahead of the cursor meanwhile: use the slow path.
-					return r.nextMembersSlow(ctx, cursor, minScore, n)
-				}
-				if score >= minScore {
+			if len(members) == 0 || int64(members[0].Score) != cursor.score {
+				return r.nextMembersSlow(ctx, cursor, minScore, n)
+			}
+			if first, _ := members[0].Member.(string); first != cursor.digest {
+				return r.nextMembersSlow(ctx, cursor, minScore, n)
+			}
+			out := make([]redis.Z, 0, n)
+			for _, m := range members[1:] {
+				if int64(m.Score) >= minScore {
 					out = append(out, m)
 				}
 			}
