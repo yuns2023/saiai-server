@@ -48,6 +48,8 @@ let alive = true
 const expiresMs = computed(() => (link.value ? Date.parse(link.value.expires_at) : NaN))
 const remainingMs = computed(() => (Number.isFinite(expiresMs.value) ? Math.max(0, expiresMs.value - now.value) : 0))
 const linkLive = computed(() => !!link.value && remainingMs.value > 0)
+/** Checked at click time with the real clock (the countdown ticks only once a second). */
+const linkStillValid = (): boolean => !!link.value && Number.isFinite(expiresMs.value) && expiresMs.value > Date.now()
 const countdown = computed(() => {
   const s = Math.ceil(remainingMs.value / 1000)
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
@@ -196,7 +198,7 @@ onUnmounted(() => {
               </button>
               <template v-if="link && linkLive">
                 <!-- Copy only (no link to open here): the owner opens it in the browser they use for Claude. -->
-                <CopyButton :value="link.auth_url" :label="t('onboard.copyLink')" :guard="() => linkLive" data-testid="onboard-link" />
+                <CopyButton :value="link.auth_url" :label="t('onboard.copyLink')" :guard="linkStillValid" data-testid="onboard-link" />
                 <span class="num text-sm text-ink-2" data-testid="onboard-countdown">{{ t('onboard.expiresIn', { time: countdown }) }}</span>
               </template>
               <span v-else-if="link" class="text-sm text-seal" role="alert" data-testid="onboard-expired">{{ t('onboard.linkExpired') }}</span>

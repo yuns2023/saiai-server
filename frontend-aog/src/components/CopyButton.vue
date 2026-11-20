@@ -23,9 +23,15 @@ async function copy(): Promise<void> {
     area.style.position = 'fixed'
     area.style.opacity = '0'
     document.body.appendChild(area)
-    area.select()
-    const ok = document.execCommand('copy')
-    area.remove()
+    let ok = false
+    try {
+      area.select()
+      ok = document.execCommand('copy')
+    } catch {
+      ok = false
+    } finally {
+      area.remove()
+    }
     if (!ok) {
       app.notify('error', t('common.copyFailed'))
       return

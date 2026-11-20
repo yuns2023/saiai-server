@@ -105,6 +105,26 @@ describe('HostedOnboard', () => {
     }
   })
 
+  it('does not copy a link that expired between countdown ticks', async () => {
+    vi.useFakeTimers()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    try {
+      const w = await mountForm()
+      hosted.createAuthUrl.mockResolvedValue({ ...LINK, expires_at: new Date(Date.now() + 3000).toISOString() })
+      await w.get('[data-testid=onboard-generate]').trigger('click')
+      await flushPromises()
+      // Move only the system clock past the expiry: the countdown has not ticked yet.
+      vi.setSystemTime(Date.now() + 3500)
+      await w.get('[data-testid=onboard-link]').trigger('click')
+      await flushPromises()
+      expect(writeText).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(navigator, 'clipboard')
+      vi.useRealTimers()
+    }
+  })
+
   it('submits code, name and proxy, then clears the code and the form', async () => {
     const w = await mountForm()
     await generate(w)
