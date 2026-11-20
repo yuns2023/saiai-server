@@ -411,7 +411,7 @@ const en: typeof zh = {
     unlistedDone: 'Sharing stopped.',
     loadFailed: 'Could not load the sharing status.',
     explain: 'While shared, other users can use this account at the price of the selected tier; the platform keeps a cut of what they pay and the rest is your earning. Earnings are frozen for a while, then can be moved into your balance. You can stop sharing at any time; requests in progress finish normally.',
-    protection: 'Reserved for your own use: {concurrency} concurrent requests, {devices} devices and {admissions} new devices per cycle; selling pauses when this account reaches {cap5h}% of its 5-hour or {cap7d}% of its 7-day limit.',
+    protection: 'Reserved for your own use: {concurrency} concurrent requests, {devices} devices and {admissions} new devices per cycle. Usage quota is not reserved: once this account has used up its 5-hour or 7-day limit, buyers and you both wait until it resets.',
     reasonSep: ': ',
     reason_market_disabled: 'the sharing market is not open',
     reason_not_configured: 'an administrator has not allowed sharing',

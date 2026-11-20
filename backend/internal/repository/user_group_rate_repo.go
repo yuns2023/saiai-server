@@ -258,11 +258,11 @@ func (r *userGroupRateRepository) DeleteByUserID(ctx context.Context, userID int
 	return err
 }
 
-// ListNonPositiveRateUsers lists users whose stored override on groupID is
-// <= 0 (a market tier may not be sold at a zero rate).
-func (r *userGroupRateRepository) ListNonPositiveRateUsers(ctx context.Context, groupID int64) ([]int64, error) {
+// ListNegativeRateUsers lists users whose stored override on groupID is
+// negative or NaN (refused on a market tier; 0 is allowed, migration 136).
+func (r *userGroupRateRepository) ListNegativeRateUsers(ctx context.Context, groupID int64) ([]int64, error) {
 	rows, err := r.sql.QueryContext(ctx,
-		`SELECT user_id FROM user_group_rate_multipliers WHERE group_id = $1 AND (rate_multiplier <= 0 OR rate_multiplier = 'NaN') ORDER BY user_id`, groupID)
+		`SELECT user_id FROM user_group_rate_multipliers WHERE group_id = $1 AND (rate_multiplier < 0 OR rate_multiplier = 'NaN') ORDER BY user_id`, groupID)
 	if err != nil {
 		return nil, err
 	}

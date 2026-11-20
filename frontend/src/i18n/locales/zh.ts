@@ -41,15 +41,12 @@ export default {
     protection: {
       reserved_concurrency: '预留并发',
       reserved_devices: '预留设备',
-      reserved_admissions: '预留周期名额',
-      cap_5h_pct: '5 小时上限 %',
-      cap_7d_pct: '7 天上限 %',
-      sample_max_age_minutes: '样本最长有效（分钟）'
+      reserved_admissions: '预留周期名额'
     },
     errors: {
       INVALID_MARKET_TIER: '共享档位必须是 Anthropic 普通计费分组、未开启托管计量、倍率大于 0。',
       MARKET_TIER_FALLBACK: '共享档位不能设置降级分组，其他分组的降级/兜底也不能指向共享档位。',
-      MARKET_TIER_RATE_OVERRIDE: '共享档位上的用户专属倍率必须大于 0（按 4 位小数）；请先修改或删除为 0 的专属倍率。',
+      MARKET_TIER_RATE_OVERRIDE: '共享档位上的用户专属倍率不能为负数；请先修改或删除负数的专属倍率。',
       MARKET_TIER_GUARD_UNAVAILABLE: '共享档位检查暂时不可用，请稍后再试。',
       MARKET_MEMBERSHIP_CONFLICT: '该账号已由号主共享上架到这个分组；请先撤销共享，再由管理员绑定。',
       MARKET_LISTING_NOT_FOUND: '该账号还没有配置过共享。',
@@ -86,7 +83,7 @@ export default {
       tierAdminMember: '该账号已由管理员绑定到此分组，号主不能再上架到这里',
       tierGone: '已不是共享档位',
       protection: '号主保障',
-      protectionHint: '号主自己使用时保留的并发、设备和每周期新设备名额；用量达到上限比例、或用量样本超过有效时间时暂停出售。新配置默认使用站点设置中的默认值。',
+      protectionHint: '号主自己使用时保留的并发、设备和每周期新设备名额；用量额度不预留，额度用完后号对所有人暂停，直到恢复。新配置默认使用站点设置中的默认值。',
       range: '范围 {min}–{max}',
       leaveOneSlot: '至少给买家留 1 个并发',
       leaveOneDevice: '至少给买家留 1 台设备',

@@ -53,9 +53,9 @@ describe('market utils', () => {
   })
 
   it('protection: first field out of range', () => {
-    const p = { reserved_concurrency: 0, reserved_devices: 0, reserved_admissions: 0, cap_5h_pct: 70, cap_7d_pct: 60, sample_max_age_minutes: 30 }
+    const p = { reserved_concurrency: 0, reserved_devices: 0, reserved_admissions: 0 }
     expect(firstBadProtection(p)).toBeNull()
-    expect(firstBadProtection({ ...p, cap_5h_pct: 0 })).toBe('cap_5h_pct')
-    expect(firstBadProtection({ ...p, sample_max_age_minutes: '' })).toBe('sample_max_age_minutes')
+    expect(firstBadProtection({ ...p, reserved_devices: 33 })).toBe('reserved_devices')
+    expect(firstBadProtection({ ...p, reserved_admissions: '' })).toBe('reserved_admissions')
   })
 })

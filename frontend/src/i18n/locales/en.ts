@@ -41,15 +41,12 @@ export default {
     protection: {
       reserved_concurrency: 'Reserved concurrency',
       reserved_devices: 'Reserved devices',
-      reserved_admissions: 'Reserved new devices per cycle',
-      cap_5h_pct: '5-hour cap %',
-      cap_7d_pct: '7-day cap %',
-      sample_max_age_minutes: 'Usage sample max age (min)'
+      reserved_admissions: 'Reserved new devices per cycle'
     },
     errors: {
       INVALID_MARKET_TIER: 'A sharing tier must be a standard (balance) Anthropic group without hosted metering and with a rate above 0.',
       MARKET_TIER_FALLBACK: 'A sharing tier cannot have a fallback group, and no fallback may point into a sharing tier.',
-      MARKET_TIER_RATE_OVERRIDE: 'User rate overrides on a sharing tier must be above 0 (4 decimals); change or remove the zero overrides first.',
+      MARKET_TIER_RATE_OVERRIDE: 'User rate overrides on a sharing tier cannot be negative; change or remove the negative overrides first.',
       MARKET_TIER_GUARD_UNAVAILABLE: 'Sharing-tier checks are unavailable; try again later.',
       MARKET_MEMBERSHIP_CONFLICT: 'The owner listed this account in that group; revoke sharing before binding it as an administrator.',
       MARKET_LISTING_NOT_FOUND: 'Sharing was never configured for this account.',
@@ -86,7 +83,7 @@ export default {
       tierAdminMember: 'already bound here by an administrator; the owner cannot list here',
       tierGone: 'no longer a sharing tier',
       protection: 'Owner protection',
-      protectionHint: 'Concurrency, devices and new devices per cycle kept for the owner\'s own use; selling pauses at the usage caps or when the usage sample is too old. New configurations start from the site defaults.',
+      protectionHint: 'Concurrency, devices and new devices per cycle kept for the owner\'s own use; usage quota is not reserved: once it is used up the account pauses for everyone until it resets. New configurations start from the site defaults.',
       range: 'range {min}–{max}',
       leaveOneSlot: 'leave buyers at least 1 slot',
       leaveOneDevice: 'leave buyers at least 1 device',

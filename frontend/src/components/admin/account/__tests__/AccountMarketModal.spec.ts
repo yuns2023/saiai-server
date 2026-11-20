@@ -11,7 +11,7 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => store }))
 vi.mock('@/api/client', () => ({ apiClient: {} }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key), te: () => true }) }))
 
-const protection = { reserved_concurrency: 1, reserved_devices: 2, reserved_admissions: 1, cap_5h_pct: 70, cap_7d_pct: 60, sample_max_age_minutes: 30 }
+const protection = { reserved_concurrency: 1, reserved_devices: 2, reserved_admissions: 1 }
 
 function view(over: Record<string, unknown> = {}) {
   return {
@@ -77,11 +77,11 @@ describe('AccountMarketModal', () => {
   it('refuses an out-of-range value before sending (static and per-account bounds)', async () => {
     market.getListing.mockResolvedValue(view())
     const w = await mountModal()
-    await w.get('[data-testid=market-cap_5h_pct]').setValue('0')
+    await w.get('[data-testid=market-reserved_devices]').setValue('-1')
     await w.get('form').trigger('submit')
     await flushPromises()
     expect(market.putListing).not.toHaveBeenCalled()
-    await w.get('[data-testid=market-cap_5h_pct]').setValue('70')
+    await w.get('[data-testid=market-reserved_devices]').setValue('2')
     // Concurrency 4: reserving 4 would leave buyers nothing.
     await w.get('[data-testid=market-reserved_concurrency]').setValue('4')
     await w.get('form').trigger('submit')

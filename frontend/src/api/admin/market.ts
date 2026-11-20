@@ -14,9 +14,6 @@ export interface MarketProtection {
   reserved_concurrency: number
   reserved_devices: number
   reserved_admissions: number
-  cap_5h_pct: number
-  cap_7d_pct: number
-  sample_max_age_minutes: number
 }
 
 /** At most this many allowed tiers per account (migration 134 cardinality CHECK). */

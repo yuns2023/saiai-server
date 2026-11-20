@@ -20,17 +20,11 @@ const (
 	SettingKeyMarketDefaultReservedConcurrency  = "market_default_reserved_concurrency"
 	SettingKeyMarketDefaultReservedDevices      = "market_default_reserved_devices"
 	SettingKeyMarketDefaultReservedAdmissions   = "market_default_reserved_admissions"
-	SettingKeyMarketDefaultCap5hPct             = "market_default_cap_5h_pct"
-	SettingKeyMarketDefaultCap7dPct             = "market_default_cap_7d_pct"
-	SettingKeyMarketDefaultSampleMaxAgeMinutes  = "market_default_sample_max_age_minutes"
 	MaxMarketEarningFreezeDays                  = 90
 	DefaultMarketEarningFreezeDays              = 7
 	DefaultMarketDefaultReservedConcurrency     = 1
 	DefaultMarketDefaultReservedDevices         = 2
 	DefaultMarketDefaultReservedAdmissions      = 1
-	DefaultMarketDefaultCap5hPct                = 70
-	DefaultMarketDefaultCap7dPct                = 60
-	DefaultMarketDefaultSampleMaxAgeMinutes     = 30
 	marketPlatformCutRateDecimals               = 4
 	marketMinConvertDecimals                    = 2
 	marketSettingDefaultPlatformCutRateText     = "0.2"
@@ -71,9 +65,6 @@ func MarketSettingKeys() []string {
 		SettingKeyMarketDefaultReservedConcurrency,
 		SettingKeyMarketDefaultReservedDevices,
 		SettingKeyMarketDefaultReservedAdmissions,
-		SettingKeyMarketDefaultCap5hPct,
-		SettingKeyMarketDefaultCap7dPct,
-		SettingKeyMarketDefaultSampleMaxAgeMinutes,
 	}
 }
 
@@ -108,9 +99,6 @@ func ParseMarketSettings(values map[string]string) MarketSettings {
 			ReservedConcurrency: parseBoundedIntSetting(values[SettingKeyMarketDefaultReservedConcurrency], 0, MaxMarketReservedConcurrency, DefaultMarketDefaultReservedConcurrency),
 			ReservedDevices:     parseBoundedIntSetting(values[SettingKeyMarketDefaultReservedDevices], 0, MaxMarketReservedDevices, DefaultMarketDefaultReservedDevices),
 			ReservedAdmissions:  parseBoundedIntSetting(values[SettingKeyMarketDefaultReservedAdmissions], 0, MaxMarketReservedAdmissions, DefaultMarketDefaultReservedAdmissions),
-			Cap5hPct:            parseBoundedIntSetting(values[SettingKeyMarketDefaultCap5hPct], 1, 100, DefaultMarketDefaultCap5hPct),
-			Cap7dPct:            parseBoundedIntSetting(values[SettingKeyMarketDefaultCap7dPct], 1, 100, DefaultMarketDefaultCap7dPct),
-			SampleMaxAgeMinutes: parseBoundedIntSetting(values[SettingKeyMarketDefaultSampleMaxAgeMinutes], 1, MaxMarketSampleMaxAgeMinutes, DefaultMarketDefaultSampleMaxAgeMinutes),
 		},
 	}
 	if v, err := decimal.NewFromString(strings.TrimSpace(values[SettingKeyMarketPlatformCutRate])); err == nil && ValidMarketPlatformCutRate(v) {
@@ -144,9 +132,6 @@ func marketSettingUpdates(settings *SystemSettings, updates map[string]string) {
 		SettingKeyMarketDefaultReservedConcurrency: strconv.Itoa(in.DefaultProtection.ReservedConcurrency),
 		SettingKeyMarketDefaultReservedDevices:     strconv.Itoa(in.DefaultProtection.ReservedDevices),
 		SettingKeyMarketDefaultReservedAdmissions:  strconv.Itoa(in.DefaultProtection.ReservedAdmissions),
-		SettingKeyMarketDefaultCap5hPct:            strconv.Itoa(in.DefaultProtection.Cap5hPct),
-		SettingKeyMarketDefaultCap7dPct:            strconv.Itoa(in.DefaultProtection.Cap7dPct),
-		SettingKeyMarketDefaultSampleMaxAgeMinutes: strconv.Itoa(in.DefaultProtection.SampleMaxAgeMinutes),
 	}
 	parsed := ParseMarketSettings(stored)
 	updates[SettingKeyMarketEnabled] = strconv.FormatBool(parsed.Enabled)
@@ -156,9 +141,6 @@ func marketSettingUpdates(settings *SystemSettings, updates map[string]string) {
 	updates[SettingKeyMarketDefaultReservedConcurrency] = strconv.Itoa(parsed.DefaultProtection.ReservedConcurrency)
 	updates[SettingKeyMarketDefaultReservedDevices] = strconv.Itoa(parsed.DefaultProtection.ReservedDevices)
 	updates[SettingKeyMarketDefaultReservedAdmissions] = strconv.Itoa(parsed.DefaultProtection.ReservedAdmissions)
-	updates[SettingKeyMarketDefaultCap5hPct] = strconv.Itoa(parsed.DefaultProtection.Cap5hPct)
-	updates[SettingKeyMarketDefaultCap7dPct] = strconv.Itoa(parsed.DefaultProtection.Cap7dPct)
-	updates[SettingKeyMarketDefaultSampleMaxAgeMinutes] = strconv.Itoa(parsed.DefaultProtection.SampleMaxAgeMinutes)
 }
 
 // restrictMarketUpdates keeps only the market keys the caller provided

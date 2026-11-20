@@ -52,7 +52,7 @@ function view(over: Partial<OwnerMarketView> = {}): OwnerMarketView {
       { group_id: 3, name: 'T1-Pro', rate_multiplier: 1.2, available: true, admin_member: false },
       { group_id: 4, name: 'T2-Max', rate_multiplier: 1.6, available: true, admin_member: false }
     ],
-    protection: { reserved_concurrency: 1, reserved_devices: 2, reserved_admissions: 1, cap_5h_pct: 70, cap_7d_pct: 60, sample_max_age_minutes: 30 },
+    protection: { reserved_concurrency: 1, reserved_devices: 2, reserved_admissions: 1 },
     unavailable_reasons: [],
     can_list: true,
     ...over
@@ -177,6 +177,7 @@ describe('HostedView sharing market', () => {
     expect(block.get('[data-testid=market-tier-3]').text()).toContain('T1-Pro')
     expect(block.get('[data-testid=market-tier-3]').text()).toContain('×1.2')
     expect(block.get('[data-testid=market-explain]').text()).toContain('预留 1 个并发、2 台设备')
+    expect(block.get('[data-testid=market-explain]').text()).toContain('用量额度不预留')
     // Two tiers: nothing preselected, so listing waits for a choice.
     expect(block.get('[data-testid=market-list]').attributes('disabled')).toBeDefined()
     await block.get('[data-testid=market-tier-4] input').setValue(true)

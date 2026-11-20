@@ -111,6 +111,7 @@ func marketFactsFromState(state *service.MarketAdmissionState) *service.MarketAu
 		Listing:            state.Listing,
 		GroupRate:          state.GroupRateMultiplier,
 		GroupModelRates:    state.GroupModelRateMultipliers,
+		BuyerRateOverride:  state.BuyerRateOverride,
 	}
 	if state.OwnerEventUserID != nil {
 		v := *state.OwnerEventUserID

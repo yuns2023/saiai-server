@@ -12,9 +12,6 @@ type MarketSettings struct {
 	MarketDefaultReservedConcurrency int     `json:"market_default_reserved_concurrency"`
 	MarketDefaultReservedDevices     int     `json:"market_default_reserved_devices"`
 	MarketDefaultReservedAdmissions  int     `json:"market_default_reserved_admissions"`
-	MarketDefaultCap5hPct            int     `json:"market_default_cap_5h_pct"`
-	MarketDefaultCap7dPct            int     `json:"market_default_cap_7d_pct"`
-	MarketDefaultSampleMaxAgeMinutes int     `json:"market_default_sample_max_age_minutes"`
 }
 
 // MarketSettingsFromService converts the parsed block (defaults when the
@@ -33,8 +30,5 @@ func MarketSettingsFromService(s *service.SystemSettings) MarketSettings {
 		MarketDefaultReservedConcurrency: in.DefaultProtection.ReservedConcurrency,
 		MarketDefaultReservedDevices:     in.DefaultProtection.ReservedDevices,
 		MarketDefaultReservedAdmissions:  in.DefaultProtection.ReservedAdmissions,
-		MarketDefaultCap5hPct:            in.DefaultProtection.Cap5hPct,
-		MarketDefaultCap7dPct:            in.DefaultProtection.Cap7dPct,
-		MarketDefaultSampleMaxAgeMinutes: in.DefaultProtection.SampleMaxAgeMinutes,
 	}
 }

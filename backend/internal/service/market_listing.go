@@ -92,7 +92,7 @@ var (
 
 	ErrMarketTierInvalid      = infraerrors.BadRequest("INVALID_MARKET_TIER", "Market tiers must be standard (balance) anthropic groups without hosted usage and with a rate multiplier > 0")
 	ErrMarketTierFallback     = infraerrors.BadRequest("MARKET_TIER_FALLBACK", "Fallback chains may not enter or leave a market tier")
-	ErrMarketTierRateOverride = infraerrors.BadRequest("MARKET_TIER_RATE_OVERRIDE", "User rate overrides on a market tier must be greater than 0 at 4 decimal places")
+	ErrMarketTierRateOverride = infraerrors.BadRequest("MARKET_TIER_RATE_OVERRIDE", "User rate overrides on a market tier may not be negative")
 	ErrMarketTierGuardMissing = infraerrors.ServiceUnavailable("MARKET_TIER_GUARD_UNAVAILABLE", "market tier checks are unavailable")
 	// ErrMarketEarningRecordImmutable: market_earning history rows are never
 	// deleted or expired.
@@ -110,9 +110,6 @@ type MarketProtectionParams struct {
 	ReservedConcurrency int `json:"reserved_concurrency"`
 	ReservedDevices     int `json:"reserved_devices"`
 	ReservedAdmissions  int `json:"reserved_admissions"`
-	Cap5hPct            int `json:"cap_5h_pct"`
-	Cap7dPct            int `json:"cap_7d_pct"`
-	SampleMaxAgeMinutes int `json:"sample_max_age_minutes"`
 }
 
 // Bounds of the protection parameters (migration 134 CHECK).
@@ -120,17 +117,13 @@ const (
 	MaxMarketReservedConcurrency = 100
 	MaxMarketReservedDevices     = 32
 	MaxMarketReservedAdmissions  = 32
-	MaxMarketSampleMaxAgeMinutes = 1440
 )
 
 // ValidRange checks the static bounds only.
 func (p MarketProtectionParams) ValidRange() bool {
 	return p.ReservedConcurrency >= 0 && p.ReservedConcurrency <= MaxMarketReservedConcurrency &&
 		p.ReservedDevices >= 0 && p.ReservedDevices <= MaxMarketReservedDevices &&
-		p.ReservedAdmissions >= 0 && p.ReservedAdmissions <= MaxMarketReservedAdmissions &&
-		p.Cap5hPct >= 1 && p.Cap5hPct <= 100 &&
-		p.Cap7dPct >= 1 && p.Cap7dPct <= 100 &&
-		p.SampleMaxAgeMinutes >= 1 && p.SampleMaxAgeMinutes <= MaxMarketSampleMaxAgeMinutes
+		p.ReservedAdmissions >= 0 && p.ReservedAdmissions <= MaxMarketReservedAdmissions
 }
 
 // MarketListing is one account_market_listings row.
@@ -330,6 +323,17 @@ func MarketTierRateStoredPositive(rate float64) bool {
 	return decimal.NewFromFloat(rate).Round(4).IsPositive()
 }
 
+// MarketTierOverrideStoredAllowed reports a finite user rate override that
+// is >= 0 after rounding to the DECIMAL(10,4) storage precision. A zero
+// override on a tier is allowed: the buyer path is then unpriced and never
+// selects a listed account.
+func MarketTierOverrideStoredAllowed(rate float64) bool {
+	if math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return false
+	}
+	return !decimal.NewFromFloat(rate).Round(4).IsNegative()
+}
+
 // MarketTierGroupGuard is implemented by the group repository: live groups
 // whose claude_code_only fallback or invalid-request fallback points at
 // groupID (inbound references block promotion to a tier).
@@ -344,7 +348,7 @@ type MarketTierLookup interface {
 }
 
 // MarketTierRateGuard is implemented by the user-group rate repository:
-// users whose stored override on groupID is <= 0.
+// users whose stored override on groupID is negative (or NaN).
 type MarketTierRateGuard interface {
-	ListNonPositiveRateUsers(ctx context.Context, groupID int64) ([]int64, error)
+	ListNegativeRateUsers(ctx context.Context, groupID int64) ([]int64, error)
 }

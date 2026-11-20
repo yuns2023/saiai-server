@@ -124,6 +124,7 @@ func TestAdminMarketListingHandlerJSON(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"listing":null`)
 
 	w = httptest.NewRecorder()
+	// cap_5h_pct: a retired field an old tab may still send; ignored.
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing",
 		bytes.NewBufferString(`{"allowed_group_ids":[3],"reserved_concurrency":0,"cap_5h_pct":50}`)))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -136,7 +137,6 @@ func TestAdminMarketListingHandlerJSON(t *testing.T) {
 	require.Equal(t, []string{"account_id", "allowed_group_ids", "created_at", "listed_at", "owner_user_id", "protection",
 		"selected_group_id", "status", "updated_at", "version"}, marketJSONKeys(t, view.Listing))
 	require.Equal(t, 0, repo.listing.Protection.ReservedConcurrency, "explicit 0 is kept")
-	require.Equal(t, 50, repo.listing.Protection.Cap5hPct)
 	require.Equal(t, 2, repo.listing.Protection.ReservedDevices, "omitted = site default")
 
 	for _, raw := range []string{`{}`, `{"reserved_concurrency":1}`, `nope`} {
@@ -182,15 +182,15 @@ func TestResolveMarketSettings(t *testing.T) {
 	require.True(t, got.PlatformCutRate.Equal(decimal.RequireFromString("0.2")), "omitted keeps stored")
 	for _, req := range []marketSettingsRequest{
 		{MarketEarningFreezeDays: i(91)}, {MarketMinConvertUSD: f(0)}, {MarketMinConvertUSD: f(1.005)},
-		{MarketDefaultCap5hPct: i(0)}, {MarketDefaultSampleMaxAgeMinutes: i(1441)}, {MarketDefaultReservedConcurrency: i(-1)},
+		{MarketDefaultReservedDevices: i(33)}, {MarketDefaultReservedAdmissions: i(-1)}, {MarketDefaultReservedConcurrency: i(-1)},
 	} {
 		_, msg := resolveMarketSettings(&req, prev)
 		require.NotEmpty(t, msg, "%+v", req)
 	}
 
 	require.False(t, (&marketSettingsRequest{}).present(), "unrelated saves do not write the market block")
-	require.True(t, (&marketSettingsRequest{MarketDefaultCap7dPct: i(50)}).present())
-	require.Equal(t, []string{service.SettingKeyMarketDefaultCap7dPct}, (&marketSettingsRequest{MarketDefaultCap7dPct: i(50)}).providedKeys())
+	require.True(t, (&marketSettingsRequest{MarketDefaultReservedAdmissions: i(2)}).present())
+	require.Equal(t, []string{service.SettingKeyMarketDefaultReservedAdmissions}, (&marketSettingsRequest{MarketDefaultReservedAdmissions: i(2)}).providedKeys())
 	// Audit: an unrelated save (no market block written) reports no market change.
 	enabled := service.ParseMarketSettings(map[string]string{service.SettingKeyMarketEnabled: "true"})
 	require.Empty(t, diffMarketSettings(&service.SystemSettings{Market: &enabled}, &service.SystemSettings{}))

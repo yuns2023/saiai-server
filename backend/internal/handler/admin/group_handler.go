@@ -652,7 +652,15 @@ func (h *GroupHandler) ClearGroupRateMultipliers(c *gin.Context) {
 
 // BatchSetGroupRateMultipliersRequest represents batch set rate multipliers request
 type BatchSetGroupRateMultipliersRequest struct {
-	Entries []service.GroupRateMultiplierInput `json:"entries" binding:"required"`
+	Entries []batchGroupRateMultiplierEntry `json:"entries" binding:"required"`
+}
+
+// batchGroupRateMultiplierEntry: rate_multiplier is a pointer so a missing
+// or null value is refused instead of silently becoming 0 (a zero override
+// is a valid, free rate, also on a market tier).
+type batchGroupRateMultiplierEntry struct {
+	UserID         int64    `json:"user_id"`
+	RateMultiplier *float64 `json:"rate_multiplier"`
 }
 
 // BatchSetGroupRateMultipliers handles batch setting rate multipliers for a group
@@ -670,7 +678,16 @@ func (h *GroupHandler) BatchSetGroupRateMultipliers(c *gin.Context) {
 		return
 	}
 
-	if err := h.adminService.BatchSetGroupRateMultipliers(c.Request.Context(), groupID, req.Entries); err != nil {
+	entries := make([]service.GroupRateMultiplierInput, 0, len(req.Entries))
+	for i, e := range req.Entries {
+		if e.RateMultiplier == nil {
+			response.BadRequest(c, fmt.Sprintf("Invalid request: entries[%d].rate_multiplier is required", i))
+			return
+		}
+		entries = append(entries, service.GroupRateMultiplierInput{UserID: e.UserID, RateMultiplier: *e.RateMultiplier})
+	}
+
+	if err := h.adminService.BatchSetGroupRateMultipliers(c.Request.Context(), groupID, entries); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

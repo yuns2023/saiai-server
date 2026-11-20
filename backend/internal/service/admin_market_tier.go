@@ -11,8 +11,9 @@ import (
 // validateMarketTierGroup runs on every update of a group that ends up as a
 // market tier (promotion or a tier edit): the group rules, no group may fall
 // back into it (claude_code_only or invalid-request fallback, which also
-// covers a middle-of-chain node), and every stored user rate override on it
-// must stay > 0. The repositories implement the guard interfaces; a missing
+// covers a middle-of-chain node), and no stored user rate override on it
+// may be negative (0 is allowed: free self-use; the dispatch never sells a
+// listed account at a zero price). The repositories implement the guard interfaces; a missing
 // guard refuses the save instead of skipping the check.
 func (s *adminServiceImpl) validateMarketTierGroup(ctx context.Context, group *Group) error {
 	if group == nil || !group.MarketTier {
@@ -39,7 +40,7 @@ func (s *adminServiceImpl) validateMarketTierGroup(ctx context.Context, group *G
 	if !ok {
 		return ErrMarketTierGuardMissing
 	}
-	users, err := rateGuard.ListNonPositiveRateUsers(ctx, group.ID)
+	users, err := rateGuard.ListNegativeRateUsers(ctx, group.ID)
 	if err != nil {
 		return err
 	}
@@ -67,17 +68,18 @@ func userGroupRatesToCheck(rates map[int64]*float64) []marketTierRateCheck {
 }
 
 // validateMarketTierRateOverrides refuses an override on a market tier that
-// is not > 0 at the stored DECIMAL(10,4) precision (0, negative, NaN, or a
-// value such as 0.00001 that rounds to 0). Values that are positive at that
-// precision are valid on every group and need no lookup; the rest are
-// checked with one batched query of the groups' market_tier flag.
+// is negative at the stored DECIMAL(10,4) precision (or not finite). Zero is
+// allowed (free self-use: a zero price never dispatches to a listed account,
+// see computeMarketPrice / marketSnapshotGroupPriced). Values that are >= 0
+// at that precision are valid on every group and need no lookup; the rest
+// are checked with one batched query of the groups' market_tier flag.
 func (s *adminServiceImpl) validateMarketTierRateOverrides(ctx context.Context, rates []marketTierRateCheck) error {
 	if s.groupRepo == nil {
 		return nil
 	}
 	var suspect []int64
 	for _, item := range rates {
-		if !MarketTierRateStoredPositive(item.rate) && !slices.Contains(suspect, item.groupID) {
+		if !MarketTierOverrideStoredAllowed(item.rate) && !slices.Contains(suspect, item.groupID) {
 			suspect = append(suspect, item.groupID)
 		}
 	}

@@ -153,7 +153,7 @@ func (f *marketFixture) list(accountID, owner, groupID int64) (*service.MarketLi
 }
 
 func marketTestDefaults() service.MarketProtectionParams {
-	return service.MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1, Cap5hPct: 70, Cap7dPct: 60, SampleMaxAgeMinutes: 30}
+	return service.MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1}
 }
 
 func marketMemberships(t *testing.T, accountID int64) map[int64]string {
@@ -823,10 +823,23 @@ func TestMarketListingAdminRevokeAndSelectedTierRemoval(t *testing.T) {
 	require.Equal(t, l.Version, again.Version)
 	// Protection params: merged and validated against the account.
 	p, err := f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: acc, AllowedGroupIDs: []int64{tier2}, Defaults: marketTestDefaults(),
-		Merge: func(b service.MarketProtectionParams) service.MarketProtectionParams { b.Cap5hPct = 50; return b }})
+		Merge: func(b service.MarketProtectionParams) service.MarketProtectionParams {
+			b.ReservedConcurrency = 0
+			return b
+		}})
 	require.NoError(t, err)
-	require.Equal(t, 50, p.Protection.Cap5hPct)
-	require.Equal(t, 60, p.Protection.Cap7dPct)
+	require.Equal(t, 0, p.Protection.ReservedConcurrency)
+	require.Equal(t, 2, p.Protection.ReservedDevices)
+	// The retired share-cap columns are no longer written: the insert takes
+	// the column defaults and every history row copies them, so the
+	// previous binary (which still reads and writes them) keeps working.
+	var cap5h, cap7d, sampleAge int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT cap_5h_pct, cap_7d_pct, sample_max_age_minutes
+		FROM account_market_listings WHERE account_id = $1`, acc).Scan(&cap5h, &cap7d, &sampleAge))
+	require.Equal(t, []int{70, 60, 30}, []int{cap5h, cap7d, sampleAge})
+	require.Zero(t, hostedCountRows(t, `SELECT COUNT(*) FROM account_market_listing_events
+		WHERE account_id = $1 AND (cap_5h_pct, cap_7d_pct, sample_max_age_minutes) <> (70, 60, 30)`, acc))
+	require.NotZero(t, hostedCountRows(t, "SELECT COUNT(*) FROM account_market_listing_events WHERE account_id = $1", acc))
 
 	_, err = f.list(acc, owner, tier2)
 	require.NoError(t, err)
@@ -1029,13 +1042,15 @@ func TestMarketTierGuardQueries(t *testing.T) {
 
 	u1 := f.user(t)
 	u2 := f.user(t)
+	u3 := f.user(t)
 	rates := &userGroupRateRepository{sql: integrationDB}
-	zero, small := 0.0, 0.00001
+	zero, small, negative := 0.0, 0.00001, -0.5
 	require.NoError(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{plain: &zero}))
 	require.NoError(t, rates.SyncUserGroupRates(ctx, u2, map[int64]*float64{plain: &small}))
-	users, err := rates.ListNonPositiveRateUsers(ctx, plain)
+	require.NoError(t, rates.SyncUserGroupRates(ctx, u3, map[int64]*float64{plain: &negative}), "plain groups keep the general rules")
+	users, err := rates.ListNegativeRateUsers(ctx, plain)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []int64{u1, u2}, users, "0.00001 is stored as 0.0000")
+	require.Equal(t, []int64{u3}, users, "zero (and 0.00001 stored as 0.0000) is allowed on a tier, only negative is listed")
 
 	// Database guards (the backstop for concurrent admin saves).
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", plain)
@@ -1043,7 +1058,13 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = NULL, fallback_group_id_on_invalid_request = NULL WHERE id = ANY($1)", pq.Array([]int64{referrer, invalidReferrer}))
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", plain)
-	require.Equal(t, service.ErrMarketTierRateOverride, translateMarketTierGuardError(err), "zero overrides block promotion")
+	require.Equal(t, service.ErrMarketTierRateOverride, translateMarketTierGuardError(err), "a negative override blocks promotion")
+	require.NoError(t, rates.SyncUserGroupRates(ctx, u3, map[int64]*float64{plain: nil}))
+	// Migration 136: zero overrides no longer block promotion.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", plain)
+	require.NoError(t, err, "zero overrides (free self-use) do not block promotion")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_tier = FALSE WHERE id = $1", plain)
+	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = $2 WHERE id = $1", referrer, tier)
 	require.Equal(t, service.ErrMarketTierFallback, translateMarketTierGuardError(err))
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id_on_invalid_request = $2 WHERE id = $1", referrer, tier)
@@ -1051,11 +1072,21 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	ok := 1.5
 	require.NoError(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{tier: &ok}))
 	// A rejected save rolls back as a whole (its deletes included).
-	require.ErrorIs(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{plain: nil, tier: &small}), service.ErrMarketTierRateOverride)
-	require.ErrorIs(t, rates.SyncGroupRateMultipliers(ctx, tier, []service.GroupRateMultiplierInput{{UserID: u2, RateMultiplier: 0}}), service.ErrMarketTierRateOverride)
+	require.ErrorIs(t, rates.SyncUserGroupRates(ctx, u1, map[int64]*float64{plain: nil, tier: &negative}), service.ErrMarketTierRateOverride)
+	require.ErrorIs(t, rates.SyncGroupRateMultipliers(ctx, tier, []service.GroupRateMultiplierInput{{UserID: u2, RateMultiplier: -1}}), service.ErrMarketTierRateOverride)
 	kept, err := rates.GetByUserID(ctx, u1)
 	require.NoError(t, err)
 	require.Equal(t, map[int64]float64{plain: 0, tier: 1.5}, kept)
+	// Zero (and rounds-to-zero) overrides on a tier are stored (both writers).
+	require.NoError(t, rates.SyncGroupRateMultipliers(ctx, tier, []service.GroupRateMultiplierInput{{UserID: u2, RateMultiplier: 0}}))
+	require.NoError(t, rates.SyncUserGroupRates(ctx, u3, map[int64]*float64{tier: &small}))
+	tierRates, err := rates.GetByGroupID(ctx, tier)
+	require.NoError(t, err)
+	stored := map[int64]float64{}
+	for _, e := range tierRates {
+		stored[e.UserID] = e.RateMultiplier
+	}
+	require.Equal(t, map[int64]float64{u2: 0, u3: 0}, stored)
 
 	// Saving an unrelated field takes no lock on the fallback target (no
 	// lock cycle between groups that reference each other).
@@ -1077,7 +1108,7 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET fallback_group_id = NULL WHERE id = $1", referrer)
 	require.NoError(t, err)
 
-	// Concurrent promotion vs zero override: the override waits for the
+	// Concurrent promotion vs negative override: the override waits for the
 	// promotion's row lock, then sees the tier and fails.
 	fresh := f.group(t, false)
 	promote, err := integrationDB.BeginTx(ctx, nil)
@@ -1086,7 +1117,7 @@ func TestMarketTierGuardQueries(t *testing.T) {
 	_, err = promote.ExecContext(ctx, "UPDATE groups SET market_tier = TRUE WHERE id = $1", fresh)
 	require.NoError(t, err)
 	done := make(chan error, 1)
-	go func() { done <- rates.SyncUserGroupRates(ctx, u2, map[int64]*float64{fresh: &zero}) }()
+	go func() { done <- rates.SyncUserGroupRates(ctx, u2, map[int64]*float64{fresh: &negative}) }()
 	waitForLockWait(t)
 	require.NoError(t, promote.Commit())
 	select {

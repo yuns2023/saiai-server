@@ -2067,7 +2067,7 @@ func (r *accountRepository) loadMarketListingSnapshots(ctx context.Context, mark
 	}
 	rows, err := r.sql.QueryContext(ctx, `
 		SELECT account_id, owner_user_id, selected_group_id, version, reserved_concurrency, reserved_devices,
-			reserved_admissions, cap_5h_pct, cap_7d_pct, sample_max_age_minutes
+			reserved_admissions
 		FROM account_market_listings
 		WHERE account_id = ANY($1) AND status = 'listed' AND selected_group_id IS NOT NULL`, pq.Array(ids))
 	if err != nil {
@@ -2080,8 +2080,7 @@ func (r *accountRepository) loadMarketListingSnapshots(ctx context.Context, mark
 			l         service.AccountMarketListing
 		)
 		if err := rows.Scan(&accountID, &l.OwnerUserID, &l.GroupID, &l.Version,
-			&l.Protection.ReservedConcurrency, &l.Protection.ReservedDevices, &l.Protection.ReservedAdmissions,
-			&l.Protection.Cap5hPct, &l.Protection.Cap7dPct, &l.Protection.SampleMaxAgeMinutes); err != nil {
+			&l.Protection.ReservedConcurrency, &l.Protection.ReservedDevices, &l.Protection.ReservedAdmissions); err != nil {
 			return nil, err
 		}
 		out[accountID] = &l

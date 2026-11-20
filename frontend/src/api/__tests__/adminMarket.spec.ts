@@ -27,7 +27,7 @@ describe('admin marketAPI', () => {
     expect(v.ineligible_reason).toBe('')
 
     http.put.mockResolvedValue({ data: view })
-    const body = { allowed_group_ids: [], reserved_concurrency: 0, reserved_devices: 0, reserved_admissions: 0, cap_5h_pct: 70, cap_7d_pct: 60, sample_max_age_minutes: 30 }
+    const body = { allowed_group_ids: [], reserved_concurrency: 0, reserved_devices: 0, reserved_admissions: 0 }
     await marketAPI.putListing(11, body)
     // allowed_group_ids is always sent (an empty list allows nothing); explicit zeros stay zeros.
     expect(http.put).toHaveBeenCalledWith('/admin/accounts/11/market-listing', body)
