@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -187,6 +188,32 @@ func TestClaudeDevicePlatformParse_Caps(t *testing.T) {
 	p, _, overflow = extractClaudeEnvironmentPlatform(huge)
 	require.True(t, overflow)
 	require.Empty(t, p)
+
+	// A line cut by the scan budget is not read as complete.
+	cut := strings.Repeat("x", claudeDevicePlatformMaxScanBytes-40) + "\n# Environment\n - Platform: darwin-and-more"
+	p, _, overflow = extractClaudeEnvironmentPlatform(cut)
+	require.True(t, len(cut) > claudeDevicePlatformMaxScanBytes)
+	require.True(t, overflow)
+	require.Empty(t, p)
+
+	// Many heading candidates on one huge line stay linear (finishes fast).
+	start := time.Now()
+	p, _, _ = extractClaudeEnvironmentPlatform(strings.Repeat("# Environment ", claudeDevicePlatformMaxScanBytes/14))
+	require.Empty(t, p)
+	require.Less(t, time.Since(start), 2*time.Second)
+
+	// An over-long heading line still ends the section.
+	longHeading := "# Environment\n - Shell: zsh\n# " + strings.Repeat("h", claudeDevicePlatformMaxLineBytes) + "\n - Platform: win32\n"
+	p, _, _ = extractClaudeEnvironmentPlatform(longHeading)
+	require.Empty(t, p)
+
+	// Non-text blocks in an array are ignored.
+	p, _, _ = extractClaudeEnvironmentPlatform([]any{map[string]any{"type": "image", "text": cdpEnvBlock("win32", "Windows 11 Pro 10.0.26200")}})
+	require.Empty(t, p)
+
+	// Over-long headers are unknown, never parsed.
+	got, _ := normalizeClaudeDevicePlatform(cdpHeaders("Linux"+strings.Repeat(" ", 64), "x64"+strings.Repeat(" ", 64)), nil)
+	require.Equal(t, ClaudeDevicePlatformSample{"unknown", "unknown", ""}, got)
 
 	// Non-text values are ignored.
 	p, _, overflow = extractClaudeEnvironmentPlatform(map[string]any{"text": "x"})

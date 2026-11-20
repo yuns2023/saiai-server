@@ -31,6 +31,7 @@ const (
 	claudeDevicePlatformMaxLineBytes    = 512
 	claudeDevicePlatformMaxVersionDigit = 6
 	claudeDevicePlatformMaxUserIDBytes  = 4096
+	claudeDevicePlatformMaxHeaderBytes  = 32
 	claudeDevicePlatformDisplayPrefix   = 8
 )
 
@@ -68,7 +69,8 @@ func claudeDeviceIdentity(deviceID string) (digest, prefix string, ok bool) {
 	}
 	lower := strings.ToLower(deviceID)
 	sum := sha256.Sum256([]byte(lower))
-	return hex.EncodeToString(sum[:]), lower[:claudeDevicePlatformDisplayPrefix], true
+	// Clone: the device id may share memory with the whole request body.
+	return hex.EncodeToString(sum[:]), strings.Clone(lower[:claudeDevicePlatformDisplayPrefix]), true
 }
 
 // normalizeClaudeDevicePlatform combines the X-Stainless-* headers (present
@@ -81,6 +83,14 @@ func normalizeClaudeDevicePlatform(headers http.Header, system any) (ClaudeDevic
 	if headers != nil {
 		headerOS = headers.Get("X-Stainless-Os")
 		headerArch = headers.Get("X-Stainless-Arch")
+	}
+	// Real values are a few bytes; longer ones are "present but unknown"
+	// and are never trimmed or lower-cased.
+	if len(headerOS) > claudeDevicePlatformMaxHeaderBytes {
+		headerOS = claudeDevicePlatformOther
+	}
+	if len(headerArch) > claudeDevicePlatformMaxHeaderBytes {
+		headerArch = ""
 	}
 	switch strings.ToLower(strings.TrimSpace(headerArch)) {
 	case "x64":
@@ -250,6 +260,9 @@ func extractClaudeEnvironmentPlatform(system any) (platform, osVersion string, o
 			if !ok {
 				continue
 			}
+			if kind, _ := m["type"].(string); kind != "text" {
+				continue
+			}
 			if text, ok := m["text"].(string); ok && text != "" {
 				texts = append(texts, text)
 			}
@@ -264,7 +277,13 @@ func extractClaudeEnvironmentPlatform(system any) (platform, osVersion string, o
 			break
 		}
 		if len(text) > budget {
+			// Never read a line cut by the budget as if it were complete.
 			text = text[:budget]
+			if cut := strings.LastIndexByte(text, '\n'); cut >= 0 {
+				text = text[:cut]
+			} else {
+				text = ""
+			}
 			overflow = true
 		}
 		budget -= len(text)
@@ -277,49 +296,34 @@ func extractClaudeEnvironmentPlatform(system any) (platform, osVersion string, o
 	return "", "", overflow
 }
 
-// scanClaudeEnvironmentSection finds the first line that is exactly
-// "# Environment" (surrounding blanks allowed) and reads the following lines
-// until the next heading, at most claudeDevicePlatformMaxEnvLines lines.
+// scanClaudeEnvironmentSection walks the lines once (linear in the text):
+// the first line that is exactly "# Environment" (surrounding blanks
+// allowed) opens the section, which ends at the next heading or after
+// claudeDevicePlatformMaxEnvLines lines. Over-long lines are never parsed
+// as values; an over-long line starting with "#" still ends the section.
 func scanClaudeEnvironmentSection(text string) (platform, osVersion string, found, overflow bool) {
 	const heading = "# Environment"
-	pos := 0
-	start := -1
-	for pos < len(text) {
-		idx := strings.Index(text[pos:], heading)
-		if idx < 0 {
-			return "", "", false, false
-		}
-		idx += pos
-		lineStart := strings.LastIndexByte(text[:idx], '\n') + 1
-		lineEnd := strings.IndexByte(text[idx:], '\n')
-		if lineEnd < 0 {
-			lineEnd = len(text)
-		} else {
-			lineEnd += idx
-		}
-		if strings.TrimSpace(text[lineStart:lineEnd]) == heading {
-			start = lineEnd
-			break
-		}
-		pos = idx + len(heading)
-	}
-	if start < 0 {
-		return "", "", false, false
-	}
-	rest := text[start:]
-	for n := 0; len(rest) > 0 && n <= claudeDevicePlatformMaxEnvLines; n++ {
+	inSection := false
+	lines := 0
+	for len(text) > 0 {
 		var line string
-		if i := strings.IndexByte(rest, '\n'); i >= 0 {
-			line, rest = rest[:i], rest[i+1:]
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			line, text = text[:i], text[i+1:]
 		} else {
-			line, rest = rest, ""
+			line, text = text, ""
 		}
-		if n == 0 {
-			// The remainder of the heading line itself (empty).
+		if !inSection {
+			if len(line) <= claudeDevicePlatformMaxLineBytes && strings.TrimSpace(line) == heading {
+				inSection, found = true, true
+			}
 			continue
 		}
-		if n == claudeDevicePlatformMaxEnvLines {
+		lines++
+		if lines > claudeDevicePlatformMaxEnvLines {
 			overflow = true
+			break
+		}
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
 			break
 		}
 		if len(line) > claudeDevicePlatformMaxLineBytes {
@@ -327,9 +331,6 @@ func scanClaudeEnvironmentSection(text string) (platform, osVersion string, foun
 			continue
 		}
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
-			break
-		}
 		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
 		if value, ok := strings.CutPrefix(trimmed, "Platform:"); ok && platform == "" {
 			platform = strings.TrimSpace(value)
@@ -337,5 +338,5 @@ func scanClaudeEnvironmentSection(text string) (platform, osVersion string, foun
 			osVersion = strings.TrimSpace(value)
 		}
 	}
-	return platform, osVersion, true, overflow
+	return platform, osVersion, found, overflow
 }

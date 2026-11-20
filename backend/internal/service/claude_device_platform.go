@@ -333,6 +333,9 @@ func (s *ClaudeDevicePlatformService) ObserveRequest(deviceID string, headers ht
 	select {
 	case s.queue <- obs:
 		s.counters.enqueued.Add(1)
+		// Remembered at enqueue so identical requests racing the first
+		// write are not queued again; a failed write forgets it.
+		s.dedupe.remember(obs, s.now())
 	default:
 		s.counters.queueFull.Add(1)
 	}
@@ -355,6 +358,7 @@ func (s *ClaudeDevicePlatformService) write(obs ClaudeDevicePlatformObservation)
 	defer cancel()
 	status, err := s.store.RecordClaudeDevicePlatform(ctx, obs, s.limits)
 	if err != nil {
+		s.dedupe.forget(obs)
 		if s.counters.writeErrors.Add(1)%100 == 1 {
 			logger.L().Debug("gateway.claude_device_platform_write_failed", zap.Error(err))
 		}
@@ -363,7 +367,6 @@ func (s *ClaudeDevicePlatformService) write(obs ClaudeDevicePlatformObservation)
 	switch status {
 	case ClaudeDevicePlatformWriteOK:
 		s.counters.written.Add(1)
-		s.dedupe.remember(obs, s.now())
 	case ClaudeDevicePlatformWriteGlobalCap:
 		s.counters.globalCap.Add(1)
 	case ClaudeDevicePlatformWriteUserCap:
@@ -479,7 +482,10 @@ func (s *ClaudeDevicePlatformService) resolveUsers(ctx context.Context, items []
 	}
 }
 
-// claudeDevicePlatformDedupe is a bounded LRU of recently written states.
+// claudeDevicePlatformDedupe is a bounded LRU keyed by device + user that
+// keeps the last queued state (family, arch, major). Only a repeat of that
+// last state within the interval is skipped, so 15 -> 26 -> 15 writes all
+// three observations.
 type claudeDevicePlatformDedupe struct {
 	mu    sync.Mutex
 	max   int
@@ -488,30 +494,23 @@ type claudeDevicePlatformDedupe struct {
 }
 
 type claudeDevicePlatformDedupeEntry struct {
-	key string
-	at  time.Time
+	key   string
+	state string
+	at    time.Time
 }
 
 func newClaudeDevicePlatformDedupe(size int) *claudeDevicePlatformDedupe {
 	return &claudeDevicePlatformDedupe{max: size, order: list.New(), items: make(map[string]*list.Element, size)}
 }
 
-func claudeDevicePlatformDedupeKey(obs ClaudeDevicePlatformObservation) string {
-	var b strings.Builder
-	b.Grow(len(obs.Digest) + len(obs.Family) + len(obs.Arch) + len(obs.Major) + 24)
-	_, _ = b.WriteString(obs.Digest)
-	for _, part := range []string{obs.Family, obs.Arch, obs.Major} {
-		_ = b.WriteByte('|')
-		_, _ = b.WriteString(part)
-	}
-	_ = b.WriteByte('|')
-	_, _ = b.WriteString(strconv.FormatInt(obs.UserID, 10))
-	return b.String()
+func claudeDevicePlatformDedupeKey(obs ClaudeDevicePlatformObservation) (key, state string) {
+	return obs.Digest + "|" + strconv.FormatInt(obs.UserID, 10), obs.Family + "|" + obs.Arch + "|" + obs.Major
 }
 
-// recent reports that the exact same state was written within the interval.
+// recent reports that the device+user's last queued state equals this one
+// and was queued within the interval.
 func (d *claudeDevicePlatformDedupe) recent(obs ClaudeDevicePlatformObservation, now time.Time) bool {
-	key := claudeDevicePlatformDedupeKey(obs)
+	key, state := claudeDevicePlatformDedupeKey(obs)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	el, ok := d.items[key]
@@ -520,20 +519,20 @@ func (d *claudeDevicePlatformDedupe) recent(obs ClaudeDevicePlatformObservation,
 	}
 	entry, _ := el.Value.(*claudeDevicePlatformDedupeEntry)
 	age := now.Sub(entry.at)
-	return age >= 0 && age < claudeDevicePlatformDedupeInterval
+	return entry.state == state && age >= 0 && age < claudeDevicePlatformDedupeInterval
 }
 
 func (d *claudeDevicePlatformDedupe) remember(obs ClaudeDevicePlatformObservation, now time.Time) {
-	key := claudeDevicePlatformDedupeKey(obs)
+	key, state := claudeDevicePlatformDedupeKey(obs)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if el, ok := d.items[key]; ok {
 		entry, _ := el.Value.(*claudeDevicePlatformDedupeEntry)
-		entry.at = now
+		entry.state, entry.at = state, now
 		d.order.MoveToFront(el)
 		return
 	}
-	d.items[key] = d.order.PushFront(&claudeDevicePlatformDedupeEntry{key: key, at: now})
+	d.items[key] = d.order.PushFront(&claudeDevicePlatformDedupeEntry{key: key, state: state, at: now})
 	for d.order.Len() > d.max {
 		oldest := d.order.Back()
 		if oldest == nil {
@@ -542,5 +541,18 @@ func (d *claudeDevicePlatformDedupe) remember(obs ClaudeDevicePlatformObservatio
 		entry, _ := oldest.Value.(*claudeDevicePlatformDedupeEntry)
 		delete(d.items, entry.key)
 		d.order.Remove(oldest)
+	}
+}
+
+// forget drops the entry if it still holds this observation's state.
+func (d *claudeDevicePlatformDedupe) forget(obs ClaudeDevicePlatformObservation) {
+	key, state := claudeDevicePlatformDedupeKey(obs)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if el, ok := d.items[key]; ok {
+		if entry, _ := el.Value.(*claudeDevicePlatformDedupeEntry); entry.state == state {
+			delete(d.items, key)
+			d.order.Remove(el)
+		}
 	}
 }

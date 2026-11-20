@@ -153,7 +153,7 @@ if uid ~= '0' then
     if count >= maxUsers then
       redis.call('HSET', dev, 'ut', '1')
       fields['ut'] = '1'
-      if oldestLast ~= nil and oldestLast < now then
+      if oldestLast ~= nil and oldestLast <= now then
         redis.call('HDEL', dev, oldestField)
         fields[oldestField] = nil
       else
@@ -192,9 +192,15 @@ for k, v in pairs(fields) do
 end
 
 local matched = {}
+-- The window is anchored at the newest family sighting (never before this
+-- event), so a late older event is not paired with a much newer one.
+local anchor = now
+for _, l in pairs(familyLast) do
+  if l > anchor then anchor = l end
+end
 local recent = {}
 for f, l in pairs(familyLast) do
-  if l >= now - familyWindow then table.insert(recent, f) end
+  if l >= anchor - familyWindow then table.insert(recent, f) end
 end
 if #recent >= 2 then
   table.sort(recent)
@@ -270,7 +276,9 @@ else
 end
 
 redis.call('ZADD', tracked, 'GT', now, digest)
-redis.call('EXPIRE', dev, retention)
+-- The hash expires exactly when its tracked entry is pruned (same clock).
+local seen = tonumber(redis.call('ZSCORE', tracked, digest)) or now
+redis.call('EXPIREAT', dev, seen + retention)
 return {'ok', isNew, reasonCount}
 `)
 
@@ -372,8 +380,29 @@ func (r *claudeDevicePlatformCache) nextMembers(ctx context.Context, cursor *cla
 		return nil, nil
 	}
 	scoreText := strconv.FormatInt(cursor.score, 10)
-	// Members tied with the cursor score that sort after it. The tie group
-	// is bounded by the zset cap.
+	// Fast path: the cursor member still has its score, so the next members
+	// in (score desc, member desc) order follow its reverse rank.
+	if score, err := r.rdb.ZScore(ctx, claudeDevicePlatformFlaggedKey, cursor.digest).Result(); err == nil && int64(score) == cursor.score {
+		rank, err := r.rdb.ZRevRank(ctx, claudeDevicePlatformFlaggedKey, cursor.digest).Result()
+		if err == nil {
+			members, err := r.rdb.ZRevRangeWithScores(ctx, claudeDevicePlatformFlaggedKey, rank+1, rank+int64(n)).Result()
+			if err != nil {
+				return nil, err
+			}
+			out := members[:0]
+			for _, m := range members {
+				if int64(m.Score) >= minScore {
+					out = append(out, m)
+				}
+			}
+			return out, nil
+		}
+	} else if err != nil && err != redis.Nil {
+		return nil, err
+	}
+	// Slow path (the cursor member was removed or re-scored): members tied
+	// with the cursor score that sort after it. The tie group is bounded by
+	// the zset cap.
 	ties, err := r.rdb.ZRevRangeByScore(ctx, claudeDevicePlatformFlaggedKey, &redis.ZRangeBy{
 		Max: scoreText, Min: scoreText,
 	}).Result()
@@ -526,6 +555,9 @@ func decodeClaudeDevicePlatformDevice(fields map[string]string, cutoff int64) (s
 			if !ok {
 				continue
 			}
+			if last < cutoff {
+				continue // left the retention window since the last write
+			}
 			firstAt, lastAt := time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
 			if k[1] == 'a' {
 				device.Platforms = append(device.Platforms, service.ClaudeDevicePlatformArchEntry{Family: family, Arch: second, FirstSeenAt: firstAt, LastSeenAt: lastAt})
@@ -535,7 +567,7 @@ func decodeClaudeDevicePlatformDevice(fields map[string]string, cutoff int64) (s
 		case strings.HasPrefix(k, "u:"):
 			uid, err := strconv.ParseInt(k[2:], 10, 64)
 			last, keyText, ok := splitClaudeDevicePlatformValue(v)
-			if err != nil || !ok {
+			if err != nil || !ok || last < cutoff {
 				continue
 			}
 			keyID, _ := strconv.ParseInt(keyText, 10, 64)

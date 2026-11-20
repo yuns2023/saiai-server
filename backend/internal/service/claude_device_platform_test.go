@@ -113,9 +113,14 @@ func TestClaudeDevicePlatformService_DedupeOnlySkipsSameState(t *testing.T) {
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("Windows", "arm64"), nil, key), "platform change commits")
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 25.0.0"), key), "major change commits")
 	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), nil, &APIKey{ID: 9, UserID: 2}), "user change commits")
+	// 15 -> 26 -> 15 within the interval: every switch is written.
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 25.0.0"), key))
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
+	require.Equal(t, 0, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key))
 	now = now.Add(claudeDevicePlatformDedupeInterval)
-	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), nil, key), "interval elapsed")
-	require.Equal(t, int64(5), svc.Stats().Written)
+	require.Equal(t, 1, observeAndWrite(cdpHeaders("MacOS", "arm64"), cdpEnvBlock("darwin", "Darwin 24.3.0"), key), "interval elapsed")
+	require.Equal(t, int64(8), svc.Stats().Written)
 
 	// A failed write is not remembered.
 	store.err = context.DeadlineExceeded

@@ -43,8 +43,11 @@ func (s *GatewayService) observeClaudeDevicePlatformAux(c *gin.Context, account 
 	if s == nil || s.claudeDevicePlatform == nil || parsed == nil {
 		return
 	}
+	if len(parsed.MetadataUserID) > claudeDevicePlatformMaxUserIDBytes {
+		return
+	}
 	raw := strings.TrimSpace(parsed.MetadataUserID)
-	if raw == "" || len(raw) > claudeDevicePlatformMaxUserIDBytes {
+	if raw == "" {
 		return
 	}
 	userID := ParseMetadataUserID(raw)

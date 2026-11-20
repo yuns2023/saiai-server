@@ -99,6 +99,12 @@ func TestClaudeDevicePlatformRedis_CrossFamily(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, float64(cdpT0+60), score)
 
+	// A late, much older event is not paired with a newer family.
+	h.record(cdpObs("late", "linux", "x64", "", 1, cdpT0+25*3600))
+	h.record(cdpObs("late", "macos", "x64", "", 1, cdpT0))
+	_, flagged = h.device("late", cdpT0+25*3600)
+	require.False(t, flagged)
+
 	// Two families more than 24 h apart are not cross_family.
 	h.record(cdpObs("b", "macos", "arm64", "", 1, cdpT0))
 	h.record(cdpObs("b", "linux", "arm64", "", 1, cdpT0+25*3600))
@@ -187,7 +193,17 @@ func TestClaudeDevicePlatformRedis_UserTruncationKeepsFlag(t *testing.T) {
 	require.False(t, ids[1], "oldest user replaced")
 	require.True(t, ids[21])
 
-	// An older out-of-order event for a 22nd user is dropped, the flag stays.
+	// A 22nd user in the same second as the oldest kept user replaces it.
+	h.record(cdpObs("many", "linux", "x64", "", 23, cdpT0+2))
+	d, _ = h.device("many", cdpT0+21)
+	ids = map[int64]bool{}
+	for _, u := range d.Users {
+		ids[u.UserID] = true
+	}
+	require.True(t, ids[23])
+	require.False(t, ids[2])
+
+	// An older out-of-order event for another user is dropped, the flag stays.
 	h.record(cdpObs("many", "linux", "x64", "", 22, cdpT0))
 	d, _ = h.device("many", cdpT0+21)
 	require.Len(t, d.Users, service.ClaudeDevicePlatformMaxUsers)
@@ -224,12 +240,32 @@ func TestClaudeDevicePlatformRedis_GlobalAndUserCaps(t *testing.T) {
 	require.Zero(t, h.rdb.ZCard(ctx, claudeDevicePlatformFlaggedKey).Val())
 }
 
+func TestClaudeDevicePlatformRedis_ReadDropsExpiredDetails(t *testing.T) {
+	h := newCDPHarness(t)
+	h.record(cdpObs("old", "macos", "arm64", "", 1, cdpT0))
+	h.record(cdpObs("old", "linux", "x64", "", 2, cdpT0+29*86400))
+	// Read on day 31: user 1 and the macOS entry left the window, the
+	// cross_user flag (matched on day 29) is still shown.
+	d, flagged := h.device("old", cdpT0+31*86400)
+	require.True(t, flagged)
+	require.True(t, reasonSet(d)["cross_user"])
+	require.Len(t, d.Users, 1)
+	require.Equal(t, int64(2), d.Users[0].UserID)
+	require.Len(t, d.Platforms, 1)
+	require.Equal(t, "linux", d.Platforms[0].Family)
+}
+
 func TestClaudeDevicePlatformRedis_TTLs(t *testing.T) {
 	h := newCDPHarness(t)
 	ctx := context.Background()
 	h.record(cdpObs("ttl", "linux", "x64", "", 1, cdpT0))
-	ttl := h.rdb.TTL(ctx, claudeDevicePlatformDevKey(cdpDigest("ttl"))).Val()
-	require.InDelta(t, service.ClaudeDevicePlatformRetention.Seconds(), ttl.Seconds(), 5)
+	// The hash expires when its tracked entry would be pruned (event clock).
+	expireAt := h.rdb.ExpireTime(ctx, claudeDevicePlatformDevKey(cdpDigest("ttl"))).Val()
+	require.Equal(t, time.Duration(cdpT0)*time.Second+service.ClaudeDevicePlatformRetention, expireAt)
+	h.record(cdpObs("ttl", "linux", "x64", "", 1, cdpT0+100))
+	h.record(cdpObs("ttl", "linux", "x64", "", 1, cdpT0+50)) // late event never shortens it
+	expireAt = h.rdb.ExpireTime(ctx, claudeDevicePlatformDevKey(cdpDigest("ttl"))).Val()
+	require.Equal(t, time.Duration(cdpT0+100)*time.Second+service.ClaudeDevicePlatformRetention, expireAt)
 	dailyTTL := h.rdb.TTL(ctx, claudeDevicePlatformNewKey(1, cdpT0)).Val()
 	require.InDelta(t, (48 * time.Hour).Seconds(), dailyTTL.Seconds(), 5)
 }
@@ -313,6 +349,22 @@ func TestClaudeDevicePlatformRedis_ListPagination(t *testing.T) {
 	page, err = h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 10, Reasons: []string{"arch_only"}, Now: now})
 	require.NoError(t, err)
 	require.Len(t, page.Items, 1)
+
+	// The cursor member disappears between pages (slow path): no
+	// duplicates, the rest of the tie group still follows.
+	first, err := h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 2, Reasons: []string{"cross_user"}, Now: now})
+	require.NoError(t, err)
+	require.Len(t, first.Items, 2)
+	cursorDigest := first.NextCursor[len(first.NextCursor)-64:]
+	require.NoError(t, h.rdb.ZRem(ctx, claudeDevicePlatformFlaggedKey, cursorDigest).Err())
+	rest, err := h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 10, Cursor: first.NextCursor, Reasons: []string{"cross_user"}, Now: now})
+	require.NoError(t, err)
+	require.Len(t, rest.Items, 3)
+	for _, item := range rest.Items {
+		for _, prev := range first.Items {
+			require.NotEqual(t, prev.DisplayPrefix, item.DisplayPrefix)
+		}
+	}
 
 	_, err = h.store.ListFlaggedClaudeDevicePlatforms(ctx, service.ClaudeDevicePlatformFlaggedQuery{Limit: 10, Cursor: "garbage", Now: now})
 	require.ErrorIs(t, err, service.ErrClaudeDevicePlatformInvalidQuery)
