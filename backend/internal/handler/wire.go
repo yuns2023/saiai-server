@@ -37,6 +37,7 @@ func ProvideAdminHandlers(
 	hostedApplicationHandler *admin.HostedApplicationHandler,
 	marketListingHandler *admin.MarketListingHandler,
 	marketEarningsHandler *admin.MarketEarningsHandler,
+	claudeDevicePlatformHandler *admin.ClaudeDevicePlatformHandler,
 	hostedOwnerService *service.HostedOwnerService,
 ) *AdminHandlers {
 	accountHandler.SetHostedOwnerService(hostedOwnerService)
@@ -71,6 +72,8 @@ func ProvideAdminHandlers(
 		HostedApplication: hostedApplicationHandler,
 		MarketListing:     marketListingHandler,
 		MarketEarnings:    marketEarningsHandler,
+
+		ClaudeDevicePlatform: claudeDevicePlatformHandler,
 	}
 }
 
@@ -214,6 +217,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewPaymentHandler,
 	admin.NewCryptoPayHandler,
 	admin.NewSettlementHandler,
+	admin.NewClaudeDevicePlatformHandler,
 	admin.NewHostedApplicationHandler,
 	admin.NewMarketListingHandler,
 	admin.NewMarketEarningsHandler,

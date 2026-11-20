@@ -343,11 +343,13 @@ func ProvideGatewayService(
 	digestStore *DigestSessionStore,
 	settingService *SettingService,
 	market *MarketRuntime,
+	devicePlatform *ClaudeDevicePlatformService,
 ) *GatewayService {
 	svc := NewGatewayService(accountRepo, groupRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
 		cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService, billingCacheService, identityService,
 		httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestStore, settingService)
 	svc.SetMarketRuntime(market)
+	svc.SetClaudeDevicePlatformService(devicePlatform)
 	return svc
 }
 
@@ -724,6 +726,7 @@ var ProviderSet = wire.NewSet(
 	ProvideIdempotencyCoordinator,
 	ProvideIdempotencyCleanupService,
 	ProvideClaudeEntrypointObservationService,
+	ProvideClaudeDevicePlatformService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,

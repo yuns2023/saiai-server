@@ -82,6 +82,7 @@ var ProviderSet = wire.NewSet(
 	NewInputModerationTaskQueue,
 	NewClaudeDeviceRepository,
 	NewClaudeEntrypointObservationRepository,
+	NewClaudeDevicePlatformUserLookup,
 	NewClientDeviceRepository,
 	NewClientProofNonceStore,
 
@@ -98,6 +99,7 @@ var ProviderSet = wire.NewSet(
 	NewDashboardCache,
 	NewEmailCache,
 	NewIdentityCache,
+	NewClaudeDevicePlatformStore,
 	NewRedeemCache,
 	NewGeminiTokenCache,
 	NewSchedulerCache,

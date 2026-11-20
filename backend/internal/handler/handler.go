@@ -37,6 +37,8 @@ type AdminHandlers struct {
 	MarketListing *admin.MarketListingHandler
 	// MarketEarnings: owner earnings overview, ledger and reverse (P3a).
 	MarketEarnings *admin.MarketEarningsHandler
+	// ClaudeDevicePlatform: read-only flagged Claude device list.
+	ClaudeDevicePlatform *admin.ClaudeDevicePlatformHandler
 }
 
 // Handlers contains all HTTP handlers

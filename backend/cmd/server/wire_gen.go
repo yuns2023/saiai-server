@@ -205,7 +205,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	deferredService := service.ProvideDeferredService(accountRepository, timingWheelService)
 	claudeTokenProvider := service.ProvideClaudeTokenProvider(accountRepository, geminiTokenCache, oAuthService, oAuthRefreshAPI)
 	digestSessionStore := service.NewDigestSessionStore()
-	gatewayService := service.ProvideGatewayService(accountRepository, groupRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, identityService, httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestSessionStore, settingService, marketRuntime)
+	claudeDevicePlatformStore := repository.NewClaudeDevicePlatformStore(redisClient)
+	claudeDevicePlatformUserLookup := repository.NewClaudeDevicePlatformUserLookup(client)
+	claudeDevicePlatformService := service.ProvideClaudeDevicePlatformService(claudeDevicePlatformStore, claudeDevicePlatformUserLookup)
+	gatewayService := service.ProvideGatewayService(accountRepository, groupRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, identityService, httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestSessionStore, settingService, marketRuntime, claudeDevicePlatformService)
 	openAIGatewayService := service.NewOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider)
 	geminiTokenProvider := service.ProvideGeminiTokenProvider(accountRepository, geminiTokenCache, geminiOAuthService, oAuthRefreshAPI)
 	antigravityGatewayService := service.ProvideRetiredAntigravityGatewayService()
@@ -248,7 +251,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	hostedApplicationHandler := admin.NewHostedApplicationHandler(hostedSelfOnboardService)
 	adminMarketListingHandler := admin.NewMarketListingHandler(marketListingService)
 	adminMarketEarningsHandler := admin.NewMarketEarningsHandler(ownerEarningService)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler, cryptoPayHandler, settlementHandler, hostedApplicationHandler, adminMarketListingHandler, adminMarketEarningsHandler, hostedOwnerService)
+	claudeDevicePlatformHandler := admin.NewClaudeDevicePlatformHandler(claudeDevicePlatformService)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accessLevelHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, adminSubscriptionHandler, adminUsageHandler, moderationEvidenceHandler, userAttributeHandler, errorPassthroughHandler, adminAPIKeyHandler, paymentHandler, cryptoPayHandler, settlementHandler, hostedApplicationHandler, adminMarketListingHandler, adminMarketEarningsHandler, claudeDevicePlatformHandler, hostedOwnerService)
 	usageRecordWorkerPool := service.NewUsageRecordWorkerPool(configConfig)
 	inputModerationClient := repository.NewConfiguredInputModerationClient(jevSettingsService)
 	inputModerationTaskQueue := repository.NewInputModerationTaskQueue(redisClient)
@@ -287,7 +291,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	cryptoPayWorker := service.ProvideCryptoPayWorker(db, cryptoPayService)
 	moderationEvidenceCleanupService := service.ProvideModerationEvidenceCleanupService(db, inputModerationEvidenceRepository)
 	hostedApplicationExpiryWorker := service.ProvideHostedApplicationExpiryWorker(hostedSelfOnboardService)
-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, cryptoPayWorker, moderationEvidenceCleanupService, hostedApplicationExpiryWorker, usageCleanupService, idempotencyCleanupService, claudeEntrypointObservationService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
+	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, schedulerSnapshotService, tokenRefreshService, carpoolMaintenanceService, accountExpiryService, subscriptionExpiryService, paymentExpiryService, cryptoPayWorker, moderationEvidenceCleanupService, hostedApplicationExpiryWorker, usageCleanupService, idempotencyCleanupService, claudeEntrypointObservationService, claudeDevicePlatformService, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, inputModerationService, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, openAIGatewayService, backupService)
 	application := &Application{
 		Server:  httpServer,
 		Cleanup: v,
@@ -327,6 +331,7 @@ func provideCleanup(
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	claudeEntrypointObservations *service.ClaudeEntrypointObservationService,
+	claudeDevicePlatform *service.ClaudeDevicePlatformService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
@@ -405,6 +410,10 @@ func provideCleanup(
 			}},
 			{"ClaudeEntrypointObservationService", func() error {
 				claudeEntrypointObservations.Stop()
+				return nil
+			}},
+			{"ClaudeDevicePlatformService", func() error {
+				claudeDevicePlatform.Stop()
 				return nil
 			}},
 			{"TokenRefreshService", func() error {

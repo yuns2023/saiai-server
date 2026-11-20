@@ -27,6 +27,7 @@ import accessLevelsAPI from './accessLevels'
 import cryptoPayAPI from './cryptoPay'
 import hostedApplicationsAPI from './hostedApplications'
 import marketAPI from './market'
+import claudeDevicePlatformAPI from './claudeDevicePlatform'
 
 /**
  * Unified admin API object for convenient access
@@ -55,7 +56,8 @@ export const adminAPI = {
   accessLevels: accessLevelsAPI,
   cryptoPay: cryptoPayAPI,
   hostedApplications: hostedApplicationsAPI,
-  market: marketAPI
+  market: marketAPI,
+  claudeDevicePlatform: claudeDevicePlatformAPI
 }
 
 export {
@@ -82,7 +84,8 @@ export {
   accessLevelsAPI,
   cryptoPayAPI,
   hostedApplicationsAPI,
-  marketAPI
+  marketAPI,
+  claudeDevicePlatformAPI
 }
 
 export type { PaymentProvider, PaymentProviderInput, PaymentConfigUpdate, AdminPaymentOrder } from './payment'

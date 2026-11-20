@@ -948,6 +948,9 @@ type GatewayService struct {
 	stickySelectionLocks                 map[string]*stickySelectionLock
 	// market is the P3a market dispatch runtime (nil = no market).
 	market *MarketRuntime
+
+	// claudeDevicePlatform records device platforms (observe-only); nil = off.
+	claudeDevicePlatform *ClaudeDevicePlatformService
 }
 
 // NewGatewayService creates a new GatewayService
@@ -1992,6 +1995,7 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {
 		if forCountTokens && isClaudeOAuthCountTokensAuxRequest(c, parsed) {
+			s.observeClaudeDevicePlatformAux(c, account, parsed)
 			logger.LegacyPrintf(
 				"service.gateway",
 				"Claude OAuth count_tokens auxiliary request allowed request_id=%s account=%d reason=%s model=%s",
@@ -2016,9 +2020,11 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 	}
 
 	originalUserID := strings.TrimSpace(parsed.MetadataUserID)
-	if ParseMetadataUserID(originalUserID) == nil {
+	parsedOriginalUserID := ParseMetadataUserID(originalUserID)
+	if parsedOriginalUserID == nil {
 		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth requests require a valid metadata.user_id", ErrClaudeOAuthMetadataRequired)
 	}
+	s.observeClaudeDevicePlatform(c, account, parsed, parsedOriginalUserID.DeviceID)
 	if account.Type != AccountTypeSetupToken && strings.TrimSpace(account.GetExtraString("account_uuid")) == "" {
 		return body, nil, s.claudeOAuthClientRequestError(c, forCountTokens, "Claude OAuth requests require account.extra.account_uuid", ErrClaudeOAuthAccountUUIDRequired)
 	}

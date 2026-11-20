@@ -78,6 +78,7 @@ func provideCleanup(
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	claudeEntrypointObservations *service.ClaudeEntrypointObservationService,
+	claudeDevicePlatform *service.ClaudeDevicePlatformService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
@@ -157,6 +158,10 @@ func provideCleanup(
 			}},
 			{"ClaudeEntrypointObservationService", func() error {
 				claudeEntrypointObservations.Stop()
+				return nil
+			}},
+			{"ClaudeDevicePlatformService", func() error {
+				claudeDevicePlatform.Stop()
 				return nil
 			}},
 			{"TokenRefreshService", func() error {

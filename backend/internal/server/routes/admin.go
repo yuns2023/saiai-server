@@ -82,7 +82,17 @@ func RegisterAdminRoutes(
 		// 自助托管申请审核（P2c）
 		registerHostedApplicationRoutes(admin, h)
 
+		// Claude 设备平台观察（只读）
+		registerClaudeDevicePlatformRoutes(admin, h)
+
 	}
+}
+
+func registerClaudeDevicePlatformRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	if h == nil || h.Admin == nil || h.Admin.ClaudeDevicePlatform == nil {
+		return
+	}
+	admin.GET("/claude-device-platform/flagged", h.Admin.ClaudeDevicePlatform.ListFlagged)
 }
 
 func registerAccessLevelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

@@ -643,6 +643,7 @@ export default {
     buySubscription: 'Purchase & recharge',
     cryptoDeposits: 'Held Stablecoin Deposits',
     hostedApplications: 'Hosting Applications',
+    claudeDevices: 'Claude Devices',
     marketEarnings: 'Sharing Earnings',
     docs: 'Docs'
   },
@@ -4163,6 +4164,39 @@ export default {
       failedToDelete: 'Failed to delete announcement',
       failedToLoadReadStatus: 'Failed to load read status',
       deleteConfirm: 'Are you sure you want to delete this announcement? This action cannot be undone.'
+    },
+
+    // Claude device platform observation (read-only)
+    claudeDevicePlatform: {
+      title: 'Claude Devices',
+      description: 'Per original Claude Code device ID: which systems, versions and users used the same "device". Observe-only (nothing is blocked); use it to spot shared or copied ~/.claude.json files.',
+      notice: 'Data is per site and covers the last 30 days. Legitimate setups such as Docker mounting the same ~/.claude, Rosetta, or an OS upgrade can also appear here; judge by users and times.',
+      prefixHint: 'First 8 hex digits of the device ID (the full ID is never shown)',
+      empty: 'No devices match the filter.',
+      failedToLoad: 'Failed to load devices',
+      loadMore: 'Load more',
+      usersTruncated: 'More than 20 users; only the 20 most recent are kept',
+      keyAndTime: 'Key #{key} · {time}',
+      columns: {
+        device: 'Device',
+        reasons: 'Reasons',
+        platforms: 'System / arch / version',
+        users: 'Users',
+        lastMatchedAt: 'Last matched'
+      },
+      reasons: {
+        cross_family: 'Cross-system',
+        version_alternation: 'Version alternation',
+        cross_user: 'Cross-user',
+        arch_only: 'Arch only',
+        sequential_upgrade: 'Sequential upgrade'
+      },
+      families: {
+        windows: 'Windows',
+        macos: 'macOS',
+        linux: 'Linux',
+        unknown: 'Unknown'
+      }
     },
 
     // Hosted self-onboarding applications

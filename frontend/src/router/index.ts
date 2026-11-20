@@ -404,6 +404,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/claude-devices',
+    name: 'AdminClaudeDevices',
+    component: () => import('@/views/admin/ClaudeDevicesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Claude Devices',
+      titleKey: 'admin.claudeDevicePlatform.title',
+      descriptionKey: 'admin.claudeDevicePlatform.description'
+    }
+  },
+  {
     path: '/admin/market-earnings',
     name: 'AdminMarketEarnings',
     component: () => import('@/views/admin/MarketEarningsView.vue'),

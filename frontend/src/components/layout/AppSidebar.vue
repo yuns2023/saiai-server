@@ -539,6 +539,7 @@ const adminNavItems = computed((): NavItem[] => {
       ? [{ path: '/admin/crypto-deposits', label: t('nav.cryptoDeposits'), icon: CreditCardIcon, hideInSimpleMode: true }]
       : []),
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
+    { path: '/admin/claude-devices', label: t('nav.claudeDevices'), icon: ServerIcon, hideInSimpleMode: true },
     // Always listed (simple mode too): with self-onboarding switched off, pending applications must stay reachable to reject.
     { path: '/admin/hosted-applications', label: t('nav.hostedApplications'), icon: UsersIcon },
     // Sharing market: listed while the switch is on (the page stays reachable from the market settings).
