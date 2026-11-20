@@ -46,17 +46,10 @@ export const CLIENT = {
   /** "What is this / how to uninstall" link. */
   repoUrl: 'https://github.com/2742zdz/AITP',
   uninstallCommand: 'aitp uninstall',
-  /** Offer the one-line install command (manual values stay available as a fallback). */
+  /** Offer the one-line install command (the only supported setup). */
   oneLineInstall: true,
   install: INSTALL
 } as const
-
-/** Gateway root without a trailing /v1 (Claude Code adds its own path). Display/manual use only. */
-export function gatewayRoot(baseUrl: string): string {
-  return parseRoot(baseUrl) ?? (stripLineBreaks(baseUrl).replace(/\/+$/, '').replace(/\/v1$/, '') || window.location.origin)
-}
-
-const stripLineBreaks = (v: string) => v.replace(/[\r\n]/g, '')
 
 /**
  * The gateway root as a URL-serialized absolute http(s) URL (quotes, spaces and
@@ -86,9 +79,6 @@ export interface ConnectSnippet {
   command: string | null
   /** The site's API address is not an absolute http(s) URL, so no install command is offered. */
   badBaseUrl: boolean
-  /** Plain values for configuring Claude Code by hand. */
-  baseUrl: string
-  envLines: string[]
 }
 
 export interface ConnectOptions {
@@ -101,12 +91,9 @@ export function connectSnippet(rawBaseUrl: string, apiKey: string, shell: Shell,
   const safeRoot = parseRoot(rawBaseUrl)
   const keyOk = !/[\r\n]/.test(apiKey) && (shell !== 'cmd' || cmdSafe(apiKey))
   const rootOk = safeRoot !== null && (shell !== 'cmd' || cmdSafe(safeRoot))
-  const root = safeRoot ?? gatewayRoot(rawBaseUrl)
   return {
     command: oneLine && safeRoot !== null && rootOk && keyOk ? CLIENT.install[shell](safeRoot, apiKey) : null,
-    badBaseUrl: safeRoot === null,
-    baseUrl: root,
-    envLines: envLines(shell, [['ANTHROPIC_BASE_URL', root], ['ANTHROPIC_AUTH_TOKEN', stripLineBreaks(apiKey)]])
+    badBaseUrl: safeRoot === null
   }
 }
 
@@ -134,15 +121,3 @@ export function installCodeCommand(shell: Shell, origin: string, code: string): 
   return shell === 'cmd' ? `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"` : ps
 }
 
-/** cmd.exe: set "K=V" keeps spaces and & | < > literal for interactive use. */
-const cmdQuote = (v: string) => `"${v}"`
-
-function envLines(shell: Shell, pairs: Array<[string, string]>): string[] {
-  // A value with a double quote cannot be written as cmd's set "K=V"; leave that line out.
-  const usable = shell === 'cmd' ? pairs.filter(([, v]) => !v.includes('"')) : pairs
-  return usable.map(([k, v]) => {
-    if (shell === 'powershell') return `$env:${k}=${psQuote(v)}`
-    if (shell === 'cmd') return `set ${cmdQuote(`${k}=${v}`)}`
-    return `export ${k}=${shellQuote(v)}`
-  })
-}

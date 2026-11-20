@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { CLIENT, connectSnippet, gatewayRoot, installCodeCommand, installCodeKind, isInstallCode } from '../connect'
+import { CLIENT, connectSnippet, installCodeCommand, installCodeKind, isInstallCode } from '../connect'
 
 describe('connect', () => {
-  it('normalizes the gateway root (no /v1, no trailing slash)', () => {
-    expect(gatewayRoot('https://ccyou.example/v1/')).toBe('https://ccyou.example')
-    expect(gatewayRoot('https://ccyou.example/')).toBe('https://ccyou.example')
-  })
-
   it('points the AITP client at the site', () => {
     expect(CLIENT.displayName).toBe('AITP')
     expect(CLIENT.installerBase).toBe('https://aitp.lol')
@@ -45,30 +40,14 @@ describe('connect', () => {
   it('keeps any gateway path in --base-url', () => {
     const s = connectSnippet('https://api.ccyou.example/relay/v1', 'k', 'unix')
     expect(s.command).toBe("curl -fsSL https://aitp.lol/setup.sh | bash -s -- --base-url 'https://api.ccyou.example/relay' --api-key 'k'")
-    expect(s.baseUrl).toBe('https://api.ccyou.example/relay')
   })
 
-  it('can switch the one-line install off, leaving the manual Claude Code values', () => {
+  it('can switch the one-line install off', () => {
     for (const shell of ['unix', 'powershell', 'cmd'] as const) {
       const s = connectSnippet('https://ccyou.example', 'k', shell, { oneLine: false })
       expect(s.command).toBeNull()
-      expect(s.envLines.length).toBe(2)
+      expect(Object.keys(s).sort()).toEqual(['badBaseUrl', 'command'])
     }
-  })
-
-  it('offers only the Claude Code environment variables', () => {
-    expect(connectSnippet('https://ccyou.example/v1', 'k', 'cmd').envLines).toEqual([
-      'set "ANTHROPIC_BASE_URL=https://ccyou.example"',
-      'set "ANTHROPIC_AUTH_TOKEN=k"'
-    ])
-  })
-
-  it('quotes environment values so the shell cannot expand them', () => {
-    const base = 'https://ccyou.example/a$b&c%d'
-    expect(connectSnippet(base, 'k', 'unix').envLines[0]).toBe("export ANTHROPIC_BASE_URL='https://ccyou.example/a$b&c%d'")
-    expect(connectSnippet(base, 'k', 'powershell').envLines[0]).toBe("$env:ANTHROPIC_BASE_URL='https://ccyou.example/a$b&c%d'")
-    // Interactive cmd keeps %% literally, so the value is passed through inside the quotes.
-    expect(connectSnippet(base, 'k', 'cmd').envLines[0]).toBe('set "ANTHROPIC_BASE_URL=https://ccyou.example/a$b&c%d"')
   })
 
   it('never builds an install command from a base URL that is not an absolute http(s) URL', () => {
@@ -78,8 +57,6 @@ describe('connect', () => {
       expect(s.command).toBeNull()
       expect(s.badBaseUrl).toBe(true)
     }
-    // cmd cannot carry a value with " inside set "K=V", so that line is left out.
-    expect(connectSnippet(evil, 'k', 'cmd').envLines).toEqual(['set "ANTHROPIC_AUTH_TOKEN=k"'])
     for (const bad of ['/relative', 'ftp://ccyou.example', 'javascript:alert(1)', 'https://ccyou.example\r\n& calc', '']) {
       expect(connectSnippet(bad, 'k', 'unix').command).toBeNull()
     }

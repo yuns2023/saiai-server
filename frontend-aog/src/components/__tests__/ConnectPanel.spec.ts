@@ -62,16 +62,15 @@ afterEach(() => {
 })
 
 describe('ConnectPanel', () => {
-  it('leads with the AITP command and keeps manual values collapsed', () => {
+  it('leads with the AITP command and offers no manual environment-variable setup', () => {
     const w = mountPanel()
     const install = w.find('[data-testid=connect-install]')
     expect(install.exists()).toBe(true)
     expect(install.find('pre').text()).toContain('https://aitp.lol/setup.')
     expect(install.find('pre').text()).toContain("'sk-test'")
     expect(install.find('a').attributes('href')).toBe('https://github.com/2742zdz/AITP')
-    const manual = w.find('[data-testid=connect-manual]')
-    expect(manual.attributes('open')).toBeUndefined()
-    expect(manual.text()).toContain('ANTHROPIC_AUTH_TOKEN')
+    expect(w.find('[data-testid=connect-manual]').exists()).toBe(false)
+    expect(w.text()).not.toMatch(/ANTHROPIC_|环境变量|手动配置/)
     expect(w.text()).not.toMatch(/openai|codex|gemini/i)
   })
 
@@ -81,14 +80,16 @@ describe('ConnectPanel', () => {
     expect(w.find('pre').exists()).toBe(false)
   })
 
-  it('explains a misconfigured API address and opens the manual section', async () => {
+  it('explains a misconfigured API address without offering a manual setup', async () => {
     const w = mountPanel()
     const app = useAppStore()
     app.$patch({ settings: { api_base_url: 'https://[invalid]/" & echo X & rem "' } as never })
     await w.vm.$nextTick()
     expect(w.find('[data-testid=connect-install]').exists()).toBe(false)
     expect(w.find('[data-testid=connect-no-oneline]').exists()).toBe(true)
-    expect(w.find('[data-testid=connect-manual]').attributes('open')).toBeDefined()
+    expect(w.find('[data-testid=connect-no-oneline]').text()).toBe('本站的 API 地址配置有误，暂时无法生成一键命令，请联系管理员。')
+    expect(w.find('[data-testid=connect-manual]').exists()).toBe(false)
+    expect(w.text()).not.toContain('ANTHROPIC_')
   })
 })
 
@@ -117,7 +118,7 @@ describe('ConnectPanel install codes', () => {
     expect(full.attributes('open')).toBeUndefined()
     expect(full.text()).toContain('完整命令（不使用安装码）')
     expect(full.find('pre').text()).toBe("curl -fsSL https://aitp.lol/setup.sh | bash -s -- --base-url 'https://ccyou.dev' --api-key 'sk-test'")
-    expect(w.find('[data-testid=connect-manual]').text()).toContain('ANTHROPIC_AUTH_TOKEN')
+    expect(w.find('[data-testid=connect-manual]').exists()).toBe(false)
 
     const button = w.find('[data-testid=connect-code-generate]')
     expect(button.text()).toBe('生成安装命令')
