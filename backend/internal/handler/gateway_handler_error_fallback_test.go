@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -182,4 +184,51 @@ func TestOpenAIErrorWriters_RedactRestrictedUpstreamIdentity(t *testing.T) {
 			require.Contains(t, w.Body.String(), service.DeviceAuthorizationUnavailableClientMessage)
 		})
 	}
+}
+
+func TestGatewayHandleFailoverExhaustedAfterSelection_NamesModelLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	devicesFull := &service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, Cause: service.ErrClaudeOAuthCarpoolDevicesFull}
+	limited := &service.SelectionFailureError{RequestedModel: "claude-fable-5-2", ModelRateLimited: 2, ModelRateLimitMinRemaining: 3 * time.Hour}
+	cases := []struct {
+		name        string
+		failoverErr *service.UpstreamFailoverError
+		selection   error
+		want        string
+	}{
+		{"device full and model limited", devicesFull, fmt.Errorf("wrapped: %w", limited),
+			service.ClaudeOAuthCarpoolDevicesFullModelLimitedMessage("claude-fable-5-2", 3*time.Hour)},
+		{"device full without model limits", devicesFull, &service.SelectionFailureError{RequestedModel: "claude-fable-5-2"},
+			service.ClaudeOAuthCarpoolDevicesFullAllAccountsMessage},
+		{"device full with an untyped selection error", devicesFull, service.ErrNoAvailableAccounts,
+			service.ClaudeOAuthCarpoolDevicesFullAllAccountsMessage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			(&GatewayHandler{}).handleFailoverExhaustedAfterSelection(c, tc.failoverErr, tc.selection, service.PlatformAnthropic, false)
+			require.Equal(t, http.StatusTooManyRequests, w.Code)
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &parsed))
+			errorObj, ok := parsed["error"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, "rate_limit_error", errorObj["type"])
+			assert.Equal(t, tc.want, errorObj["message"])
+		})
+	}
+
+	t.Run("other failures keep their own handling", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		(&GatewayHandler{}).handleFailoverExhaustedAfterSelection(c, &service.UpstreamFailoverError{
+			StatusCode:   http.StatusBadRequest,
+			ResponseBody: []byte(`{"error":{"message":"x"}}`),
+			Kind:         service.UpstreamFailureDeviceAuthorizationRevoked,
+		}, limited, service.PlatformAnthropic, false)
+		require.Equal(t, http.StatusBadGateway, w.Code)
+		assert.NotContains(t, w.Body.String(), "usage limit")
+	})
 }
