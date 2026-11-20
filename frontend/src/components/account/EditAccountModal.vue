@@ -2204,7 +2204,7 @@ const pinnedBinding = ref<ClaudePinnedBinding | null>(null)
 const pinnedBindingLoading = ref(false)
 const deletingPinnedBinding = ref(false)
 
-const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_PASSTHROUGH)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_PASSTHROUGH)
 const openaiUpstreamProtocol = ref<OpenAIUpstreamProtocol>(OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT)
 const isOpenAINativeRelay = computed(
@@ -2373,7 +2373,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   blockedModelPatternsText.value = formatAccountBlockedModelPatterns(extra?.blocked_model_patterns)
 
   // OpenAI passthrough 开关已下线；旧账号 extra 上的 openai_passthrough/openai_oauth_passthrough 字段读到也忽略。
-  openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+  openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
   openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
   codexCLIOnlyEnabled.value = false
@@ -2387,7 +2387,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       modeKey: 'openai_oauth_responses_websockets_v2_mode',
       enabledKey: 'openai_oauth_responses_websockets_v2_enabled',
       fallbackEnabledKeys: ['responses_websockets_v2_enabled', 'openai_ws_enabled'],
-      defaultMode: OPENAI_WS_MODE_OFF
+      defaultMode: OPENAI_WS_MODE_PASSTHROUGH
     })
     openaiAPIKeyResponsesWebSocketV2Mode.value = resolveOpenAIWSModeFromExtra(extra, {
       modeKey: 'openai_apikey_responses_websockets_v2_mode',

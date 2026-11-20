@@ -2856,7 +2856,7 @@ const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
-const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
+const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_PASSTHROUGH)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_PASSTHROUGH)
 const openaiUpstreamProtocol = ref<OpenAIUpstreamProtocol>(OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT)
 const isOpenAINativeRelay = computed(
@@ -3158,7 +3158,7 @@ watch(
       interceptWarmupRequests.value = false
     }
     if (newPlatform !== 'openai') {
-      openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+      openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
       openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
       codexCLIOnlyEnabled.value = false
@@ -3531,7 +3531,7 @@ const resetForm = () => {
   customErrorCodeInput.value = null
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
-  openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+  openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_PASSTHROUGH
   openaiUpstreamProtocol.value = OPENAI_UPSTREAM_PROTOCOL_PLATFORM_COMPAT
   codexCLIOnlyEnabled.value = false
