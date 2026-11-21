@@ -113,6 +113,9 @@ type AccountBulkUpdate struct {
 	Schedulable            *bool
 	Credentials            map[string]any
 	Extra                  map[string]any
+	// ExtraDefaults are set per row, in the same statement, for keys that are
+	// missing or JSON null after Extra is merged; existing values are kept.
+	ExtraDefaults map[string]any
 }
 
 // CreateAccountRequest 创建账号请求

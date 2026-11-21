@@ -1813,14 +1813,30 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		args = append(args, payload)
 		idx++
 	}
-	if len(updates.Extra) > 0 {
-		payload, err := json.Marshal(updates.Extra)
+	if len(updates.Extra) > 0 || len(updates.ExtraDefaults) > 0 {
+		patch := updates.Extra
+		if patch == nil {
+			patch = map[string]any{}
+		}
+		payload, err := json.Marshal(patch)
 		if err != nil {
 			return 0, err
 		}
-		setClauses = append(setClauses, "extra = COALESCE(extra, '{}'::jsonb) || $"+itoa(idx)+"::jsonb")
+		merged := "(COALESCE(extra, '{}'::jsonb) || $" + itoa(idx) + "::jsonb)"
 		args = append(args, payload)
 		idx++
+		if len(updates.ExtraDefaults) > 0 {
+			defaults, err := json.Marshal(updates.ExtraDefaults)
+			if err != nil {
+				return 0, err
+			}
+			// Defaults fill only keys that are missing or JSON null in this
+			// row's merged extra, evaluated per row inside this statement.
+			merged = merged + " || ($" + itoa(idx) + "::jsonb - ARRAY(SELECT e.key FROM jsonb_each(" + merged + ") AS e WHERE e.value <> 'null'::jsonb))"
+			args = append(args, defaults)
+			idx++
+		}
+		setClauses = append(setClauses, "extra = "+merged)
 	}
 
 	if len(setClauses) == 0 {

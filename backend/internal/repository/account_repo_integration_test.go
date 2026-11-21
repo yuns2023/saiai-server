@@ -938,6 +938,57 @@ func (s *AccountRepoSuite) TestBulkUpdate_MergeExtra() {
 	s.Require().Equal("new_val", got.Extra["new_key"])
 }
 
+func (s *AccountRepoSuite) TestBulkUpdate_ExtraDefaultsFillOnlyMissingOrNull() {
+	keepsFalse := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:  "bulk-defaults-false",
+		Extra: map[string]any{"own": "a", "claude_oauth_disable_token_refresh": false, "claude_oauth_token_disable_before_expiry_minutes": 0},
+	})
+	storedNull := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:  "bulk-defaults-null",
+		Extra: map[string]any{"own": "b", "claude_oauth_token_disable_before_expiry_minutes": nil},
+	})
+	defaults := map[string]any{"claude_oauth_disable_token_refresh": true, "claude_oauth_token_disable_before_expiry_minutes": 3}
+
+	_, err := s.repo.BulkUpdate(s.ctx, []int64{keepsFalse.ID, storedNull.ID}, service.AccountBulkUpdate{
+		Extra:         map[string]any{"k": "v"},
+		ExtraDefaults: defaults,
+	})
+	s.Require().NoError(err)
+
+	got, err := s.repo.GetByID(s.ctx, keepsFalse.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("a", got.Extra["own"])
+	s.Require().Equal("v", got.Extra["k"])
+	s.Require().Equal(false, got.Extra["claude_oauth_disable_token_refresh"])
+	s.Require().EqualValues(0, got.Extra["claude_oauth_token_disable_before_expiry_minutes"])
+
+	got, err = s.repo.GetByID(s.ctx, storedNull.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("b", got.Extra["own"])
+	s.Require().Equal("v", got.Extra["k"])
+	s.Require().Equal(true, got.Extra["claude_oauth_disable_token_refresh"])
+	s.Require().EqualValues(3, got.Extra["claude_oauth_token_disable_before_expiry_minutes"])
+
+	// A patch null is filled too; defaults alone (empty patch) still write.
+	_, err = s.repo.BulkUpdate(s.ctx, []int64{keepsFalse.ID}, service.AccountBulkUpdate{
+		Extra:         map[string]any{"claude_oauth_disable_token_refresh": nil},
+		ExtraDefaults: defaults,
+	})
+	s.Require().NoError(err)
+	got, err = s.repo.GetByID(s.ctx, keepsFalse.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(true, got.Extra["claude_oauth_disable_token_refresh"])
+	s.Require().EqualValues(0, got.Extra["claude_oauth_token_disable_before_expiry_minutes"])
+
+	plain := mustCreateAccount(s.T(), s.client, &service.Account{Name: "bulk-defaults-only", Extra: map[string]any{"own": "c"}})
+	_, err = s.repo.BulkUpdate(s.ctx, []int64{plain.ID}, service.AccountBulkUpdate{ExtraDefaults: defaults})
+	s.Require().NoError(err)
+	got, err = s.repo.GetByID(s.ctx, plain.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("c", got.Extra["own"])
+	s.Require().Equal(true, got.Extra["claude_oauth_disable_token_refresh"])
+}
+
 func (s *AccountRepoSuite) TestBulkUpdate_EmptyIDs() {
 	affected, err := s.repo.BulkUpdate(s.ctx, []int64{}, service.AccountBulkUpdate{})
 	s.Require().NoError(err)
