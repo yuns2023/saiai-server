@@ -2439,14 +2439,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		}
 	}
 
-	// When every selected account is single-device, each one also receives
-	// the single-device defaults it is missing. The defaults depend on each
-	// account's own extra, so they are computed and written per account;
-	// input.Extra stays the admin patch shared by all rows.
-	var singleDeviceDefaults map[int64]map[string]any
+	// When every selected account is single-device, the bulk write also
+	// fills the single-device defaults. They are constants, applied by the
+	// repo per row at write time only where the merged key is missing or
+	// null, so input.Extra stays the admin patch shared by all rows.
+	var singleDeviceDefaults map[string]any
 	if input.Extra != nil {
 		allSingleDevice := true
-		perAccount := make(map[int64]map[string]any, len(input.AccountIDs))
 		for _, accountID := range input.AccountIDs {
 			account := accountByID[accountID]
 			if account == nil {
@@ -2459,31 +2458,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				allSingleDevice = false
 				break
 			}
-			withDefaults := maps.Clone(targetExtra)
-			applyClaudeOAuthSingleDeviceDefaults(account.Platform, account.Type, withDefaults)
-			added := map[string]any{}
-			for key, value := range withDefaults {
-				if previous, ok := targetExtra[key]; value != nil && (!ok || previous == nil) {
-					added[key] = value
-				}
-			}
-			if len(added) > 0 {
-				perAccount[accountID] = added
-			}
 		}
 		if allSingleDevice {
-			singleDeviceDefaults = perAccount
-			// A key the admin sent as null resolves to the same constant
-			// default for every row, so it belongs in the shared patch;
-			// otherwise the bulk write would put the null back.
-			for _, defaults := range perAccount {
-				for key, value := range defaults {
-					if _, ok := input.Extra[key]; ok {
-						input.Extra[key] = value
-						delete(defaults, key)
-					}
-				}
-			}
+			singleDeviceDefaults = claudeOAuthSingleDeviceDefaultExtra()
 		}
 	}
 	if input.GroupIDs != nil {
@@ -2529,7 +2506,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			targetExtra := account.Extra
 			if input.Extra != nil {
 				targetExtra = mergedExtraMap(account.Extra, input.Extra)
-				maps.Copy(targetExtra, singleDeviceDefaults[account.ID])
+				if singleDeviceDefaults != nil {
+					applyClaudeOAuthSingleDeviceDefaults(account.Platform, account.Type, targetExtra)
+				}
 			}
 			if err := s.checkClaudeOAuthModeConsistency(ctx, account.ID, account.Platform, account.Type, targetExtra, *input.GroupIDs); err != nil {
 				return nil, err
@@ -2552,8 +2531,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	delete(input.Extra, CarpoolInitialMaintenanceKey)
 	// Prepare bulk updates for columns and JSONB fields.
 	repoUpdates := AccountBulkUpdate{
-		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Credentials:   input.Credentials,
+		Extra:         input.Extra,
+		ExtraDefaults: singleDeviceDefaults,
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name
@@ -2619,17 +2599,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}
-	// Per-account defaults hold only keys absent from input.Extra, so order
-	// does not change values. They go after the bulk write: if one fails,
-	// the row is single-device without the keys, which the runtime already
-	// reads as these same defaults (IsClaudeOAuthTokenRefreshDisabled).
-	for _, accountID := range input.AccountIDs {
-		if defaults := singleDeviceDefaults[accountID]; len(defaults) > 0 {
-			if err := s.accountRepo.UpdateExtra(ctx, accountID, defaults); err != nil {
-				return nil, err
-			}
-		}
-	}
 
 	// Handle group bindings per account (requires individual operations).
 	for _, accountID := range input.AccountIDs {
@@ -2669,11 +2638,19 @@ func applyClaudeOAuthSingleDeviceDefaults(platform, accountType string, extra ma
 	if mode != ClaudeOAuthModeSingleDevice {
 		return
 	}
-	if _, ok := extra["claude_oauth_disable_token_refresh"]; !ok || extra["claude_oauth_disable_token_refresh"] == nil {
-		extra["claude_oauth_disable_token_refresh"] = true
+	for key, value := range claudeOAuthSingleDeviceDefaultExtra() {
+		if current, ok := extra[key]; !ok || current == nil {
+			extra[key] = value
+		}
 	}
-	if _, ok := extra["claude_oauth_token_disable_before_expiry_minutes"]; !ok || extra["claude_oauth_token_disable_before_expiry_minutes"] == nil {
-		extra["claude_oauth_token_disable_before_expiry_minutes"] = DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes
+}
+
+// claudeOAuthSingleDeviceDefaultExtra returns the constant keys a
+// single-device account gets when they are missing or null.
+func claudeOAuthSingleDeviceDefaultExtra() map[string]any {
+	return map[string]any{
+		"claude_oauth_disable_token_refresh":               true,
+		"claude_oauth_token_disable_before_expiry_minutes": DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes,
 	}
 }
 

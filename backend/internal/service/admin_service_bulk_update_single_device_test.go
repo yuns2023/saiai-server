@@ -11,39 +11,52 @@ import (
 )
 
 // singleDeviceBulkRepo records every extra write so the test can replay them
-// in order and compute what each row ends up with.
+// in order and compute what each row ends up with. BulkUpdate replays the
+// repo SQL: extra || patch, then ExtraDefaults for keys missing or null.
 type singleDeviceBulkRepo struct {
 	accountRepoStubForBulkUpdate
-	writes []singleDeviceExtraWrite
+	writes           []singleDeviceExtraWrite
+	updateExtraCalls int
+	lastBulk         AccountBulkUpdate
 }
 
 type singleDeviceExtraWrite struct {
-	ids   []int64
-	patch map[string]any
+	ids      []int64
+	patch    map[string]any
+	defaults map[string]any
 }
 
 func (s *singleDeviceBulkRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	s.updateExtraCalls++
 	s.writes = append(s.writes, singleDeviceExtraWrite{ids: []int64{id}, patch: maps.Clone(updates)})
 	return nil
 }
 
 func (s *singleDeviceBulkRepo) BulkUpdate(ctx context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
-	if len(updates.Extra) > 0 {
-		s.writes = append(s.writes, singleDeviceExtraWrite{ids: append([]int64{}, ids...), patch: maps.Clone(updates.Extra)})
+	s.lastBulk = updates
+	if len(updates.Extra) > 0 || len(updates.ExtraDefaults) > 0 {
+		s.writes = append(s.writes, singleDeviceExtraWrite{ids: append([]int64{}, ids...), patch: maps.Clone(updates.Extra), defaults: maps.Clone(updates.ExtraDefaults)})
 	}
 	return s.accountRepoStubForBulkUpdate.BulkUpdate(ctx, ids, updates)
 }
 
-// finalExtra replays the recorded `extra || patch` writes on top of the
-// original rows.
+// finalExtra replays the recorded writes on top of the original rows.
 func (s *singleDeviceBulkRepo) finalExtra(accounts []*Account) map[int64]map[string]any {
 	out := make(map[int64]map[string]any, len(accounts))
 	for _, account := range accounts {
 		out[account.ID] = maps.Clone(account.Extra)
+		if out[account.ID] == nil {
+			out[account.ID] = map[string]any{}
+		}
 	}
 	for _, write := range s.writes {
 		for _, id := range write.ids {
 			maps.Copy(out[id], write.patch)
+			for key, value := range write.defaults {
+				if current, ok := out[id][key]; !ok || current == nil {
+					out[id][key] = value
+				}
+			}
 		}
 	}
 	return out
@@ -108,11 +121,11 @@ func TestAdminService_BulkUpdateAccounts_SingleDeviceKeepsPerAccountExtra(t *tes
 		"claude_oauth_token_disable_before_expiry_minutes": 10,
 	}, final[2])
 
-	// No write may carry another account's own keys.
-	for _, write := range repo.writes {
-		require.NotContains(t, write.patch, "account_uuid")
-		require.NotContains(t, write.patch, "device_id")
-	}
+	// One shared write; it carries no account's own keys.
+	require.Zero(t, repo.updateExtraCalls)
+	require.Len(t, repo.writes, 1)
+	require.Equal(t, map[string]any{"custom_flag": "on"}, repo.writes[0].patch)
+	require.Equal(t, claudeOAuthSingleDeviceDefaultExtra(), repo.writes[0].defaults)
 }
 
 func TestAdminService_BulkUpdateAccounts_MixedBatchAddsNoSingleDeviceDefaults(t *testing.T) {
@@ -132,6 +145,7 @@ func TestAdminService_BulkUpdateAccounts_MixedBatchAddsNoSingleDeviceDefaults(t 
 	require.Len(t, repo.writes, 1)
 	require.Equal(t, []int64{1, 2}, repo.writes[0].ids)
 	require.Equal(t, map[string]any{"custom_flag": "on"}, repo.writes[0].patch)
+	require.Nil(t, repo.writes[0].defaults)
 }
 
 func TestAdminService_BulkUpdateAccounts_SingleDeviceOneAccountGetsDefaults(t *testing.T) {
@@ -174,7 +188,62 @@ func TestAdminService_BulkUpdateAccounts_SingleDeviceExplicitNullGetsDefault(t *
 		require.Equal(t, true, final[id]["claude_oauth_disable_token_refresh"])
 		require.Equal(t, DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes, final[id]["claude_oauth_token_disable_before_expiry_minutes"])
 	}
-	for _, write := range repo.writes {
-		require.NotContains(t, write.patch, "runtime_marker")
+	require.Zero(t, repo.updateExtraCalls)
+	require.Len(t, repo.writes, 1)
+	require.NotContains(t, repo.writes[0].patch, "runtime_marker")
+	require.Nil(t, final[2]["runtime_marker"])
+}
+
+func TestAdminService_BulkUpdateAccounts_SwitchSharedToSingleDeviceGetsDefaults(t *testing.T) {
+	a := newSingleDeviceBulkAccount(1, "11111111-2222-4333-8444-555555555555", "device-a")
+	b := newSingleDeviceBulkAccount(2, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "device-b")
+	a.Extra["claude_oauth_mode"] = "shared"
+	b.Extra["claude_oauth_mode"] = "shared"
+	b.Extra["claude_oauth_disable_token_refresh"] = false
+	original := cloneAccounts([]*Account{a, b})
+	repo := &singleDeviceBulkRepo{accountRepoStubForBulkUpdate: accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{a, b}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1, 2},
+		Extra:      map[string]any{"claude_oauth_mode": ClaudeOAuthModeSingleDevice},
+	})
+	require.NoError(t, err)
+	require.Zero(t, repo.updateExtraCalls)
+	final := repo.finalExtra(original)
+	require.Equal(t, ClaudeOAuthModeSingleDevice, final[1]["claude_oauth_mode"])
+	require.Equal(t, ClaudeOAuthModeSingleDevice, final[2]["claude_oauth_mode"])
+	require.Equal(t, "device-a", final[1]["device_id"])
+	require.Equal(t, "device-b", final[2]["device_id"])
+	require.Equal(t, true, final[1]["claude_oauth_disable_token_refresh"])
+	require.Equal(t, false, final[2]["claude_oauth_disable_token_refresh"])
+	require.Equal(t, DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes, final[1]["claude_oauth_token_disable_before_expiry_minutes"])
+	require.Equal(t, DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes, final[2]["claude_oauth_token_disable_before_expiry_minutes"])
+}
+
+// Old code sent the first account's whole extra here, so the carpool
+// schedule step ran; with every merged mode single_device it never wrote
+// (auto-expand is carpool-only). Expected now: no schedule write, and the
+// bulk write carries only the defaults.
+func TestAdminService_BulkUpdateAccounts_SingleDeviceOnlyServerOwnedKeys(t *testing.T) {
+	a := newSingleDeviceBulkAccount(1, "11111111-2222-4333-8444-555555555555", "device-a")
+	b := newSingleDeviceBulkAccount(2, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "device-b")
+	original := cloneAccounts([]*Account{a, b})
+	repo := &singleDeviceBulkRepo{accountRepoStubForBulkUpdate: accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{a, b}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1, 2},
+		Extra:      map[string]any{CarpoolNextMaintenanceKey: "forged", CarpoolMaintenanceGenerationKey: "forged"},
+	})
+	require.NoError(t, err)
+	require.Zero(t, repo.updateExtraCalls)
+	require.Empty(t, repo.lastBulk.Extra)
+	require.Equal(t, claudeOAuthSingleDeviceDefaultExtra(), repo.lastBulk.ExtraDefaults)
+	final := repo.finalExtra(original)
+	for id, account := range map[int64]*Account{1: original[0], 2: original[1]} {
+		want := maps.Clone(account.Extra)
+		maps.Copy(want, claudeOAuthSingleDeviceDefaultExtra())
+		require.Equal(t, want, final[id])
 	}
 }
