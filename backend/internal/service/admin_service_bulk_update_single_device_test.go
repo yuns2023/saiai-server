@@ -221,10 +221,8 @@ func TestAdminService_BulkUpdateAccounts_SwitchSharedToSingleDeviceGetsDefaults(
 	require.Equal(t, DefaultClaudeOAuthTokenDisableBeforeExpiryMinutes, final[2]["claude_oauth_token_disable_before_expiry_minutes"])
 }
 
-// Old code sent the first account's whole extra here, so the carpool
-// schedule step ran; with every merged mode single_device it never wrote
-// (auto-expand is carpool-only). Expected now: no schedule write, and the
-// bulk write carries only the defaults.
+// Forged server-owned keys are stripped; rows without a stored schedule get
+// no schedule write, and the bulk write carries only the defaults.
 func TestAdminService_BulkUpdateAccounts_SingleDeviceOnlyServerOwnedKeys(t *testing.T) {
 	a := newSingleDeviceBulkAccount(1, "11111111-2222-4333-8444-555555555555", "device-a")
 	b := newSingleDeviceBulkAccount(2, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "device-b")
@@ -246,4 +244,25 @@ func TestAdminService_BulkUpdateAccounts_SingleDeviceOnlyServerOwnedKeys(t *test
 		maps.Copy(want, claudeOAuthSingleDeviceDefaultExtra())
 		require.Equal(t, want, final[id])
 	}
+}
+
+// A single-device row with a leftover schedule has it cleared even when the
+// admin patch is empty (same as before the fix).
+func TestAdminService_BulkUpdateAccounts_SingleDeviceEmptyPatchClearsStaleSchedule(t *testing.T) {
+	a := newSingleDeviceBulkAccount(1, "11111111-2222-4333-8444-555555555555", "device-a")
+	a.Extra[CarpoolNextMaintenanceKey] = "2026-01-01T00:00:00Z"
+	b := newSingleDeviceBulkAccount(2, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "device-b")
+	repo := &singleDeviceBulkRepo{accountRepoStubForBulkUpdate: accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{a, b}}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1, 2},
+		Extra:      map[string]any{},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	require.Equal(t, []int64{1}, repo.writes[0].ids)
+	require.Equal(t, "", repo.writes[0].patch[CarpoolNextMaintenanceKey])
+	require.NotContains(t, repo.writes[0].patch, "account_uuid")
+	require.Equal(t, claudeOAuthSingleDeviceDefaultExtra(), repo.lastBulk.ExtraDefaults)
 }

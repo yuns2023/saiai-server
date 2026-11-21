@@ -2571,7 +2571,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// Policies may have different intervals. Normalize each merged policy
 	// independently instead of assigning one shared next-run timestamp.
-	if len(input.Extra) > 0 {
+	// An all-single-device batch enters even with an empty patch, so stale
+	// schedule keys on those rows are still cleared as before.
+	if len(input.Extra) > 0 || singleDeviceDefaults != nil {
 		for _, previous := range accountsForPinnedDefaults {
 			if previous == nil {
 				continue
