@@ -90,6 +90,8 @@ export function fetchAccountUsageShared(
 export function invalidateAccountUsage(accountId: number): void {
   accountEpochs.set(accountId, epochOf(accountId) + 1)
   cache.delete(accountId)
+  // The edited account (maybe now disabled/error) needs a new explicit query.
+  manuallyQueriedAccounts.delete(accountId)
 }
 
 export function clearAccountUsageCache(): void {

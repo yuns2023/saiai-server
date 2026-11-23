@@ -64,6 +64,9 @@ describe('accountUsageCache', () => {
     expect(wasAccountUsageQueried(6)).toBe(false)
     clearAccountUsageCache()
     expect(wasAccountUsageQueried(5)).toBe(false)
+    markAccountUsageQueried(5)
+    invalidateAccountUsage(5)
+    expect(wasAccountUsageQueried(5)).toBe(false)
   })
 
   it('a failed request is not cached and frees its in-flight slot', async () => {

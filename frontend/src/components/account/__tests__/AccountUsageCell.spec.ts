@@ -177,6 +177,19 @@ describe('AccountUsageCell', () => {
     expect(getUsage).toHaveBeenCalledTimes(3)
   })
 
+  it('手动查询失败的错误账号，重新挂载不会自动重试', async () => {
+    getUsage.mockRejectedValue({ status: 500 })
+    const account = makeAccount({ id: 6109, platform: 'anthropic', type: 'oauth', status: 'error' })
+    const first = mount(AccountUsageCell, { props: { account }, global: { stubs: barStub } })
+    await flushPromises()
+    await first.find('[data-testid="usage-deferred"] button').trigger('click')
+    await flushPromises()
+    first.unmount()
+    mount(AccountUsageCell, { props: { account }, global: { stubs: barStub } })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(1)
+  })
+
   it('自动查过的账号在视野外变成错误后，重新挂载回到“-”且刷新不再查', async () => {
     getUsage.mockResolvedValue(anthropicUsage)
     const first = mount(AccountUsageCell, {

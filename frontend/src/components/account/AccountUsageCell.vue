@@ -692,7 +692,12 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
 
   try {
     const data = await requestUsage(source)
-    if (seq === requestSeq) usageInfo.value = data
+    if (seq === requestSeq) {
+      usageInfo.value = data
+      // Remembered only after a successful query, so a failing skipped account
+      // is not re-requested on every remount.
+      if (manuallyQueried.value) markAccountUsageQueried(props.account.id)
+    }
   } catch (e: any) {
     // A failed refresh keeps the previous result on screen.
     if (seq === requestSeq && !usageInfo.value) error.value = t('common.error')
@@ -704,18 +709,19 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
 
 const queryDeferredUsage = () => {
   manuallyQueried.value = true
-  markAccountUsageQueried(props.account.id)
   return loadUsage(autoSource.value, { force: true })
 }
 
 const loadActiveUsage = async () => {
   manuallyQueried.value = true
-  markAccountUsageQueried(props.account.id)
   activeQueryLoading.value = true
   const seq = ++requestSeq
   try {
     const data = await requestUsage('active')
-    if (seq === requestSeq) usageInfo.value = data
+    if (seq === requestSeq) {
+      usageInfo.value = data
+      markAccountUsageQueried(props.account.id)
+    }
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
   } finally {
