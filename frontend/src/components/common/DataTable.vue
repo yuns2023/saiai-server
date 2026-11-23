@@ -90,7 +90,34 @@
               :sort-key="sortKey"
               :sort-order="sortOrder"
             >
-              <div class="flex items-center space-x-1">
+              <div v-if="column.sortOptions?.length" class="flex items-center gap-0.5" data-testid="header-sort-options">
+                <template v-for="(option, optionIndex) in column.sortOptions" :key="option.key">
+                  <span v-if="optionIndex > 0" class="text-gray-300 dark:text-dark-600">/</span>
+                  <button
+                    type="button"
+                    class="inline-flex items-center rounded-sm px-0.5 uppercase tracking-wider hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-dark-200"
+                    :class="{ 'text-gray-700 dark:text-dark-200': sortKey === option.key }"
+                    :data-sort-key="option.key"
+                    @click.stop="handleSort(option.key)"
+                  >
+                    {{ option.label }}
+                    <svg
+                      v-if="sortKey === option.key"
+                      class="h-3.5 w-3.5"
+                      :class="{ 'rotate-180 transform': sortOrder === 'desc' }"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"
+                        clip-rule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </template>
+              </div>
+              <div v-else class="flex items-center space-x-1">
                 <span>{{ column.label }}</span>
                 <span v-if="column.sortable" class="text-gray-400 dark:text-dark-500">
                   <svg
@@ -167,7 +194,8 @@
               v-for="(column, colIndex) in columns"
               :key="column.key"
               :class="[
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
+                'whitespace-nowrap text-sm text-gray-900 dark:text-gray-100',
+                dense ? 'py-2' : 'py-4',
                 getAdaptivePaddingClass(),
                 getStickyColumnClass(column, colIndex),
                 column.class
@@ -320,6 +348,8 @@ interface Props {
    * will emit 'sort' events instead of performing client-side sorting.
    */
   serverSideSort?: boolean
+  /** Tighter row padding (py-2 instead of py-4) for wide, data-dense tables */
+  dense?: boolean
   /** Estimated row height in px for the virtualizer (default 56) */
   estimateRowHeight?: number
   /** Number of rows to render beyond the visible area (default 5) */
@@ -353,6 +383,7 @@ const getSortableKeys = () => {
   const keys = new Set<string>()
   for (const col of props.columns) {
     if (col.sortable) keys.add(col.key)
+    for (const option of col.sortOptions ?? []) keys.add(option.key)
   }
   return keys
 }

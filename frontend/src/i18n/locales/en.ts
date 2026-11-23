@@ -3297,6 +3297,7 @@ export default {
       interceptWarmupRequestsDesc:
         'When enabled, warmup requests like title generation will return mock responses without consuming upstream tokens',
       autoPauseOnExpired: 'Auto Pause On Expired',
+      expiresShort: 'Exp.',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
@@ -3785,6 +3786,8 @@ export default {
         statsHint: 'Requests, tokens and A/U use the request-stats window; its start may differ from the standard-cost window',
         rollingHint: '*Upstream reset time unknown; counted over a rolling window',
         estimatedCapacity: 'Est ${cost}',
+        standardCostLabel: 'Standard',
+        estimatedCapacityLabel: 'Est. capacity',
         estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)',
         restartedChip: 'since {time}',
         restartedHint: 'Statistics start at {time} ({source}): the upstream reset the usage mid-window; earlier usage is excluded from standard price, A/U and the estimate',
