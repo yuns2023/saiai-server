@@ -2,8 +2,9 @@
   <div
     ref="rootRef"
     :title="tooltip"
-    @mouseenter="openDetails"
-    @mouseleave="detailsOpen = false"
+    @pointerenter="onPointerEnter"
+    @pointerleave="onPointerLeave"
+    @pointerup="onPointerUp"
   >
     <!-- One line per window: label, bar, percent, reset, A $ · 估 $ -->
     <div class="flex items-center gap-1">
@@ -53,11 +54,12 @@
       </span>
     </div>
 
-    <!-- Hover details: fixed-positioned so the scrolling table does not clip it -->
+    <!-- Hover/tap details: fixed-positioned so the scrolling table does not clip
+         it; closed on any scroll so it never floats over another row. -->
     <div
       v-if="hasDetails"
       v-show="detailsOpen"
-      class="fixed z-50 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[11px] text-gray-600 shadow-lg dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
+      class="fixed z-[300] rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[11px] text-gray-600 shadow-lg dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
       :style="detailsStyle"
       data-testid="window-stats"
     >
@@ -99,7 +101,7 @@
 
 <script setup lang="ts">
 import { formatTokenCount } from '@/utils/usageTokens'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { UsageWindowRestart, WindowStats } from '@/types'
@@ -281,8 +283,15 @@ const hasDetails = computed(
 const rootRef = ref<HTMLElement | null>(null)
 const detailsOpen = ref(false)
 const detailsStyle = ref<Record<string, string>>({})
+const closeOnScroll = () => closeDetails()
+const closeDetails = () => {
+  if (!detailsOpen.value) return
+  detailsOpen.value = false
+  window.removeEventListener('scroll', closeOnScroll, true)
+  window.removeEventListener('resize', closeOnScroll)
+}
 const openDetails = () => {
-  if (!hasDetails.value) return
+  if (!hasDetails.value || detailsOpen.value) return
   const rect = rootRef.value?.getBoundingClientRect()
   if (rect) {
     // Below the row; flip above when near the bottom of the viewport.
@@ -292,6 +301,22 @@ const openDetails = () => {
       : { left: `${rect.left}px`, top: `${rect.bottom + 4}px` }
   }
   detailsOpen.value = true
+  // capture: the table scrolls inside its own container, not the window
+  window.addEventListener('scroll', closeOnScroll, true)
+  window.addEventListener('resize', closeOnScroll)
 }
+// Mouse: hover shows the details. Touch/pen has no hover: tap toggles them.
+const onPointerEnter = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') openDetails()
+}
+const onPointerLeave = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') closeDetails()
+}
+const onPointerUp = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') return
+  if (detailsOpen.value) closeDetails()
+  else openDetails()
+}
+onBeforeUnmount(closeDetails)
 
 </script>

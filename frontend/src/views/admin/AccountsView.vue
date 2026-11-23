@@ -994,7 +994,7 @@ const toggleableColumns = computed(() =>
 )
 
 const columnWidths: Record<string, string> = {
-  select: 'w-10', name: 'w-52',
+  select: 'w-12', name: 'w-52',
   capacity: 'w-24', schedulable: 'w-40',
   today_stats: 'min-w-36', groups: 'min-w-56', usage: 'min-w-64'
 }

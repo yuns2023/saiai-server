@@ -122,12 +122,23 @@ describe('UsageProgressBar', () => {
 
     const details = wrapper.get('[data-testid="window-stats"]')
     expect(details.isVisible()).toBe(false)
-    await wrapper.trigger('mouseenter')
+    await wrapper.trigger('pointerenter', { pointerType: 'mouse' })
     expect(details.isVisible()).toBe(true)
     expect(details.text()).toContain('$136.03')
     expect(details.text()).toContain('$136.21')
     expect(details.text()).toContain('$851.31')
-    await wrapper.trigger('mouseleave')
+    await wrapper.trigger('pointerleave', { pointerType: 'mouse' })
+    expect(details.isVisible()).toBe(false)
+
+    // Touch: tap toggles; hover events from touch are ignored.
+    await wrapper.trigger('pointerenter', { pointerType: 'touch' })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerup', { pointerType: 'touch' })
+    expect(details.isVisible()).toBe(true)
+
+    // Any scroll (the table scrolls in its own container) closes it.
+    document.body.dispatchEvent(new Event('scroll'))
+    await wrapper.vm.$nextTick()
     expect(details.isVisible()).toBe(false)
     wrapper.unmount()
   })
