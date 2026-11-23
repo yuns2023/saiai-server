@@ -5,6 +5,7 @@
 
 import { apiClient } from '../client'
 import { i18n } from '@/i18n'
+import { createRequestThrottle, runThrottledWithRetry } from '@/utils/requestThrottle'
 import type {
   Account,
   CreateAccountRequest,
@@ -376,11 +377,17 @@ export async function clearError(id: number): Promise<Account> {
  * @param id - Account ID
  * @returns Account usage info
  */
+// Shared by every usage cell on the accounts page so a full-page refresh stays
+// under the edge per-IP limit (20 r/s, burst 80) instead of bursting ~100 requests.
+const usageRequestThrottle = createRequestThrottle({ capacity: 40, refillPerSecond: 10 })
+
 export async function getUsage(id: number, source?: 'passive' | 'active'): Promise<AccountUsageInfo> {
-  const { data } = await apiClient.get<AccountUsageInfo>(`/admin/accounts/${id}/usage`, {
-    params: source ? { source } : undefined
+  return runThrottledWithRetry(usageRequestThrottle, async () => {
+    const { data } = await apiClient.get<AccountUsageInfo>(`/admin/accounts/${id}/usage`, {
+      params: source ? { source } : undefined
+    })
+    return data
   })
-  return data
 }
 
 /**
