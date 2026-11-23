@@ -728,7 +728,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// A user-level pointer lets the conversation keep its account (and prompt
 	// cache) when the Key's group changes, e.g. smart switching.
-	c.Request = c.Request.WithContext(service.WithUserSessionPointer(c.Request.Context(), subject.UserID, platform, parsedReq.MetadataUserID))
+	c.Request = c.Request.WithContext(service.WithUserSessionPointer(c.Request.Context(), apiKey.UserID, platform, parsedReq.MetadataUserID))
 
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64

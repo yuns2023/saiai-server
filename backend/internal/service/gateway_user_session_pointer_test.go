@@ -241,3 +241,78 @@ func TestUserSessionPointer_LegacySelectionKeepsAccountAboveFiveHourGate(t *test
 	require.Equal(t, int64(1), selected.ID)
 	require.Empty(t, cache.deletedSessions)
 }
+
+// pendingReadFailStub makes the group's pending lookup fail with a real error
+// (not a miss); the pointer must not replace an unreadable group state.
+type pendingReadFailStub struct {
+	pointerGatewayCacheStub
+}
+
+func (m *pendingReadFailStub) GetPendingSessionAccountID(context.Context, int64, string) (int64, error) {
+	return 0, errors.New("redis timeout")
+}
+func (m *pendingReadFailStub) SetPendingSessionAccountIDNX(context.Context, int64, string, int64, time.Duration) (bool, error) {
+	return true, nil
+}
+func (m *pendingReadFailStub) DeletePendingSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
+func TestUserSessionPointer_GroupReadFailureDoesNotUsePointer(t *testing.T) {
+	ctx, p := pointerTestCtx(t, 7, pointerTestMetadata)
+	cache := &pendingReadFailStub{pointerGatewayCacheStub{
+		mockGatewayCacheForPlatform: mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}},
+		pointers:                    map[string]int64{pointerStubKey(p.userID, p.digest): 2},
+	}}
+	svc := &GatewayService{cache: cache, cfg: testConfig()}
+	id, fromPointer, err := svc.getStickySessionAccountIDForSelection(ctx, nil, "h")
+	require.Error(t, err)
+	require.Zero(t, id)
+	require.False(t, fromPointer)
+	require.Zero(t, cache.readCalls)
+}
+
+type pointerOwnershipStub struct {
+	*stickyOwnershipStub
+	pointers map[string]int64
+}
+
+func (c *pointerOwnershipStub) GetUserSessionAccountID(_ context.Context, userID int64, digest string) (int64, error) {
+	if id, ok := c.pointers[pointerStubKey(userID, digest)]; ok {
+		return id, nil
+	}
+	return 0, ErrGatewaySessionCacheMiss
+}
+func (c *pointerOwnershipStub) SetUserSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
+	return nil
+}
+
+// Claude Code ownership path: the new group has no owner; the pointer account
+// is selected and claimed with previous="" like any new owner.
+func TestUserSessionPointer_ClaudeCodeOwnershipClaimsPointerAccount(t *testing.T) {
+	groupID := int64(31)
+	resetAt := time.Now().Add(2 * time.Hour)
+	repo := pointerTestRepo(
+		Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, SessionWindowEnd: &resetAt, Extra: map[string]any{"session_window_utilization": 0.08}, AccountGroups: []AccountGroup{{GroupID: groupID}}},
+		Account{ID: 2, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5, SessionWindowEnd: &resetAt, Extra: map[string]any{"session_window_utilization": 0.92}, AccountGroups: []AccountGroup{{GroupID: groupID}}},
+	)
+	ctx, p := pointerTestCtx(t, 7, pointerTestMetadata)
+	ctx = SetClaudeCodeClient(ctx, true)
+	cache := &pointerOwnershipStub{
+		stickyOwnershipStub: &stickyOwnershipStub{mockGatewayCacheForPlatform: &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}}},
+		pointers:            map[string]int64{pointerStubKey(p.userID, p.digest): 2},
+	}
+	group := &Group{ID: groupID, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}
+	svc := pointerTestLoadAwareService(repo, cache)
+	svc.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: group}}
+
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "h", "claude-3-5-sonnet-20241022", nil, "")
+	require.NoError(t, err)
+	if result.ReleaseFunc != nil {
+		defer result.ReleaseFunc()
+	}
+	require.Equal(t, int64(2), result.Account.ID, "pointer keeps the account despite the 5h new-session gate")
+	require.NotEmpty(t, result.StickyOwnership)
+	require.Equal(t, 1, cache.claims)
+	require.Equal(t, int64(2), cache.sessionBindings["h"])
+}

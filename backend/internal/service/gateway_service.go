@@ -677,8 +677,12 @@ func (s *GatewayService) getStickySessionAccountIDForSelection(ctx context.Conte
 	if accountID > 0 {
 		return accountID, false, err
 	}
-	// A pending-key miss surfaces as redis.Nil here, so a zero account (with
-	// or without err) means "no group binding".
+	// Only a definite miss means "no group binding"; an unreadable group state
+	// must not be replaced by the pointer. A pending-key miss surfaces as
+	// redis.Nil here.
+	if !isStickyCacheMiss(err) {
+		return 0, false, err
+	}
 	if pointer := s.userSessionPointerAccountID(ctx); pointer > 0 {
 		return pointer, true, nil
 	}
