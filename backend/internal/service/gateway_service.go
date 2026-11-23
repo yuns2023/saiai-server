@@ -678,8 +678,7 @@ func (s *GatewayService) getStickySessionAccountIDForSelection(ctx context.Conte
 		return accountID, false, err
 	}
 	// Only a definite miss means "no group binding"; an unreadable group state
-	// must not be replaced by the pointer. A pending-key miss surfaces as
-	// redis.Nil here.
+	// must not be replaced by the pointer.
 	if !isStickyCacheMiss(err) {
 		return 0, false, err
 	}

@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 // A user session pointer remembers which account last served one Claude
@@ -61,7 +59,7 @@ func WithUserSessionPointer(ctx context.Context, userID int64, platform, metadat
 
 // isStickyCacheMiss reports whether a sticky lookup error is a plain miss.
 func isStickyCacheMiss(err error) bool {
-	return err == nil || errors.Is(err, ErrGatewaySessionCacheMiss) || errors.Is(err, redis.Nil)
+	return err == nil || errors.Is(err, ErrGatewaySessionCacheMiss)
 }
 
 func userSessionPointerFromContext(ctx context.Context) (userSessionPointer, bool) {

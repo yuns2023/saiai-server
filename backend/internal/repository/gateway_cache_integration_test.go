@@ -113,6 +113,11 @@ func (s *GatewayCacheSuite) TestUserSessionPointer() {
 	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
 	_, err = s.cache.GetSessionAccountID(s.ctx, 0, "digest-a")
 	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
+
+	// A pending miss carries the same miss identity and stays matchable as redis.Nil.
+	_, err = pc.GetPendingSessionAccountID(s.ctx, 1, "no-pending")
+	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
+	require.ErrorIs(s.T(), err, redis.Nil)
 }
 
 func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {

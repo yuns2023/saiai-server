@@ -140,7 +140,12 @@ func (c *gatewayCache) SetUserSessionAccountID(ctx context.Context, userID int64
 
 func (c *gatewayCache) GetPendingSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
 	key := buildPendingSessionKey(groupID, sessionHash)
-	return c.rdb.Get(ctx, key).Int64()
+	accountID, err := c.rdb.Get(ctx, key).Int64()
+	if errors.Is(err, redis.Nil) {
+		// Same miss identity as confirmed bindings; redis.Nil stays matchable.
+		return 0, errors.Join(service.ErrGatewaySessionCacheMiss, err)
+	}
+	return accountID, err
 }
 
 func (c *gatewayCache) SetPendingSessionAccountIDNX(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) (bool, error) {
