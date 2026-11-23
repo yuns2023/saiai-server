@@ -379,6 +379,8 @@ export async function clearError(id: number): Promise<Account> {
  */
 // Shared by every usage cell on the accounts page so a full-page refresh stays
 // under the edge per-IP limit (20 r/s, burst 80) instead of bursting ~100 requests.
+// Page loads pass 'passive' or no source; an explicit 'active' is a user-initiated
+// single lookup (row 查询 button, quota-window modal) and jumps the queue.
 const usageRequestThrottle = createRequestThrottle({ capacity: 40, refillPerSecond: 10 })
 
 export async function getUsage(id: number, source?: 'passive' | 'active'): Promise<AccountUsageInfo> {
@@ -387,7 +389,7 @@ export async function getUsage(id: number, source?: 'passive' | 'active'): Promi
       params: source ? { source } : undefined
     })
     return data
-  })
+  }, 2, 1500, { priority: source === 'active' })
 }
 
 /**

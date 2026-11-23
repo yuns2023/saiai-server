@@ -20,6 +20,7 @@ describe('createRequestThrottle', () => {
       })
     )
 
+    await vi.advanceTimersByTimeAsync(0)
     expect(started).toEqual([0, 1, 2])
     await vi.advanceTimersByTimeAsync(100)
     expect(started).toEqual([0, 1, 2, 3])
@@ -48,6 +49,30 @@ describe('createRequestThrottle', () => {
       last = t
       expect(excess).toBeLessThanOrEqual(81)
     }
+  })
+
+  it('lets priority requests jump ahead of waiting ones', async () => {
+    const throttle = createRequestThrottle({ capacity: 1, refillPerSecond: 10 })
+    const started: string[] = []
+    const run = (name: string, priority = false) =>
+      throttle.run(async () => {
+        started.push(name)
+      }, { priority })
+    const all = [run('a'), run('b'), run('c'), run('manual', true)]
+    await vi.advanceTimersByTimeAsync(1000)
+    await Promise.all(all)
+    expect(started).toEqual(['a', 'manual', 'b', 'c'])
+  })
+
+  it('turns a synchronous throw into a rejection and keeps draining', async () => {
+    const throttle = createRequestThrottle({ capacity: 1, refillPerSecond: 10 })
+    const failing = throttle.run((() => {
+      throw new Error('sync')
+    }) as () => Promise<never>)
+    const next = throttle.run(async () => 'ok')
+    await expect(failing).rejects.toThrow('sync')
+    await vi.advanceTimersByTimeAsync(100)
+    await expect(next).resolves.toBe('ok')
   })
 
   it('propagates task errors without blocking the queue', async () => {
