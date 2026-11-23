@@ -25,6 +25,9 @@ export const ACCOUNT_USAGE_CACHE_TTL_MS = 60_000
 
 const cache = new Map<number, CacheEntry>()
 const inflight = new Map<string, Promise<AccountUsageInfo>>()
+// Bumped by clearAccountUsageCache(); requests started before a clear must not
+// write into (or delete from) the new generation's maps.
+let generation = 0
 
 export function getCachedAccountUsage(
   accountId: number,
@@ -52,19 +55,28 @@ export function fetchAccountUsageShared(
   const pending = inflight.get(key)
   if (pending) return pending
 
+  const startedIn = generation
   const request = fetcher()
     .then((data) => {
-      cache.set(accountId, { data, refreshToken, versionKey, fetchedAt: Date.now() })
+      if (startedIn === generation) {
+        cache.set(accountId, { data, refreshToken, versionKey, fetchedAt: Date.now() })
+      }
       return data
     })
     .finally(() => {
-      inflight.delete(key)
+      if (startedIn === generation && inflight.get(key) === request) inflight.delete(key)
     })
   inflight.set(key, request)
   return request
 }
 
+/** Drop one account's cached result (after it was edited or re-authorized). */
+export function invalidateAccountUsage(accountId: number): void {
+  cache.delete(accountId)
+}
+
 export function clearAccountUsageCache(): void {
+  generation += 1
   cache.clear()
   inflight.clear()
 }

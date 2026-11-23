@@ -329,7 +329,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
-import { clearAccountUsageCache } from '@/utils/accountUsageCache'
+import { clearAccountUsageCache, invalidateAccountUsage } from '@/utils/accountUsageCache'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
@@ -1236,6 +1236,8 @@ const patchAccountInList = (updatedAccount: Account) => {
   syncAccountRefs(mergedAccount)
 }
 const handleAccountUpdated = (updatedAccount: Account) => {
+  // Edited/re-authorized: a remounted usage cell must not reuse the old result.
+  invalidateAccountUsage(updatedAccount.id)
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
 }

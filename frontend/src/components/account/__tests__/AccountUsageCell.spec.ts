@@ -131,6 +131,34 @@ describe('AccountUsageCell', () => {
     expect(getUsage).toHaveBeenCalledTimes(2)
   })
 
+  it('状态变化后，之前发出的请求晚到也不会写回', async () => {
+    let resolve!: (v: unknown) => void
+    getUsage.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6105, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: barStub }
+    })
+    await wrapper.setProps({ account: makeAccount({ id: 6105, platform: 'anthropic', type: 'oauth', status: 'error' }) })
+    resolve(anthropicUsage)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-deferred"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('5h|16')
+  })
+
+  it('手动查询过的停用账号重新挂载后仍显示结果', async () => {
+    getUsage.mockResolvedValue(anthropicUsage)
+    const account = makeAccount({ id: 6106, platform: 'anthropic', type: 'oauth', status: 'inactive' })
+    const first = mount(AccountUsageCell, { props: { account }, global: { stubs: barStub } })
+    await flushPromises()
+    await first.find('[data-testid="usage-deferred"] button').trigger('click')
+    await flushPromises()
+    first.unmount()
+    const second = mount(AccountUsageCell, { props: { account }, global: { stubs: barStub } })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(1)
+    expect(second.text()).toContain('5h|16')
+  })
+
   it('刷新失败时保留上一次的结果', async () => {
     getUsage.mockResolvedValueOnce(anthropicUsage).mockRejectedValueOnce({ status: 500 })
     const wrapper = mount(AccountUsageCell, {

@@ -415,6 +415,10 @@ const usageVersionKey = computed(
 // button); a skipped account then follows page refreshes like the others.
 const manuallyQueried = ref(false)
 
+// Bumped whenever the cell's account state changes; a response to an older
+// request is dropped instead of overwriting the current state.
+let requestSeq = 0
+
 // Disabled and error accounts are not queried automatically (their windows are
 // not in use and an error account often cannot be queried anyway).
 const autoLoadAllowed = computed(() => {
@@ -677,17 +681,19 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
 
   // Keep showing the previous result while refreshing; only the first load
   // shows the skeleton.
+  const seq = ++requestSeq
   loading.value = !usageInfo.value
   error.value = null
 
   try {
-    usageInfo.value = await requestUsage(source)
+    const data = await requestUsage(source)
+    if (seq === requestSeq) usageInfo.value = data
   } catch (e: any) {
     // A failed refresh keeps the previous result on screen.
-    if (!usageInfo.value) error.value = t('common.error')
+    if (seq === requestSeq && !usageInfo.value) error.value = t('common.error')
     console.error('Failed to load usage:', e)
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
   }
 }
 
@@ -699,8 +705,10 @@ const queryDeferredUsage = () => {
 const loadActiveUsage = async () => {
   manuallyQueried.value = true
   activeQueryLoading.value = true
+  const seq = ++requestSeq
   try {
-    usageInfo.value = await requestUsage('active')
+    const data = await requestUsage('active')
+    if (seq === requestSeq) usageInfo.value = data
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
   } finally {
@@ -796,6 +804,16 @@ const autoSource = computed<'passive' | undefined>(() => {
 })
 
 onMounted(() => {
+  if (shouldFetchUsage.value && !autoLoadAllowed.value) {
+    // A skipped account the user already queried keeps its result when the
+    // row is remounted (scroll, list reload).
+    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken, usageVersionKey.value)
+    if (cached) {
+      usageInfo.value = cached
+      manuallyQueried.value = true
+    }
+    return
+  }
   if (!shouldAutoLoadUsageOnMount.value) return
   loadUsage(autoSource.value)
 })
@@ -833,8 +851,10 @@ watch(autoLoadAllowed, (allowed) => {
       console.error('Failed to load usage after status change:', e)
     })
   } else if (!manuallyQueried.value) {
+    requestSeq += 1
     usageInfo.value = null
     error.value = null
+    loading.value = false
   }
 })
 
@@ -842,8 +862,10 @@ watch(autoLoadAllowed, (allowed) => {
 watch(
   () => `${props.account.platform}:${props.account.type}`,
   () => {
+    requestSeq += 1
     usageInfo.value = null
     error.value = null
+    loading.value = false
     manuallyQueried.value = false
     if (!shouldAutoLoadUsageOnMount.value) return
     loadUsage(autoSource.value).catch((e) => {
