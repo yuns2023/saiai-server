@@ -6,6 +6,7 @@
     @pointerleave="onPointerLeave"
     @pointerdown="onPointerDown"
     @pointerup="onPointerUp"
+    @pointercancel="onPointerCancel"
   >
     <!-- One line per window: label, bar, percent, reset, A $ · 估 $ -->
     <div class="flex items-center gap-1">
@@ -317,6 +318,9 @@ const onPointerLeave = (e: PointerEvent) => {
 let touchStart: { x: number; y: number } | null = null
 const onPointerDown = (e: PointerEvent) => {
   touchStart = e.pointerType === 'mouse' ? null : { x: e.clientX, y: e.clientY }
+}
+const onPointerCancel = () => {
+  touchStart = null
 }
 const onPointerUp = (e: PointerEvent) => {
   if (e.pointerType === 'mouse') return

@@ -141,6 +141,22 @@ describe('UsageProgressBar', () => {
     await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 12, clientY: 102 })
     expect(details.isVisible()).toBe(true)
 
+    // A cancelled touch (browser took over the gesture) leaves no stale start.
+    // (details are open here) a pointerup without its pointerdown is ignored
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 12, clientY: 102 })
+    expect(details.isVisible()).toBe(true)
+    // tap closes
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointercancel', { pointerType: 'touch' })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    expect(details.isVisible()).toBe(true)
+
     // Any scroll (the table scrolls in its own container) closes it.
     document.body.dispatchEvent(new Event('scroll'))
     await wrapper.vm.$nextTick()
