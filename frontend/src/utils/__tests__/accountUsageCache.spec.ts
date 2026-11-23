@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AccountUsageInfo } from '@/types'
 import {
+  accountUsageEpoch,
   clearAccountUsageCache,
   fetchAccountUsageShared,
   getCachedAccountUsage,
@@ -67,6 +68,14 @@ describe('accountUsageCache', () => {
     markAccountUsageQueried(5)
     invalidateAccountUsage(5)
     expect(wasAccountUsageQueried(5)).toBe(false)
+
+    // a manual request that started before an edit does not set the mark
+    const epochAtStart = accountUsageEpoch(5)
+    invalidateAccountUsage(5)
+    markAccountUsageQueried(5, epochAtStart)
+    expect(wasAccountUsageQueried(5)).toBe(false)
+    markAccountUsageQueried(5, accountUsageEpoch(5))
+    expect(wasAccountUsageQueried(5)).toBe(true)
   })
 
   it('a failed request is not cached and frees its in-flight slot', async () => {

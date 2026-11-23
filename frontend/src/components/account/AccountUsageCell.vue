@@ -342,6 +342,7 @@ import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import {
+  accountUsageEpoch,
   fetchAccountUsageShared,
   getCachedAccountUsage,
   markAccountUsageQueried,
@@ -687,6 +688,7 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
   // Keep showing the previous result while refreshing; only the first load
   // shows the skeleton.
   const seq = ++requestSeq
+  const epoch = accountUsageEpoch(props.account.id)
   loading.value = !usageInfo.value
   error.value = null
 
@@ -696,7 +698,7 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
       usageInfo.value = data
       // Remembered only after a successful query, so a failing skipped account
       // is not re-requested on every remount.
-      if (manuallyQueried.value) markAccountUsageQueried(props.account.id)
+      if (manuallyQueried.value) markAccountUsageQueried(props.account.id, epoch)
     }
   } catch (e: any) {
     // A failed refresh keeps the previous result on screen.
@@ -716,11 +718,12 @@ const loadActiveUsage = async () => {
   manuallyQueried.value = true
   activeQueryLoading.value = true
   const seq = ++requestSeq
+  const epoch = accountUsageEpoch(props.account.id)
   try {
     const data = await requestUsage('active')
     if (seq === requestSeq) {
       usageInfo.value = data
-      markAccountUsageQueried(props.account.id)
+      markAccountUsageQueried(props.account.id, epoch)
     }
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
