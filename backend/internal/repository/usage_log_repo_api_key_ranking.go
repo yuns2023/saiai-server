@@ -93,9 +93,9 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 //
 // The cache read rate sort only ranks Keys with at least
 // usagestats.CacheReadRateMinTokens tokens; the totals still cover every Key in
-// the scope (they are computed before that filter). The totals are read from
-// the ranked rows, so when no Key passes the threshold they are loaded with a
-// second, unfiltered query.
+// the scope: they are window sums over every Key, read from a one-row
+// subquery LEFT JOINed to the ranked rows in the same statement, so a filtered
+// empty ranking still carries them (as one row with a NULL api_key_id).
 func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")
@@ -161,16 +161,23 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			ORDER BY %s
 			LIMIT $%d
 		)
-		SELECT r.api_key_id, COALESCE(k.name, ''), r.user_id, COALESCE(us.email, ''),
-			r.cost, r.actual_cost, r.requests, r.hosted_requests, r.tokens, r.input_tokens, r.output_tokens,
-			r.cache_creation_tokens, r.cache_read_tokens,
-			r.request_body_bytes_total, r.request_body_bytes_avg, r.request_body_bytes_max, r.request_body_bytes_known_count,
-			r.subscription_revenue, r.subscription_revenue_unpriced_cost,
-			r.balance_cost, r.subscription_cost, r.unclassified_cost,
-			r.total_cost, r.total_actual_cost, r.total_requests, r.total_tokens,
-			r.total_subscription_revenue, r.total_subscription_revenue_unpriced_cost,
-			r.total_balance_cost, r.total_subscription_cost, r.total_unclassified_cost
-		FROM ranked r
+		SELECT r.api_key_id, COALESCE(k.name, ''), COALESCE(r.user_id, 0), COALESCE(us.email, ''),
+			COALESCE(r.cost, 0), COALESCE(r.actual_cost, 0), COALESCE(r.requests, 0), COALESCE(r.hosted_requests, 0),
+			COALESCE(r.tokens, 0), COALESCE(r.input_tokens, 0), COALESCE(r.output_tokens, 0),
+			COALESCE(r.cache_creation_tokens, 0), COALESCE(r.cache_read_tokens, 0),
+			COALESCE(r.request_body_bytes_total, 0), r.request_body_bytes_avg, r.request_body_bytes_max, COALESCE(r.request_body_bytes_known_count, 0),
+			COALESCE(r.subscription_revenue, 0), COALESCE(r.subscription_revenue_unpriced_cost, 0),
+			COALESCE(r.balance_cost, 0), COALESCE(r.subscription_cost, 0), COALESCE(r.unclassified_cost, 0),
+			t.total_cost, t.total_actual_cost, t.total_requests, t.total_tokens,
+			t.total_subscription_revenue, t.total_subscription_revenue_unpriced_cost,
+			t.total_balance_cost, t.total_subscription_cost, t.total_unclassified_cost
+		FROM (
+			SELECT total_cost, total_actual_cost, total_requests, total_tokens,
+				total_subscription_revenue, total_subscription_revenue_unpriced_cost,
+				total_balance_cost, total_subscription_cost, total_unclassified_cost
+			FROM scoped LIMIT 1
+		) t
+		LEFT JOIN ranked r ON TRUE
 		LEFT JOIN api_keys k ON k.id = r.api_key_id
 		LEFT JOIN users us ON us.id = r.user_id
 		ORDER BY %s
@@ -190,9 +197,9 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 	}
 	for rows.Next() {
 		var item usagestats.APIKeySpendingRankingItem
-		var sizeAvg, sizeMax sql.NullInt64
+		var keyID, sizeAvg, sizeMax sql.NullInt64
 		if err = rows.Scan(
-			&item.APIKeyID, &item.KeyName, &item.UserID, &item.Email,
+			&keyID, &item.KeyName, &item.UserID, &item.Email,
 			&item.Cost, &item.ActualCost, &item.Requests, &item.HostedRequests, &item.Tokens, &item.InputTokens, &item.OutputTokens,
 			&item.CacheCreationTokens, &item.CacheReadTokens,
 			&item.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &item.RequestBodyBytesKnownCount,
@@ -204,20 +211,15 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 		); err != nil {
 			return nil, err
 		}
+		if !keyID.Valid {
+			continue // scope totals only: no Key passed the cache read rate threshold
+		}
+		item.APIKeyID = keyID.Int64
 		item.RequestBodyBytesAvg, item.RequestBodyBytesMax = nullInt64Ptr(sizeAvg), nullInt64Ptr(sizeMax)
 		result.Ranking = append(result.Ranking, item)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
-	}
-	if len(result.Ranking) == 0 && sort == usagestats.SpendingRankingSortCacheReadRate {
-		scope, scopeErr := r.GetAPIKeySpendingRanking(ctx, startTime, endTime, userID, 1, usagestats.SpendingRankingSortCost, "")
-		if scopeErr != nil {
-			return nil, scopeErr
-		}
-		result.TotalCost, result.TotalActualCost = scope.TotalCost, scope.TotalActualCost
-		result.TotalRequests, result.TotalTokens = scope.TotalRequests, scope.TotalTokens
-		result.TotalSubscriptionRevenueStats = scope.TotalSubscriptionRevenueStats
 	}
 	return result, nil
 }

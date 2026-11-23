@@ -196,7 +196,7 @@ func TestGetAPIKeySpendingRankingSortByCacheReadRate(t *testing.T) {
 			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, 20, usagestats.SpendingRankingSortCacheReadRate, tc.order)
 			require.NoError(t, err)
 			require.Len(t, got.Ranking, 1)
-			require.NoError(t, mock.ExpectationsWereMet()) // no second (totals) query
+			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
 
@@ -222,12 +222,12 @@ func TestGetAPIKeySpendingRankingCacheReadRateEmptyKeepsScopeTotals(t *testing.T
 	repo := &usageLogRepository{sql: db}
 	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	mock.ExpectQuery(`(?s)WHERE tokens >= \$4 .*LIMIT \$5`).WithArgs(start, end, int64(7), usagestats.CacheReadRateMinTokens, 20).
-		WillReturnRows(apiKeyRankingRows())
-	// Totals come from an unfiltered cost query limited to one row.
-	mock.ExpectQuery(`(?s)WHERE TRUE\s+ORDER BY cost DESC.*LIMIT \$4`).WithArgs(start, end, int64(7), 1).
+	// One statement: totals come from scoped (all Keys), ranked rows are LEFT
+	// JOINed, so no Key passing the threshold yields one totals-only row.
+	mock.ExpectQuery(`(?s)WHERE tokens >= \$4 .*LIMIT \$5.*FROM \(\s+SELECT total_cost, .*FROM scoped LIMIT 1\s+\) t\s+LEFT JOIN ranked r ON TRUE`).
+		WithArgs(start, end, int64(7), usagestats.CacheReadRateMinTokens, 20).
 		WillReturnRows(apiKeyRankingRows().
-			AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 0, 200, 100, 50, 25, 25, int64(0), nil, nil, int64(0), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
+			AddRow(nil, "", 0, "", 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0, int64(0), nil, nil, int64(0), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
 	got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 7, 20, usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc)
 	require.NoError(t, err)
 	require.NotNil(t, got.Ranking)
@@ -239,12 +239,4 @@ func TestGetAPIKeySpendingRankingCacheReadRateEmptyKeepsScopeTotals(t *testing.T
 	require.Equal(t, 6.4, got.TotalSubscriptionRevenue)
 	require.Equal(t, 1.5, got.TotalUnclassifiedCost)
 	require.NoError(t, mock.ExpectationsWereMet())
-
-	// The totals query failing fails the request rather than showing zero totals.
-	db, mock = newSQLMock(t)
-	repo = &usageLogRepository{sql: db}
-	mock.ExpectQuery(`WHERE tokens >=`).WillReturnRows(apiKeyRankingRows())
-	mock.ExpectQuery(`WHERE TRUE`).WillReturnError(errors.New("unavailable"))
-	_, err = repo.GetAPIKeySpendingRanking(context.Background(), start, end, 7, 20, usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc)
-	require.Error(t, err)
 }
