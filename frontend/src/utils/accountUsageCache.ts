@@ -36,17 +36,21 @@ const epochOf = (accountId: number) => accountEpochs.get(accountId) ?? 0
 // refreshes even after their cell was unmounted and remounted.
 const manuallyQueriedAccounts = new Set<number>()
 
-/** Current edit epoch of an account; pass it back to markAccountUsageQueried. */
-export function accountUsageEpoch(accountId: number): number {
-  return epochOf(accountId)
+/**
+ * Identifies the page visit (generation) and the account's edit epoch; pass it
+ * back to markAccountUsageQueried.
+ */
+export function accountUsageEpoch(accountId: number): string {
+  return `${generation}:${epochOf(accountId)}`
 }
 
 /**
- * Remember a successful manual query. `epoch` is the account's epoch when the
- * request started: a request that outlived an edit does not set the mark.
+ * Remember a successful manual query. `epoch` is accountUsageEpoch() taken
+ * when the request started: a request that outlived an edit or the page visit
+ * does not set the mark.
  */
-export function markAccountUsageQueried(accountId: number, epoch = epochOf(accountId)): void {
-  if (epoch !== epochOf(accountId)) return
+export function markAccountUsageQueried(accountId: number, epoch = accountUsageEpoch(accountId)): void {
+  if (epoch !== accountUsageEpoch(accountId)) return
   manuallyQueriedAccounts.add(accountId)
 }
 

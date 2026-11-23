@@ -76,6 +76,12 @@ describe('accountUsageCache', () => {
     expect(wasAccountUsageQueried(5)).toBe(false)
     markAccountUsageQueried(5, accountUsageEpoch(5))
     expect(wasAccountUsageQueried(5)).toBe(true)
+
+    // ...nor one from a previous visit of the page (epochs restart at 0)
+    const previousVisit = accountUsageEpoch(6)
+    clearAccountUsageCache()
+    markAccountUsageQueried(6, previousVisit)
+    expect(wasAccountUsageQueried(6)).toBe(false)
   })
 
   it('a failed request is not cached and frees its in-flight slot', async () => {
