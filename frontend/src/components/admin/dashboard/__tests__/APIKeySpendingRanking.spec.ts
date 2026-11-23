@@ -12,6 +12,7 @@ vi.mock('@/api/admin/usage', () => ({ searchUsers }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => ({
   'admin.dashboard.keyRankingGlobal': 'Global',
+  'admin.dashboard.keyRankingBackToGlobal': 'Back to all Keys',
   'admin.dashboard.keyRankingRetry': 'Retry',
   'admin.dashboard.keyRankingDetails': 'Usage records',
   'admin.dashboard.keyRankingFailed': 'Ranking failed',
@@ -93,8 +94,9 @@ describe('APIKeySpendingRanking', () => {
     await wrapper.findAll('tbody td')[1].find('button').trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 7 }))
-    const globalButton = wrapper.findAll('button').find(button => button.text() === 'Global')!
-    await globalButton.trigger('click')
+    const back = wrapper.get('[data-testid="key-ranking-back-global"]')
+    expect(back.text()).toBe('Back to all Keys')
+    await back.trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: undefined }))
   })
@@ -220,5 +222,15 @@ describe('APIKeySpendingRanking', () => {
     expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate' }))
     expect(getRanking.mock.lastCall![0].order).toBeUndefined()
     expect(toggle().text()).toBe('admin.dashboard.rankingOrderDesc')
+  })
+
+  it('reloads with unchanged filters when the dashboard refresh token changes', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="key-ranking-back-global"]').exists()).toBe(false)
+    await wrapper.setProps({ refreshToken: 1 })
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(2)
+    expect(getRanking.mock.calls[1][0]).toEqual(getRanking.mock.calls[0][0])
   })
 })

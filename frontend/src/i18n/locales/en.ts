@@ -1490,6 +1490,8 @@ export default {
       spendingRankingTitle: 'User Spending Ranking',
       keySpendingRankingTitle: 'Key Spending Ranking',
       keyRankingGlobal: 'Global',
+      keyRankingBackToGlobal: 'Back to all Keys',
+      refreshHint: 'Reload all data on this page (server data may be cached for up to 30 seconds)',
       keyRankingBasis: 'Ranked by configured base (standard) cost in the selected time range, including hosted groups',
       keyRankingScopeTotal: 'Scope total (all Keys)',
       rankingActualShort: 'Billed',

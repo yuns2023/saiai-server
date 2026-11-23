@@ -1499,6 +1499,8 @@ export default {
       spendingRankingTitle: '用户消费榜',
       keySpendingRankingTitle: 'Key 消费榜',
       keyRankingGlobal: '全局',
+      keyRankingBackToGlobal: '返回全局榜',
+      refreshHint: '重新加载本页所有数据（服务器数据最多缓存 30 秒）',
       keyRankingBasis: '按所选时间范围的配置基础价（标准费用）排序，含托管分组',
       keyRankingScopeTotal: '当前范围合计（全部 Key）',
       rankingActualShort: '实扣',

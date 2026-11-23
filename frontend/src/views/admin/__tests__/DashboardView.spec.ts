@@ -219,4 +219,36 @@ describe('admin DashboardView', () => {
     expect(wrapper.get('[data-testid="hosted-service-fee-total"]').text()).toBe('admin.dashboard.hostedServiceFee $0.0000')
     wrapper.unmount()
   })
+
+  it('refresh reloads every panel and the Key ranking with the same range', async () => {
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          APIKeySpendingRanking: true,
+          Line: true
+        }
+      }
+    })
+    await flushPromises()
+    const ranking = wrapper.findComponent({ name: 'APIKeySpendingRanking' })
+    const token = ranking.props('refreshToken') as number
+
+    await wrapper.get('[data-testid="dashboard-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(getSnapshotV2).toHaveBeenCalledTimes(2)
+    expect(getSnapshotV2.mock.calls[1][0]).toMatchObject({ include_stats: true })
+    expect(getSnapshotV2.mock.calls[1][0]).toMatchObject({ start_date: getSnapshotV2.mock.calls[0][0].start_date })
+    expect(getUserUsageTrend).toHaveBeenCalledTimes(2)
+    expect(getUserSpendingRanking).toHaveBeenCalledTimes(2)
+    expect(ranking.props('refreshToken')).toBe(token + 1)
+    expect(wrapper.get('[data-testid="dashboard-refresh"]').attributes('disabled')).toBeUndefined()
+  })
 })

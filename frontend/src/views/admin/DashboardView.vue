@@ -285,6 +285,17 @@
                     @change="loadChartData"
                   />
                 </div>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm inline-flex items-center gap-1"
+                  :disabled="refreshing"
+                  :title="t('admin.dashboard.refreshHint')"
+                  data-testid="dashboard-refresh"
+                  @click="refreshAll"
+                >
+                  <Icon name="refresh" size="sm" :class="{ 'animate-spin': refreshing }" />
+                  {{ t('common.refresh') }}
+                </button>
               </div>
             </div>
           </div>
@@ -317,6 +328,7 @@
           </div>
 
           <APIKeySpendingRanking
+            :refresh-token="refreshToken"
             :start-date="startDate"
             :end-date="endDate"
             :start-time="activeRangePreset === 'last24Hours' ? rollingStartTime : undefined"
@@ -801,6 +813,22 @@ const loadChartData = async () => {
     loadUsersTrend(),
     loadUserSpendingRanking()
   ])
+}
+
+// Reloads every panel (stats, charts, both rankings); a rolling 24h range
+// moves to now. Server snapshot caches keep data for up to 30 seconds.
+const refreshing = ref(false)
+const refreshToken = ref(0)
+const refreshAll = async () => {
+  if (refreshing.value) return
+  refreshing.value = true
+  if (activeRangePreset.value === 'last24Hours') refreshRollingRange()
+  refreshToken.value++
+  try {
+    await loadDashboardStats()
+  } finally {
+    refreshing.value = false
+  }
 }
 
 onMounted(() => {

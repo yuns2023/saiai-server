@@ -569,7 +569,7 @@ type BatchUsersUsageRequest struct {
 	UserIDs []int64 `json:"user_ids" binding:"required"`
 }
 
-var dashboardUsersRankingCache = newSnapshotCache(5 * time.Minute)
+var dashboardUsersRankingCache = newSnapshotCache(30 * time.Second)
 var dashboardBatchUsersUsageCache = newSnapshotCache(30 * time.Second)
 var dashboardBatchAPIKeysUsageCache = newSnapshotCache(30 * time.Second)
 
