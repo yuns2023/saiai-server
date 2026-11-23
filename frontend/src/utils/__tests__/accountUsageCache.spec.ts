@@ -42,6 +42,27 @@ describe('accountUsageCache', () => {
     expect(getCachedAccountUsage(2, 0, 'v')).toEqual(usage(2))
   })
 
+  it('a request in flight during an edit is neither cached nor shared afterwards', async () => {
+    let resolveOld!: (v: AccountUsageInfo) => void
+    const old = fetchAccountUsageShared(4, 'passive', 0, 'v', () => new Promise((r) => { resolveOld = r }))
+    invalidateAccountUsage(4)
+    let calls = 0
+    const fresh = fetchAccountUsageShared(4, 'passive', 0, 'v', async () => { calls++; return usage(2) })
+    expect(fresh).not.toBe(old)
+    expect(calls).toBe(1)
+    await fresh
+    resolveOld(usage(1))
+    await old
+    expect(getCachedAccountUsage(4, 0, 'v')).toEqual(usage(2))
+  })
+
+  it('manualOnly reuses only results the user asked for', async () => {
+    await fetchAccountUsageShared(5, 'passive', 0, 'v', async () => usage(1))
+    expect(getCachedAccountUsage(5, 0, 'v', { manualOnly: true })).toBeNull()
+    await fetchAccountUsageShared(5, 'passive', 1, 'v', async () => usage(2), { manual: true })
+    expect(getCachedAccountUsage(5, 1, 'v', { manualOnly: true })).toEqual(usage(2))
+  })
+
   it('a failed request is not cached and frees its in-flight slot', async () => {
     await expect(fetchAccountUsageShared(3, undefined, 0, 'v', () => Promise.reject(new Error('x')))).rejects.toThrow('x')
     expect(getCachedAccountUsage(3, 0, 'v')).toBeNull()

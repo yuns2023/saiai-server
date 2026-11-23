@@ -159,6 +159,25 @@ describe('AccountUsageCell', () => {
     expect(second.text()).toContain('5h|16')
   })
 
+  it('自动查过的账号在视野外变成错误后，重新挂载回到“-”且刷新不再查', async () => {
+    getUsage.mockResolvedValue(anthropicUsage)
+    const first = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6107, platform: 'anthropic', type: 'oauth' }), manualRefreshToken: 0 },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    first.unmount()
+    const second = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6107, platform: 'anthropic', type: 'oauth', status: 'error' }), manualRefreshToken: 0 },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    expect(second.find('[data-testid="usage-deferred"]').exists()).toBe(true)
+    await second.setProps({ manualRefreshToken: 1 })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(1)
+  })
+
   it('刷新失败时保留上一次的结果', async () => {
     getUsage.mockResolvedValueOnce(anthropicUsage).mockRejectedValueOnce({ status: 500 })
     const wrapper = mount(AccountUsageCell, {

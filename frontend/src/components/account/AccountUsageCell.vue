@@ -660,10 +660,15 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-const requestUsage = (source?: 'passive' | 'active') => {
+const requestUsage = (source?: 'passive' | 'active', manual = false) => {
   const accountId = props.account.id
-  return fetchAccountUsageShared(accountId, source, props.manualRefreshToken, usageVersionKey.value, () =>
-    source ? adminAPI.accounts.getUsage(accountId, source) : adminAPI.accounts.getUsage(accountId)
+  return fetchAccountUsageShared(
+    accountId,
+    source,
+    props.manualRefreshToken,
+    usageVersionKey.value,
+    () => (source ? adminAPI.accounts.getUsage(accountId, source) : adminAPI.accounts.getUsage(accountId)),
+    { manual }
   )
 }
 
@@ -686,7 +691,8 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
   error.value = null
 
   try {
-    const data = await requestUsage(source)
+    // A skipped account is only ever loaded because the user asked for it.
+    const data = await requestUsage(source, manuallyQueried.value)
     if (seq === requestSeq) usageInfo.value = data
   } catch (e: any) {
     // A failed refresh keeps the previous result on screen.
@@ -707,7 +713,7 @@ const loadActiveUsage = async () => {
   activeQueryLoading.value = true
   const seq = ++requestSeq
   try {
-    const data = await requestUsage('active')
+    const data = await requestUsage('active', true)
     if (seq === requestSeq) usageInfo.value = data
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
@@ -807,7 +813,9 @@ onMounted(() => {
   if (shouldFetchUsage.value && !autoLoadAllowed.value) {
     // A skipped account the user already queried keeps its result when the
     // row is remounted (scroll, list reload).
-    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken, usageVersionKey.value)
+    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken, usageVersionKey.value, {
+      manualOnly: true
+    })
     if (cached) {
       usageInfo.value = cached
       manuallyQueried.value = true
