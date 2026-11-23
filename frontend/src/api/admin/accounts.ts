@@ -41,6 +41,9 @@ export async function list(
     search?: string
     owner_user_id?: number
     lite?: string
+    /** Server-side sort key (see utils/accountListSort); omitted = id DESC. */
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
   },
   options?: {
     signal?: AbortSignal
@@ -74,6 +77,9 @@ export async function listWithEtag(
     search?: string
     owner_user_id?: number
     lite?: string
+    /** Server-side sort key (see utils/accountListSort); omitted = id DESC. */
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
   },
   options?: {
     signal?: AbortSignal

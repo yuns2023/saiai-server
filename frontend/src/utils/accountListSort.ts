@@ -26,28 +26,25 @@ export const DEFAULT_ACCOUNT_LIST_SORT: AccountListSortParams = { sort_by: 'name
 const normalizeOrder = (order: unknown): AccountSortOrder => (order === 'desc' ? 'desc' : 'asc')
 
 /**
- * Normalizes a sort key/order against the currently sortable columns, the
- * same way DataTable does: an unknown or non-sortable key falls back to the
- * default (name asc) so the request always matches the header arrow.
+ * Normalizes a sort key/order against the server whitelist only (which
+ * header shows the key is DataTable's business). Unknown keys fall back to
+ * the default (name asc), matching DataTable's default arrow.
  */
-export function normalizeAccountListSort(
-  key: unknown,
-  order: unknown,
-  sortableKeys: ReadonlySet<string>
-): AccountListSortParams {
-  if (typeof key === 'string' && sortableKeys.has(key) && ACCOUNT_SERVER_SORT_KEYS.has(key)) {
+export function normalizeAccountListSort(key: unknown, order: unknown): AccountListSortParams {
+  if (typeof key === 'string' && ACCOUNT_SERVER_SORT_KEYS.has(key)) {
     return { sort_by: key, sort_order: normalizeOrder(order) }
   }
   return { ...DEFAULT_ACCOUNT_LIST_SORT }
 }
 
 /**
- * Reads the sort DataTable persisted under storageKey ({ key, order }) so the
- * first list request uses the order the header shows.
+ * Reads the sort DataTable persisted under storageKey ({ key, order }).
+ * DataTable rewrites it whenever its effective sort changes (header click,
+ * or falling back to the default when the sorted column disappears), so it
+ * is the source of truth for what the header arrow shows.
  */
 export function readPersistedAccountListSort(
   storageKey: string,
-  sortableKeys: ReadonlySet<string>,
   storage: Pick<Storage, 'getItem'> | undefined = typeof localStorage === 'undefined' ? undefined : localStorage
 ): AccountListSortParams {
   try {
@@ -55,7 +52,7 @@ export function readPersistedAccountListSort(
     if (raw) {
       const parsed = JSON.parse(raw) as { key?: unknown; order?: unknown } | null
       if (parsed && typeof parsed === 'object') {
-        return normalizeAccountListSort(parsed.key, parsed.order, sortableKeys)
+        return normalizeAccountListSort(parsed.key, parsed.order)
       }
     }
   } catch {

@@ -323,14 +323,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
-import { DEFAULT_ACCOUNT_LIST_SORT, normalizeAccountListSort, readPersistedAccountListSort } from '@/utils/accountListSort'
+import { DEFAULT_ACCOUNT_LIST_SORT, normalizeAccountListSort, readPersistedAccountListSort, type AccountSortOrder } from '@/utils/accountListSort'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useClipboard } from '@/composables/useClipboard'
@@ -669,8 +669,14 @@ useSwipeSelect(accountTableRef, {
   deselect
 })
 
+// Bumped by every full list load (sort, filter, page change); an incremental
+// refresh started under an older generation discards its response so it can
+// never overwrite the newer order or page.
+let listGeneration = 0
+
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
+  listGeneration += 1
 }
 
 const isFirstLoad = ref(true)
@@ -720,14 +726,22 @@ const handlePageSizeChange = (size: number) => {
   baseHandlePageSizeChange(size)
 }
 
-const sortableColumnKeys = () => new Set(cols.value.filter((col) => col.sortable).map((col) => col.key))
-
 // Server-side sort: a header click re-queries from page 1 (page size kept).
 const handleSort = (key: string, order: 'asc' | 'desc') => {
-  const next = normalizeAccountListSort(key, order, sortableColumnKeys())
+  const next = normalizeAccountListSort(key, order)
   params.sort_by = next.sort_by
   params.sort_order = next.sort_order
   reload()
+}
+
+// Adopts the sort DataTable persisted (its effective header sort). Returns
+// whether the list params changed.
+const syncSortFromTable = () => {
+  const next = readPersistedAccountListSort(ACCOUNT_SORT_STORAGE_KEY)
+  if (next.sort_by === params.sort_by && next.sort_order === params.sort_order) return false
+  params.sort_by = next.sort_by
+  params.sort_order = next.sort_order
+  return true
 }
 
 watch(loading, (isLoading, wasLoading) => {
@@ -846,6 +860,7 @@ const mergeAccountsIncrementally = (nextRows: Account[]) => {
 const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   autoRefreshFetching.value = true
+  const generation = listGeneration
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -858,10 +873,11 @@ const refreshAccountsIncrementally = async () => {
         search?: string
         owner_user_id?: number
         sort_by?: string
-        sort_order?: 'asc' | 'desc'
+        sort_order?: AccountSortOrder
       },
       { etag: autoRefreshETag.value }
     )
+    if (generation !== listGeneration) return
 
     if (result.etag) {
       autoRefreshETag.value = result.etag
@@ -1024,15 +1040,13 @@ const cols = computed(() =>
 )
 
 // Hiding the sorted column makes DataTable fall back to its default arrow
-// without emitting 'sort'; follow it so the data order matches the header.
+// (and persist it) without emitting 'sort'; follow it after DataTable's own
+// post-flush watchers ran so the data order matches the header.
 watch(
-  () => cols.value.filter((col) => col.sortable).map((col) => col.key).join(','),
-  () => {
-    const next = normalizeAccountListSort(params.sort_by, params.sort_order, sortableColumnKeys())
-    if (next.sort_by === params.sort_by && next.sort_order === params.sort_order) return
-    params.sort_by = next.sort_by
-    params.sort_order = next.sort_order
-    reload()
+  () => cols.value.map((col) => col.key).join(','),
+  async () => {
+    await nextTick()
+    if (syncSortFromTable()) reload()
   }
 )
 
@@ -1468,7 +1482,10 @@ const handleClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(async () => {
-  Object.assign(params, readPersistedAccountListSort(ACCOUNT_SORT_STORAGE_KEY, sortableColumnKeys()))
+  // DataTable (mounted first) has resolved and persisted its initial sort;
+  // send the same one on the first request.
+  await nextTick()
+  syncSortFromTable()
   load()
   try {
     const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
