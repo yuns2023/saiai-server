@@ -18,9 +18,6 @@ interface CacheEntry {
   // means the cached result describes a different account state.
   versionKey: string
   fetchedAt: number
-  // The user asked for this result (deferred 查询 / active query), as opposed
-  // to an automatic load; only such results are reused for skipped accounts.
-  manual: boolean
 }
 
 // A remounted cell (scrolled back into view) refetches after this long.
@@ -35,16 +32,25 @@ let generation = 0
 // older epoch (before an edit) must not be cached or shared.
 const accountEpochs = new Map<number, number>()
 const epochOf = (accountId: number) => accountEpochs.get(accountId) ?? 0
+// Disabled/error accounts the user queried on this visit; they follow page
+// refreshes even after their cell was unmounted and remounted.
+const manuallyQueriedAccounts = new Set<number>()
+
+export function markAccountUsageQueried(accountId: number): void {
+  manuallyQueriedAccounts.add(accountId)
+}
+
+export function wasAccountUsageQueried(accountId: number): boolean {
+  return manuallyQueriedAccounts.has(accountId)
+}
 
 export function getCachedAccountUsage(
   accountId: number,
   refreshToken: number,
-  versionKey: string,
-  options: { manualOnly?: boolean } = {}
+  versionKey: string
 ): AccountUsageInfo | null {
   const entry = cache.get(accountId)
   if (!entry || entry.refreshToken !== refreshToken || entry.versionKey !== versionKey) return null
-  if (options.manualOnly && !entry.manual) return null
   if (Date.now() - entry.fetchedAt > ACCOUNT_USAGE_CACHE_TTL_MS) return null
   return entry.data
 }
@@ -58,30 +64,18 @@ export function fetchAccountUsageShared(
   source: 'passive' | 'active' | undefined,
   refreshToken: number,
   versionKey: string,
-  fetcher: () => Promise<AccountUsageInfo>,
-  options: { manual?: boolean } = {}
+  fetcher: () => Promise<AccountUsageInfo>
 ): Promise<AccountUsageInfo> {
   const epoch = epochOf(accountId)
   const key = `${accountId}:${source ?? 'default'}:${refreshToken}:${versionKey}:${epoch}`
-  const manual = Boolean(options.manual)
   const pending = inflight.get(key)
-  if (pending) {
-    if (manual) {
-      // A manual query joining an automatic request still marks the result manual.
-      return pending.then((data) => {
-        const entry = cache.get(accountId)
-        if (entry && entry.data === data) entry.manual = true
-        return data
-      })
-    }
-    return pending
-  }
+  if (pending) return pending
 
   const startedIn = generation
   const request = fetcher()
     .then((data) => {
       if (startedIn === generation && epoch === epochOf(accountId)) {
-        cache.set(accountId, { data, refreshToken, versionKey, fetchedAt: Date.now(), manual })
+        cache.set(accountId, { data, refreshToken, versionKey, fetchedAt: Date.now() })
       }
       return data
     })
@@ -102,4 +96,7 @@ export function clearAccountUsageCache(): void {
   generation += 1
   cache.clear()
   inflight.clear()
+  // Requests from before the clear are already ignored via generation.
+  accountEpochs.clear()
+  manuallyQueriedAccounts.clear()
 }

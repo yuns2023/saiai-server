@@ -159,6 +159,24 @@ describe('AccountUsageCell', () => {
     expect(second.text()).toContain('5h|16')
   })
 
+  it('手动查询过的错误账号，页面刷新时在视野外，滚回后仍会查询', async () => {
+    getUsage.mockResolvedValue(anthropicUsage)
+    const account = makeAccount({ id: 6108, platform: 'anthropic', type: 'oauth', status: 'error' })
+    const first = mount(AccountUsageCell, { props: { account, manualRefreshToken: 0 }, global: { stubs: barStub } })
+    await flushPromises()
+    await first.find('[data-testid="usage-deferred"] button').trigger('click')
+    await flushPromises()
+    first.unmount()
+    // page refreshed (token 1) while the row was off-screen
+    const second = mount(AccountUsageCell, { props: { account, manualRefreshToken: 1 }, global: { stubs: barStub } })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(2)
+    expect(second.text()).toContain('5h|16')
+    await second.setProps({ manualRefreshToken: 2 })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(3)
+  })
+
   it('自动查过的账号在视野外变成错误后，重新挂载回到“-”且刷新不再查', async () => {
     getUsage.mockResolvedValue(anthropicUsage)
     const first = mount(AccountUsageCell, {

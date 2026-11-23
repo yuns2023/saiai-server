@@ -4,7 +4,9 @@ import {
   clearAccountUsageCache,
   fetchAccountUsageShared,
   getCachedAccountUsage,
-  invalidateAccountUsage
+  invalidateAccountUsage,
+  markAccountUsageQueried,
+  wasAccountUsageQueried
 } from '../accountUsageCache'
 
 const usage = (n: number) => ({ five_hour: { utilization: n } }) as unknown as AccountUsageInfo
@@ -56,11 +58,12 @@ describe('accountUsageCache', () => {
     expect(getCachedAccountUsage(4, 0, 'v')).toEqual(usage(2))
   })
 
-  it('manualOnly reuses only results the user asked for', async () => {
-    await fetchAccountUsageShared(5, 'passive', 0, 'v', async () => usage(1))
-    expect(getCachedAccountUsage(5, 0, 'v', { manualOnly: true })).toBeNull()
-    await fetchAccountUsageShared(5, 'passive', 1, 'v', async () => usage(2), { manual: true })
-    expect(getCachedAccountUsage(5, 1, 'v', { manualOnly: true })).toEqual(usage(2))
+  it('remembers queried accounts until the cache is cleared', () => {
+    markAccountUsageQueried(5)
+    expect(wasAccountUsageQueried(5)).toBe(true)
+    expect(wasAccountUsageQueried(6)).toBe(false)
+    clearAccountUsageCache()
+    expect(wasAccountUsageQueried(5)).toBe(false)
   })
 
   it('a failed request is not cached and frees its in-flight slot', async () => {

@@ -341,7 +341,12 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
-import { fetchAccountUsageShared, getCachedAccountUsage } from '@/utils/accountUsageCache'
+import {
+  fetchAccountUsageShared,
+  getCachedAccountUsage,
+  markAccountUsageQueried,
+  wasAccountUsageQueried
+} from '@/utils/accountUsageCache'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
@@ -660,15 +665,10 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-const requestUsage = (source?: 'passive' | 'active', manual = false) => {
+const requestUsage = (source?: 'passive' | 'active') => {
   const accountId = props.account.id
-  return fetchAccountUsageShared(
-    accountId,
-    source,
-    props.manualRefreshToken,
-    usageVersionKey.value,
-    () => (source ? adminAPI.accounts.getUsage(accountId, source) : adminAPI.accounts.getUsage(accountId)),
-    { manual }
+  return fetchAccountUsageShared(accountId, source, props.manualRefreshToken, usageVersionKey.value, () =>
+    source ? adminAPI.accounts.getUsage(accountId, source) : adminAPI.accounts.getUsage(accountId)
   )
 }
 
@@ -691,8 +691,7 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
   error.value = null
 
   try {
-    // A skipped account is only ever loaded because the user asked for it.
-    const data = await requestUsage(source, manuallyQueried.value)
+    const data = await requestUsage(source)
     if (seq === requestSeq) usageInfo.value = data
   } catch (e: any) {
     // A failed refresh keeps the previous result on screen.
@@ -705,15 +704,17 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
 
 const queryDeferredUsage = () => {
   manuallyQueried.value = true
+  markAccountUsageQueried(props.account.id)
   return loadUsage(autoSource.value, { force: true })
 }
 
 const loadActiveUsage = async () => {
   manuallyQueried.value = true
+  markAccountUsageQueried(props.account.id)
   activeQueryLoading.value = true
   const seq = ++requestSeq
   try {
-    const data = await requestUsage('active', true)
+    const data = await requestUsage('active')
     if (seq === requestSeq) usageInfo.value = data
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
@@ -811,15 +812,11 @@ const autoSource = computed<'passive' | undefined>(() => {
 
 onMounted(() => {
   if (shouldFetchUsage.value && !autoLoadAllowed.value) {
-    // A skipped account the user already queried keeps its result when the
-    // row is remounted (scroll, list reload).
-    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken, usageVersionKey.value, {
-      manualOnly: true
-    })
-    if (cached) {
-      usageInfo.value = cached
-      manuallyQueried.value = true
-    }
+    // A skipped account the user already queried on this visit is loaded like
+    // any other when its row is remounted (scroll, list reload, page refresh).
+    if (!wasAccountUsageQueried(props.account.id)) return
+    manuallyQueried.value = true
+    loadUsage(autoSource.value)
     return
   }
   if (!shouldAutoLoadUsageOnMount.value) return
