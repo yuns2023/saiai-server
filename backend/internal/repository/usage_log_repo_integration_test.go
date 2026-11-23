@@ -2018,7 +2018,7 @@ func (s *UsageLogRepoSuite) TestDashboardHosted_BucketsStayInclusiveAndPlatformR
 	s.Require().InDelta(1.0, ranking.TotalActualCost, 1e-9)
 	s.Require().Equal(int64(3), ranking.TotalRequests)
 
-	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 12, usagestats.SpendingRankingSortCost)
+	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 12, usagestats.SpendingRankingSortCost, "")
 	s.Require().NoError(err)
 	s.Require().Len(keys.Ranking, 2)
 	s.Require().Equal(hostedKey.ID, keys.Ranking[0].APIKeyID)

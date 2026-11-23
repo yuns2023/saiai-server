@@ -10,13 +10,13 @@ const { getRanking, searchUsers, push } = vi.hoisted(() => ({
 vi.mock('@/api/admin/dashboard', () => ({ getAPIKeySpendingRanking: getRanking }))
 vi.mock('@/api/admin/usage', () => ({ searchUsers }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => ({
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => ({
   'admin.dashboard.keyRankingGlobal': 'Global',
   'admin.dashboard.keyRankingRetry': 'Retry',
   'admin.dashboard.keyRankingDetails': 'Usage records',
   'admin.dashboard.keyRankingFailed': 'Ranking failed',
   'admin.dashboard.keyRankingSearchFailed': 'Search failed',
-}[key] || key) }) }))
+}[key] || key) + (params ? JSON.stringify(params) : '') }) }))
 
 const range = { startTime: '2026-03-01T10:00:00Z', endTime: '2026-03-02T10:00:00Z' }
 const makeRow = (overrides: Partial<APIKeySpendingRankingItem> = {}): APIKeySpendingRankingItem => ({
@@ -53,7 +53,7 @@ describe('APIKeySpendingRanking', () => {
   })
   afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
-  it('loads global Top 12 and uses all-Key totals for shares and input-only reads for cache efficiency', async () => {
+  it('loads global Top 20 and uses all-Key totals for shares and input-only reads for cache efficiency', async () => {
     getRanking.mockResolvedValue(makeResponse({ ranking: [
       makeRow(),
       makeRow({ api_key_id: 12, key_name: '', input_tokens: 0, cache_creation_tokens: 100, cache_read_tokens: 0 }),
@@ -65,7 +65,7 @@ describe('APIKeySpendingRanking', () => {
 
     expect(getRanking).toHaveBeenCalledWith({
       start_time: range.startTime, end_time: range.endTime,
-      start_date: undefined, end_date: undefined, user_id: undefined, limit: 12
+      start_date: undefined, end_date: undefined, user_id: undefined, limit: 20
     })
     expect(wrapper.text()).toContain('$100.0000') // Standard-cost scope total.
     // Scope revenue = balance $60 + subscription $20 × 0.64.
@@ -183,11 +183,46 @@ describe('APIKeySpendingRanking', () => {
     await wrapper.find('[data-testid="key-ranking-sort-request_body_bytes"]').trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenCalledTimes(2)
-    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'request_body_bytes', limit: 12 }))
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'request_body_bytes', limit: 20 }))
 
     await wrapper.find('[data-testid="key-ranking-sort-cost"]').trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenCalledTimes(3)
     expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
+  })
+
+  it('ranks by cache read rate ascending by default, toggles direction and explains the token threshold', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="key-ranking-order"]').exists()).toBe(false)
+
+    getRanking.mockResolvedValue(makeResponse({ cache_read_rate_min_tokens: 2_000_000 }))
+    await wrapper.find('[data-testid="key-ranking-sort-cache_read_rate"]').trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(2)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'asc', limit: 20 }))
+    expect(wrapper.text()).toContain('admin.dashboard.rankingCacheReadRateBasis{"tokens":"2M"}')
+    const toggle = wrapper.get('[data-testid="key-ranking-order"]')
+    expect(toggle.text()).toBe('admin.dashboard.rankingOrderAsc')
+
+    await toggle.trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(3)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'desc' }))
+    expect(wrapper.get('[data-testid="key-ranking-order"]').text()).toBe('admin.dashboard.rankingOrderDesc')
+
+    // Other sorts never send a direction; returning to the cache sort restarts ascending.
+    await wrapper.find('[data-testid="key-ranking-sort-request_body_bytes"]').trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(4)
+    expect(getRanking.mock.lastCall![0].order).toBeUndefined()
+    expect(wrapper.find('[data-testid="key-ranking-order"]').exists()).toBe(false)
+    getRanking.mockResolvedValue(makeResponse({ ranking: [] }))
+    await wrapper.find('[data-testid="key-ranking-sort-cache_read_rate"]').trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(5)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'asc' }))
+    // Empty filtered result: say why, using the default threshold when the response has none.
+    expect(wrapper.get('[data-testid="key-ranking-empty"]').text()).toBe('admin.dashboard.rankingCacheReadRateEmpty{"tokens":"1M"}')
   })
 })

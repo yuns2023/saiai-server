@@ -589,11 +589,28 @@ func parseRankingLimit(raw string) int {
 // is rejected with 400.
 func parseRankingSort(c *gin.Context) (usagestats.SpendingRankingSort, bool) {
 	sort, ok := usagestats.ParseSpendingRankingSort(strings.TrimSpace(c.Query("sort")))
-	if !ok {
+	if !ok || sort == usagestats.SpendingRankingSortCacheReadRate {
 		response.BadRequest(c, "sort must be cost or request_body_bytes")
 		return "", false
 	}
 	return sort, true
+}
+
+// parseAPIKeyRankingSort is parseRankingSort plus the Key-only cache_read_rate
+// sort and the optional "order" (asc|desc; asc only with cache_read_rate,
+// which defaults to asc).
+func parseAPIKeyRankingSort(c *gin.Context) (usagestats.SpendingRankingSort, usagestats.SpendingRankingOrder, bool) {
+	sort, ok := usagestats.ParseSpendingRankingSort(strings.TrimSpace(c.Query("sort")))
+	if !ok {
+		response.BadRequest(c, "sort must be cost, request_body_bytes or cache_read_rate")
+		return "", "", false
+	}
+	order, ok := usagestats.ParseSpendingRankingOrder(sort, strings.TrimSpace(c.Query("order")))
+	if !ok {
+		response.BadRequest(c, "order must be desc, or asc with sort=cache_read_rate")
+		return "", "", false
+	}
+	return sort, order, true
 }
 
 // GetUserSpendingRanking handles getting user spending ranking data.

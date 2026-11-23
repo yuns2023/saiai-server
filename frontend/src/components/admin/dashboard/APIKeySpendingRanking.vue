@@ -8,7 +8,7 @@
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           <UserIdentityTooltip v-if="selectedUser" :user-id="selectedUser.id"><span>{{ selectedUser.email || `#${selectedUser.id}` }}</span></UserIdentityTooltip>
           <template v-else>{{ t('admin.dashboard.keyRankingGlobal') }}</template>
-          · {{ sort === 'cost' ? t('admin.dashboard.keyRankingBasis') : t('admin.dashboard.rankingSortBodySize') }}
+          · {{ sortBasis }}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -28,6 +28,16 @@
             {{ option.label }}
           </button>
         </div>
+        <button
+          v-if="sort === 'cache_read_rate'"
+          type="button"
+          class="btn btn-secondary btn-sm whitespace-nowrap"
+          :title="t('admin.dashboard.rankingOrderToggle')"
+          data-testid="key-ranking-order"
+          @click="order = order === 'asc' ? 'desc' : 'asc'"
+        >
+          {{ order === 'asc' ? t('admin.dashboard.rankingOrderAsc') : t('admin.dashboard.rankingOrderDesc') }}
+        </button>
         <button v-if="selectedUser" type="button" class="btn btn-secondary btn-sm" @click="selectUser(null)">
           {{ t('admin.dashboard.keyRankingGlobal') }}
         </button>
@@ -176,7 +186,11 @@
         </table>
       </div>
     </template>
-    <p v-else class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.noDataAvailable') }}</p>
+    <p v-else class="py-8 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="key-ranking-empty">
+      {{ sort === 'cache_read_rate'
+        ? t('admin.dashboard.rankingCacheReadRateEmpty', { tokens: formatTokenCount(cacheReadRateMinTokens) })
+        : t('admin.dashboard.noDataAvailable') }}
+    </p>
   </section>
 </template>
 
@@ -190,7 +204,7 @@ import { getAPIKeySpendingRanking } from '@/api/admin/dashboard'
 import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import { revenuePartsFromTotals } from '@/utils/revenue'
 import { searchUsers as findUsers, type SimpleUser } from '@/api/admin/usage'
-import type { APIKeySpendingRankingItem, APIKeySpendingRankingResponse, SpendingRankingSort } from '@/types'
+import type { APIKeyRankingSort, APIKeySpendingRankingItem, APIKeySpendingRankingResponse, RankingOrder } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { cacheReadRate, formatCacheReadRate, formatTokenCount } from '@/utils/usageTokens'
 import { formatRequestBodyBytes, requestBodySizeDetailParams } from '@/utils/requestBodyBytes'
@@ -203,16 +217,29 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const router = useRouter()
-const rankingLimit = 12
+const rankingLimit = 20
+// Matches usagestats.CacheReadRateMinTokens; the response value wins once loaded.
+const defaultCacheReadRateMinTokens = 1_000_000
 const ranking = ref<APIKeySpendingRankingResponse | null>(null)
 const loading = ref(false)
 const error = ref(false)
 const selectedUser = ref<SimpleUser | null>(null)
-const sort = ref<SpendingRankingSort>('cost')
-const sortOptions = computed<{ value: SpendingRankingSort; label: string }[]>(() => [
+const sort = ref<APIKeyRankingSort>('cost')
+// Only the cache read rate sort has a direction; it starts ascending (worst
+// caching first) every time it is selected.
+const order = ref<RankingOrder>('asc')
+const sortOptions = computed<{ value: APIKeyRankingSort; label: string }[]>(() => [
   { value: 'cost', label: t('admin.dashboard.rankingSortCost') },
-  { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') }
+  { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') },
+  { value: 'cache_read_rate', label: t('admin.dashboard.rankingSortCacheReadRate') }
 ])
+const cacheReadRateMinTokens = computed(() => ranking.value?.cache_read_rate_min_tokens ?? defaultCacheReadRateMinTokens)
+const sortBasis = computed(() => {
+  if (sort.value === 'cache_read_rate') {
+    return t('admin.dashboard.rankingCacheReadRateBasis', { tokens: formatTokenCount(cacheReadRateMinTokens.value) })
+  }
+  return sort.value === 'cost' ? t('admin.dashboard.keyRankingBasis') : t('admin.dashboard.rankingSortBodySize')
+})
 const userQuery = ref('')
 const userResults = ref<SimpleUser[]>([])
 const searchLoading = ref(false)
@@ -239,7 +266,8 @@ const loadRanking = async () => {
   try {
     const result = await getAPIKeySpendingRanking({
       ...rangeParams(), user_id: selectedUser.value?.id, limit: rankingLimit,
-      sort: sort.value === 'cost' ? undefined : sort.value
+      sort: sort.value === 'cost' ? undefined : sort.value,
+      order: sort.value === 'cache_read_rate' ? order.value : undefined
     })
     if (seq === rankingSeq) ranking.value = result
   } catch {
@@ -298,8 +326,11 @@ const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
 
 const formatCost = (value: number) => value.toFixed(4)
 
+watch(sort, (value, previous) => {
+  if (value === 'cache_read_rate' && previous !== 'cache_read_rate') order.value = 'asc'
+}, { flush: 'sync' })
 watch(
-  () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value],
+  () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value, order.value],
   loadRanking,
   { immediate: true }
 )

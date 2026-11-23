@@ -30,7 +30,7 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 		}
 	}
 	limit := parseRankingLimit(c.DefaultQuery("limit", "12"))
-	sort, ok := parseRankingSort(c)
+	sort, order, ok := parseAPIKeyRankingSort(c)
 	if !ok {
 		return
 	}
@@ -41,21 +41,25 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 		UserID int64  `json:"user_id"`
 		Limit  int    `json:"limit"`
 		Sort   string `json:"sort"`
-	}{startTime.Format(time.RFC3339Nano), endTime.Format(time.RFC3339Nano), userID, limit, string(sort)})
+		Order  string `json:"order"`
+	}{startTime.Format(time.RFC3339Nano), endTime.Format(time.RFC3339Nano), userID, limit, string(sort), string(order)})
 
 	cached, hit, err := dashboardAPIKeysRankingCache.GetOrLoad(string(keyRaw), func() (any, error) {
-		ranking, err := h.dashboardService.GetAPIKeySpendingRanking(c.Request.Context(), startTime, endTime, userID, limit, sort)
+		ranking, err := h.dashboardService.GetAPIKeySpendingRanking(c.Request.Context(), startTime, endTime, userID, limit, sort, order)
 		if err != nil {
 			return nil, err
 		}
 		return withRevenueTotals(gin.H{
-			"ranking":           ranking.Ranking,
-			"total_cost":        ranking.TotalCost,
-			"total_actual_cost": ranking.TotalActualCost,
-			"total_requests":    ranking.TotalRequests,
-			"total_tokens":      ranking.TotalTokens,
-			"start_date":        startTime.Format("2006-01-02"),
-			"end_date":          inclusiveRangeEndDate(endTime),
+			"ranking":                    ranking.Ranking,
+			"total_cost":                 ranking.TotalCost,
+			"total_actual_cost":          ranking.TotalActualCost,
+			"total_requests":             ranking.TotalRequests,
+			"total_tokens":               ranking.TotalTokens,
+			"start_date":                 startTime.Format("2006-01-02"),
+			"end_date":                   inclusiveRangeEndDate(endTime),
+			"sort":                       string(sort),
+			"order":                      string(order),
+			"cache_read_rate_min_tokens": usagestats.CacheReadRateMinTokens,
 		}, ranking.TotalSubscriptionRevenueStats), nil
 	})
 	if err != nil {

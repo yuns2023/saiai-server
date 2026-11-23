@@ -9,7 +9,44 @@ const (
 	SpendingRankingSortCost SpendingRankingSort = "cost"
 	// SpendingRankingSortRequestBodyBytes ranks by total inbound request bytes.
 	SpendingRankingSortRequestBodyBytes SpendingRankingSort = "request_body_bytes"
+	// SpendingRankingSortCacheReadRate ranks Keys by token-weighted cache read
+	// rate: cache_read / (input + cache_read + cache_creation). Only the API Key
+	// ranking supports it, and only Keys with at least CacheReadRateMinTokens
+	// tokens in the range take part.
+	SpendingRankingSortCacheReadRate SpendingRankingSort = "cache_read_rate"
 )
+
+// CacheReadRateMinTokens is the minimum total tokens (input + output + cache
+// read + cache write) a Key needs in the range to be ranked by cache read rate,
+// so Keys with one or two requests do not fill the list with 0% / 100%.
+const CacheReadRateMinTokens int64 = 1_000_000
+
+// SpendingRankingOrder is the direction of a ranking. Only the cache read rate
+// sort accepts ascending; every other sort is always descending.
+type SpendingRankingOrder string
+
+const (
+	SpendingRankingOrderDesc SpendingRankingOrder = "desc"
+	SpendingRankingOrderAsc  SpendingRankingOrder = "asc"
+)
+
+// ParseSpendingRankingOrder accepts "" (the sort's default), "asc" or "desc".
+// The cache read rate sort defaults to ascending (worst caching first).
+func ParseSpendingRankingOrder(sort SpendingRankingSort, raw string) (SpendingRankingOrder, bool) {
+	switch SpendingRankingOrder(raw) {
+	case "":
+		if sort == SpendingRankingSortCacheReadRate {
+			return SpendingRankingOrderAsc, true
+		}
+		return SpendingRankingOrderDesc, true
+	case SpendingRankingOrderDesc:
+		return SpendingRankingOrderDesc, true
+	case SpendingRankingOrderAsc:
+		return SpendingRankingOrderAsc, sort == SpendingRankingSortCacheReadRate
+	default:
+		return "", false
+	}
+}
 
 // ParseSpendingRankingSort accepts "" (default cost order) or a known value.
 func ParseSpendingRankingSort(raw string) (SpendingRankingSort, bool) {
@@ -18,6 +55,8 @@ func ParseSpendingRankingSort(raw string) (SpendingRankingSort, bool) {
 		return SpendingRankingSortCost, true
 	case SpendingRankingSortRequestBodyBytes:
 		return SpendingRankingSortRequestBodyBytes, true
+	case SpendingRankingSortCacheReadRate:
+		return SpendingRankingSortCacheReadRate, true
 	default:
 		return "", false
 	}

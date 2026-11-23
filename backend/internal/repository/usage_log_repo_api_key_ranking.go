@@ -36,17 +36,45 @@ const subscriptionRevenueAggregates = `COALESCE(SUM(u.actual_cost * g.subscripti
 
 // spendingRankingOrderBy returns a fixed ORDER BY list for a whitelisted sort.
 // It is applied before LIMIT and again on the final SELECT; idOrder is the
-// stable tie-break. prefix qualifies columns (e.g. "r.").
-func spendingRankingOrderBy(sort usagestats.SpendingRankingSort, prefix, idOrder string) (string, error) {
+// stable tie-break. prefix qualifies columns (e.g. "r."). The cache read rate
+// sort needs input_tokens/cache_read_tokens/cache_creation_tokens columns and
+// cacheReadRateEligible applied first (so the denominator is positive); the
+// user ranking does not offer it.
+func spendingRankingOrderBy(sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder, prefix, idOrder string) (string, error) {
 	costOrder := prefix + "cost DESC, " + prefix + "actual_cost DESC, " + prefix + "tokens DESC, " + idOrder
+	if order != "" && order != usagestats.SpendingRankingOrderDesc && sort != usagestats.SpendingRankingSortCacheReadRate {
+		return "", fmt.Errorf("ranking sort %q only supports descending order", sort)
+	}
 	switch sort {
 	case "", usagestats.SpendingRankingSortCost:
 		return costOrder, nil
 	case usagestats.SpendingRankingSortRequestBodyBytes:
 		return prefix + "request_body_bytes_total DESC, " + prefix + "request_body_bytes_max DESC NULLS LAST, " + costOrder, nil
+	case usagestats.SpendingRankingSortCacheReadRate:
+		direction := "DESC"
+		switch order {
+		case usagestats.SpendingRankingOrderAsc:
+			direction = "ASC"
+		case "", usagestats.SpendingRankingOrderDesc:
+		default:
+			return "", fmt.Errorf("unsupported ranking order %q", order)
+		}
+		return cacheReadRateExpr(prefix) + " " + direction + ", " + costOrder, nil
 	default:
 		return "", fmt.Errorf("unsupported ranking sort %q", sort)
 	}
+}
+
+// cacheReadRateExpr mirrors the frontend cacheReadRate(): cache read divided by
+// uncached input + cache read + cache write, output excluded.
+func cacheReadRateExpr(prefix string) string {
+	return "(" + prefix + "cache_read_tokens::numeric / NULLIF(" + prefix + "input_tokens + " + prefix + "cache_read_tokens + " + prefix + "cache_creation_tokens, 0))"
+}
+
+// cacheReadRateEligible filters the cache read rate ranking to Keys with enough
+// tokens for the rate to mean something and a positive denominator.
+func cacheReadRateEligible(minTokensParam int) string {
+	return fmt.Sprintf("tokens >= $%d AND input_tokens + cache_read_tokens + cache_creation_tokens > 0", minTokensParam)
 }
 
 func nullInt64Ptr(value sql.NullInt64) *int64 {
@@ -62,15 +90,20 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 // Keys are ranked by standard total_cost so hosted Keys (actual_cost is only the
 // hosting service fee, 0 for free hosted groups; total_cost holds the standard
 // price) rank alongside billed Keys.
-func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort) (result *usagestats.APIKeySpendingRankingResponse, err error) {
+//
+// The cache read rate sort only ranks Keys with at least
+// usagestats.CacheReadRateMinTokens tokens; the totals still cover every Key in
+// the scope (they are computed before that filter), but an empty filtered
+// result carries no totals.
+func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")
 	}
-	rankedOrder, err := spendingRankingOrderBy(sort, "", "api_key_id ASC, user_id ASC")
+	rankedOrder, err := spendingRankingOrderBy(sort, order, "", "api_key_id ASC, user_id ASC")
 	if err != nil {
 		return nil, err
 	}
-	finalOrder, err := spendingRankingOrderBy(sort, "r.", "r.api_key_id ASC, r.user_id ASC")
+	finalOrder, err := spendingRankingOrderBy(sort, order, "r.", "r.api_key_id ASC, r.user_id ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +117,11 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 	if userID > 0 {
 		args = append(args, userID)
 		userFilter = " AND u.user_id = $3"
+	}
+	eligibleFilter := "TRUE"
+	if sort == usagestats.SpendingRankingSortCacheReadRate {
+		args = append(args, usagestats.CacheReadRateMinTokens)
+		eligibleFilter = cacheReadRateEligible(len(args))
 	}
 	args = append(args, limit)
 	query := fmt.Sprintf(`
@@ -104,7 +142,7 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			LEFT JOIN groups g ON g.id = u.group_id
 			WHERE u.created_at >= $1 AND u.created_at < $2%s
 			GROUP BY u.api_key_id, u.user_id
-		), ranked AS (
+		), scoped AS (
 			SELECT *,
 				COALESCE(SUM(cost) OVER (), 0) AS total_cost,
 				COALESCE(SUM(actual_cost) OVER (), 0) AS total_actual_cost,
@@ -116,6 +154,9 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 				COALESCE(SUM(subscription_cost) OVER (), 0) AS total_subscription_cost,
 				COALESCE(SUM(unclassified_cost) OVER (), 0) AS total_unclassified_cost
 			FROM key_spend
+		), ranked AS (
+			SELECT * FROM scoped
+			WHERE %s
 			ORDER BY %s
 			LIMIT $%d
 		)
@@ -132,7 +173,7 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 		LEFT JOIN api_keys k ON k.id = r.api_key_id
 		LEFT JOIN users us ON us.id = r.user_id
 		ORDER BY %s
-	`, requestBodySizeAggregates, subscriptionRevenueAggregates, userFilter, rankedOrder, len(args), finalOrder)
+	`, requestBodySizeAggregates, subscriptionRevenueAggregates, userFilter, eligibleFilter, rankedOrder, len(args), finalOrder)
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

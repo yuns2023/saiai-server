@@ -79,7 +79,7 @@ func (s *UsageLogRepoSuite) TestSubscriptionRevenueAcrossStatsRankingsAndAccount
 	s.Require().InDelta(197.0, users.TotalSubscriptionCost, 1e-9)
 	s.Require().InDelta(2.0, users.TotalUnclassifiedCost, 1e-9)
 
-	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, other.ID, 12, usagestats.SpendingRankingSortCost)
+	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, other.ID, 12, usagestats.SpendingRankingSortCost, "")
 	s.Require().NoError(err)
 	s.Require().Len(keys.Ranking, 1)
 	s.Require().InDelta(0.0, keys.Ranking[0].SubscriptionRevenue, 1e-9)
