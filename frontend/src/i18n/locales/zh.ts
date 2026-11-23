@@ -3230,6 +3230,7 @@ export default {
         fableWeekly: 'Fable 7天独立额度',
         passiveSampled: '被动采样',
         activeQuery: '查询',
+        deferredHint: '停用或错误状态的账号不自动查询用量，点击查询',
         standardCost: '标准 ${cost}',
         standardCostHint: '本窗口平台用量（标准价，所有用户；窗口按上游重置时间倒推，可能与左侧请求统计的起点不同）',
         statsHint: '请求数、Token 与 A/U 金额按请求统计口径计算，起点可能与标准价窗口不同',

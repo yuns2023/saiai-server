@@ -3779,6 +3779,7 @@ export default {
         fableWeekly: 'Fable 7-Day Dedicated Limit',
         passiveSampled: 'Passive',
         activeQuery: 'Query',
+        deferredHint: 'Usage is not queried automatically for disabled or error accounts; click to query',
         standardCost: 'Std ${cost}',
         standardCostHint: 'Platform usage this window (standard price, all users; window derived from the upstream reset time, so its start may differ from the request stats)',
         statsHint: 'Requests, tokens and A/U use the request-stats window; its start may differ from the standard-cost window',
