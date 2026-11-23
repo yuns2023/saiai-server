@@ -58,10 +58,10 @@ describe('createRequestThrottle', () => {
       throttle.run(async () => {
         started.push(name)
       }, { priority })
-    const all = [run('a'), run('b'), run('c'), run('manual', true)]
+    const all = [run('a'), run('b'), run('c'), run('manual1', true), run('manual2', true)]
     await vi.advanceTimersByTimeAsync(1000)
     await Promise.all(all)
-    expect(started).toEqual(['a', 'manual', 'b', 'c'])
+    expect(started).toEqual(['a', 'manual1', 'manual2', 'b', 'c'])
   })
 
   it('turns a synchronous throw into a rejection and keeps draining', async () => {

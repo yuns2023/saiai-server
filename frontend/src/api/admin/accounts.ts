@@ -377,8 +377,9 @@ export async function clearError(id: number): Promise<Account> {
  * @param id - Account ID
  * @returns Account usage info
  */
-// Shared by every usage cell on the accounts page so a full-page refresh stays
-// under the edge per-IP limit (20 r/s, burst 80) instead of bursting ~100 requests.
+// Shared by every usage cell on the accounts page so a full-page refresh no longer
+// bursts ~100 requests into the edge per-IP limit (20 r/s, burst 80). Per tab and
+// usage-only: other tabs/requests share the same edge quota, hence the 503 retry.
 // Page loads pass 'passive' or no source; an explicit 'active' is a user-initiated
 // single lookup (row 查询 button, quota-window modal) and jumps the queue.
 const usageRequestThrottle = createRequestThrottle({ capacity: 40, refillPerSecond: 10 })

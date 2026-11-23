@@ -5,7 +5,8 @@
  * With ~100 accounts this exceeds the edge nginx per-IP limit
  * (20 r/s, burst 80, rejected with 503), so part of the rows show an error.
  * Requests sharing a throttle start immediately while tokens remain and are
- * then paced at `refillPerSecond`, in FIFO order.
+ * then paced at `refillPerSecond`. Priority requests run before normal ones;
+ * each class is FIFO.
  */
 export interface RequestThrottleOptions {
   capacity: number
@@ -27,6 +28,8 @@ export function createRequestThrottle(options: RequestThrottleOptions): RequestT
   let tokens = capacity
   let lastRefill = Date.now()
   const queue: Array<() => void> = []
+  // queue[0 .. priorityCount) are priority entries, in arrival order.
+  let priorityCount = 0
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const refill = () => {
@@ -40,6 +43,7 @@ export function createRequestThrottle(options: RequestThrottleOptions): RequestT
     refill()
     while (queue.length > 0 && tokens >= 1) {
       tokens -= 1
+      if (priorityCount > 0) priorityCount -= 1
       queue.shift()!()
     }
     if (queue.length > 0) {
@@ -56,7 +60,8 @@ export function createRequestThrottle(options: RequestThrottleOptions): RequestT
           Promise.resolve().then(task).then(resolve, reject)
         }
         if (runOptions?.priority) {
-          queue.unshift(start)
+          queue.splice(priorityCount, 0, start)
+          priorityCount += 1
         } else {
           queue.push(start)
         }
