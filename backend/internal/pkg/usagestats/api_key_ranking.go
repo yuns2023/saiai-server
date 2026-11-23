@@ -10,19 +10,15 @@ const (
 	// SpendingRankingSortRequestBodyBytes ranks by total inbound request bytes.
 	SpendingRankingSortRequestBodyBytes SpendingRankingSort = "request_body_bytes"
 	// SpendingRankingSortCacheReadRate ranks Keys by token-weighted cache read
-	// rate: cache_read / (input + cache_read + cache_creation). Only the API Key
-	// ranking supports it, and only Keys with at least CacheReadRateMinTokens
-	// tokens in the range take part.
+	// rate: cache_read / (input + cache_read + cache_creation), output
+	// excluded. Only the API Key ranking supports it; Keys whose rate is
+	// undefined (no input of any kind) sort last in both directions.
 	SpendingRankingSortCacheReadRate SpendingRankingSort = "cache_read_rate"
 )
 
-// CacheReadRateMinTokens is the minimum total tokens (input + output + cache
-// read + cache write) a Key needs in the range to be ranked by cache read rate,
-// so Keys with one or two requests do not fill the list with 0% / 100%.
-const CacheReadRateMinTokens int64 = 1_000_000
-
-// SpendingRankingOrder is the direction of a ranking. Only the cache read rate
-// sort accepts ascending; every other sort is always descending.
+// SpendingRankingOrder is the direction of a ranking. Only the API Key ranking
+// accepts ascending (e.g. lowest cost first: Keys used very little but still
+// in use); the user ranking is always descending.
 type SpendingRankingOrder string
 
 const (
@@ -30,19 +26,13 @@ const (
 	SpendingRankingOrderAsc  SpendingRankingOrder = "asc"
 )
 
-// ParseSpendingRankingOrder accepts "" (the sort's default), "asc" or "desc".
-// The cache read rate sort defaults to ascending (worst caching first).
-func ParseSpendingRankingOrder(sort SpendingRankingSort, raw string) (SpendingRankingOrder, bool) {
+// ParseSpendingRankingOrder accepts "" (descending), "asc" or "desc".
+func ParseSpendingRankingOrder(raw string) (SpendingRankingOrder, bool) {
 	switch SpendingRankingOrder(raw) {
-	case "":
-		if sort == SpendingRankingSortCacheReadRate {
-			return SpendingRankingOrderAsc, true
-		}
-		return SpendingRankingOrderDesc, true
-	case SpendingRankingOrderDesc:
+	case "", SpendingRankingOrderDesc:
 		return SpendingRankingOrderDesc, true
 	case SpendingRankingOrderAsc:
-		return SpendingRankingOrderAsc, sort == SpendingRankingSortCacheReadRate
+		return SpendingRankingOrderAsc, true
 	default:
 		return "", false
 	}

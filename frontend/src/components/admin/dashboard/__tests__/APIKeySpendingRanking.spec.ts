@@ -191,48 +191,34 @@ describe('APIKeySpendingRanking', () => {
     expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
   })
 
-  it('ranks by cache read rate ascending by default, toggles direction and explains the token threshold', async () => {
+  it('sorts by cache read rate and toggles ascending order for every sort', async () => {
     const wrapper = createWrapper()
     await flushPromises()
-    expect(wrapper.find('[data-testid="key-ranking-order"]').exists()).toBe(false)
+    expect(getRanking.mock.lastCall![0].order).toBeUndefined()
+    const toggle = () => wrapper.get('[data-testid="key-ranking-order"]')
+    expect(toggle().text()).toBe('admin.dashboard.rankingOrderDesc')
 
-    getRanking.mockResolvedValue(makeResponse({ cache_read_rate_min_tokens: 2_000_000 }))
-    await wrapper.find('[data-testid="key-ranking-sort-cache_read_rate"]').trigger('click')
+    // Ascending cost: Keys used least but still in use.
+    await toggle().trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenCalledTimes(2)
-    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'asc', limit: 20 }))
-    expect(wrapper.text()).toContain('admin.dashboard.rankingCacheReadRateBasis{"tokens":"2M"}')
-    const toggle = wrapper.get('[data-testid="key-ranking-order"]')
-    expect(toggle.text()).toBe('admin.dashboard.rankingOrderAsc')
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ order: 'asc', limit: 20 }))
+    expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
+    expect(toggle().text()).toBe('admin.dashboard.rankingOrderAsc')
+    expect(wrapper.text()).toContain('admin.dashboard.keyRankingBasis · admin.dashboard.rankingOrderAsc')
 
-    await toggle.trigger('click')
-    await flushPromises()
-    expect(getRanking).toHaveBeenCalledTimes(3)
-    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'desc' }))
-    expect(wrapper.get('[data-testid="key-ranking-order"]').text()).toBe('admin.dashboard.rankingOrderDesc')
-
-    // Other sorts never send a direction; returning to the cache sort restarts ascending.
-    await wrapper.find('[data-testid="key-ranking-sort-request_body_bytes"]').trigger('click')
-    await flushPromises()
-    expect(getRanking).toHaveBeenCalledTimes(4)
-    expect(getRanking.mock.lastCall![0].order).toBeUndefined()
-    expect(wrapper.find('[data-testid="key-ranking-order"]').exists()).toBe(false)
-    getRanking.mockResolvedValue(makeResponse({ ranking: [] }))
+    // The direction is kept when switching sorts.
     await wrapper.find('[data-testid="key-ranking-sort-cache_read_rate"]').trigger('click')
     await flushPromises()
-    expect(getRanking).toHaveBeenCalledTimes(5)
+    expect(getRanking).toHaveBeenCalledTimes(3)
     expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'asc' }))
-    // Empty filtered result: keep the scope totals and say why, using the
-    // default threshold when the response has none.
-    expect(wrapper.get('[data-testid="key-ranking-empty"]').text()).toBe('admin.dashboard.rankingCacheReadRateEmpty{"tokens":"1M"}')
-    expect(wrapper.text()).toContain('$100.0000')
-    expect(wrapper.find('table').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.dashboard.rankingCacheReadRateBasis')
 
-    // No usage at all in the scope: no totals line, just the empty text.
-    getRanking.mockResolvedValue(makeResponse({ ranking: [], total_cost: 0, total_actual_cost: 0, total_requests: 0, total_tokens: 0 }))
-    await wrapper.get('[data-testid="key-ranking-order"]').trigger('click')
+    await toggle().trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-testid="key-ranking-total-revenue"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="key-ranking-empty"]').text()).toBe('admin.dashboard.rankingCacheReadRateEmpty{"tokens":"1M"}')
+    expect(getRanking).toHaveBeenCalledTimes(4)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate' }))
+    expect(getRanking.mock.lastCall![0].order).toBeUndefined()
+    expect(toggle().text()).toBe('admin.dashboard.rankingOrderDesc')
   })
 })

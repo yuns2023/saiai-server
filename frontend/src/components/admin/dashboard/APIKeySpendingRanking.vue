@@ -29,7 +29,6 @@
           </button>
         </div>
         <button
-          v-if="sort === 'cache_read_rate'"
           type="button"
           class="btn btn-secondary btn-sm whitespace-nowrap"
           :title="t('admin.dashboard.rankingOrderToggle')"
@@ -91,7 +90,7 @@
         {{ t('admin.dashboard.keyRankingRetry') }}
       </button>
     </div>
-    <template v-else-if="ranking && (ranking.ranking.length || ranking.total_requests > 0)">
+    <template v-else-if="ranking && ranking.ranking.length">
       <p class="mb-3 text-xs text-gray-500 dark:text-gray-400" aria-live="polite">
         {{ t('admin.dashboard.keyRankingScopeTotal') }}:
         {{ t('admin.dashboard.standard') }}
@@ -106,10 +105,7 @@
         · {{ ranking.total_requests.toLocaleString() }} {{ t('admin.dashboard.requests') }}
         · {{ formatTokenCount(ranking.total_tokens) }} Token
       </p>
-      <p v-if="!ranking.ranking.length" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="key-ranking-empty">
-        {{ emptyText }}
-      </p>
-      <div v-else class="overflow-x-auto">
+      <div class="overflow-x-auto">
         <table class="w-full min-w-[980px] text-sm">
           <thead class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
             <tr>
@@ -189,7 +185,7 @@
         </table>
       </div>
     </template>
-    <p v-else class="py-8 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="key-ranking-empty">{{ emptyText }}</p>
+    <p v-else class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.noDataAvailable') }}</p>
   </section>
 </template>
 
@@ -217,30 +213,24 @@ const props = defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const rankingLimit = 20
-// Matches usagestats.CacheReadRateMinTokens; the response value wins once loaded.
-const defaultCacheReadRateMinTokens = 1_000_000
 const ranking = ref<APIKeySpendingRankingResponse | null>(null)
 const loading = ref(false)
 const error = ref(false)
 const selectedUser = ref<SimpleUser | null>(null)
 const sort = ref<APIKeyRankingSort>('cost')
-// Only the cache read rate sort has a direction; it starts ascending (worst
-// caching first) every time it is selected.
-const order = ref<RankingOrder>('asc')
+// Descending by default; ascending shows e.g. the Keys used least but still
+// in use (only Keys with usage in the range are ranked). Kept across sorts.
+const order = ref<RankingOrder>('desc')
 const sortOptions = computed<{ value: APIKeyRankingSort; label: string }[]>(() => [
   { value: 'cost', label: t('admin.dashboard.rankingSortCost') },
   { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') },
   { value: 'cache_read_rate', label: t('admin.dashboard.rankingSortCacheReadRate') }
 ])
-const cacheReadRateMinTokens = computed(() => ranking.value?.cache_read_rate_min_tokens ?? defaultCacheReadRateMinTokens)
-const emptyText = computed(() => sort.value === 'cache_read_rate'
-  ? t('admin.dashboard.rankingCacheReadRateEmpty', { tokens: formatTokenCount(cacheReadRateMinTokens.value) })
-  : t('admin.dashboard.noDataAvailable'))
 const sortBasis = computed(() => {
-  if (sort.value === 'cache_read_rate') {
-    return t('admin.dashboard.rankingCacheReadRateBasis', { tokens: formatTokenCount(cacheReadRateMinTokens.value) })
-  }
-  return sort.value === 'cost' ? t('admin.dashboard.keyRankingBasis') : t('admin.dashboard.rankingSortBodySize')
+  const basis = sort.value === 'cost'
+    ? t('admin.dashboard.keyRankingBasis')
+    : sort.value === 'cache_read_rate' ? t('admin.dashboard.rankingCacheReadRateBasis') : t('admin.dashboard.rankingSortBodySize')
+  return order.value === 'asc' ? `${basis} · ${t('admin.dashboard.rankingOrderAsc')}` : basis
 })
 const userQuery = ref('')
 const userResults = ref<SimpleUser[]>([])
@@ -269,7 +259,7 @@ const loadRanking = async () => {
     const result = await getAPIKeySpendingRanking({
       ...rangeParams(), user_id: selectedUser.value?.id, limit: rankingLimit,
       sort: sort.value === 'cost' ? undefined : sort.value,
-      order: sort.value === 'cache_read_rate' ? order.value : undefined
+      order: order.value === 'asc' ? 'asc' : undefined
     })
     if (seq === rankingSeq) ranking.value = result
   } catch {
@@ -328,9 +318,6 @@ const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
 
 const formatCost = (value: number) => value.toFixed(4)
 
-watch(sort, (value, previous) => {
-  if (value === 'cache_read_rate' && previous !== 'cache_read_rate') order.value = 'asc'
-}, { flush: 'sync' })
 watch(
   () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value, order.value],
   loadRanking,

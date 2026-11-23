@@ -50,16 +50,15 @@ func (h *DashboardHandler) GetAPIKeySpendingRanking(c *gin.Context) {
 			return nil, err
 		}
 		return withRevenueTotals(gin.H{
-			"ranking":                    ranking.Ranking,
-			"total_cost":                 ranking.TotalCost,
-			"total_actual_cost":          ranking.TotalActualCost,
-			"total_requests":             ranking.TotalRequests,
-			"total_tokens":               ranking.TotalTokens,
-			"start_date":                 startTime.Format("2006-01-02"),
-			"end_date":                   inclusiveRangeEndDate(endTime),
-			"sort":                       string(sort),
-			"order":                      string(order),
-			"cache_read_rate_min_tokens": usagestats.CacheReadRateMinTokens,
+			"ranking":           ranking.Ranking,
+			"total_cost":        ranking.TotalCost,
+			"total_actual_cost": ranking.TotalActualCost,
+			"total_requests":    ranking.TotalRequests,
+			"total_tokens":      ranking.TotalTokens,
+			"start_date":        startTime.Format("2006-01-02"),
+			"end_date":          inclusiveRangeEndDate(endTime),
+			"sort":              string(sort),
+			"order":             string(order),
 		}, ranking.TotalSubscriptionRevenueStats), nil
 	})
 	if err != nil {

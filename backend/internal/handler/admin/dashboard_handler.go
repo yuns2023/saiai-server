@@ -601,17 +601,16 @@ func parseRankingSort(c *gin.Context) (usagestats.SpendingRankingSort, bool) {
 }
 
 // parseAPIKeyRankingSort is parseRankingSort plus the Key-only cache_read_rate
-// sort and the optional "order" (asc|desc; asc only with cache_read_rate,
-// which defaults to asc).
+// sort and the optional "order" (asc|desc, default desc).
 func parseAPIKeyRankingSort(c *gin.Context) (usagestats.SpendingRankingSort, usagestats.SpendingRankingOrder, bool) {
 	sort, ok := usagestats.ParseSpendingRankingSort(strings.TrimSpace(c.Query("sort")))
 	if !ok {
 		response.BadRequest(c, "sort must be cost, request_body_bytes or cache_read_rate")
 		return "", "", false
 	}
-	order, ok := usagestats.ParseSpendingRankingOrder(sort, strings.TrimSpace(c.Query("order")))
+	order, ok := usagestats.ParseSpendingRankingOrder(strings.TrimSpace(c.Query("order")))
 	if !ok {
-		response.BadRequest(c, "order must be desc, or asc with sort=cache_read_rate")
+		response.BadRequest(c, "order must be asc or desc")
 		return "", "", false
 	}
 	return sort, order, true

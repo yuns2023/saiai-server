@@ -275,7 +275,7 @@ export interface APIKeySpendingRankingParams extends Omit<UserSpendingRankingPar
   user_id?: number
   /** Omitted or 'cost' keeps the default cost order. */
   sort?: APIKeyRankingSort
-  /** Only with sort=cache_read_rate (default 'asc'); other sorts are always descending. */
+  /** Omitted or 'desc' keeps descending order. */
   order?: RankingOrder
 }
 

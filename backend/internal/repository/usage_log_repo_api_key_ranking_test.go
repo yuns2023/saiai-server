@@ -4,8 +4,8 @@ package repository
 
 import (
 	"context"
-	"database/sql/driver"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -163,80 +163,48 @@ func TestGetAPIKeySpendingRankingSortByRequestBodyBytes(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGetAPIKeySpendingRankingSortByCacheReadRate(t *testing.T) {
+func TestGetAPIKeySpendingRankingOrders(t *testing.T) {
 	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	rate := `\(cache_read_tokens::numeric / NULLIF\(input_tokens \+ cache_read_tokens \+ cache_creation_tokens, 0\)\)`
-	finalRate := `\(r.cache_read_tokens::numeric / NULLIF\(r.input_tokens \+ r.cache_read_tokens \+ r.cache_creation_tokens, 0\)\)`
+	q := regexp.QuoteMeta
+	rate := func(p string) string {
+		return "(" + p + "cache_read_tokens::numeric / NULLIF(" + p + "input_tokens + " + p + "cache_read_tokens + " + p + "cache_creation_tokens, 0))"
+	}
+	costDesc := func(p string) string {
+		return p + "cost DESC, " + p + "actual_cost DESC, " + p + "tokens DESC, " + p + "api_key_id ASC, " + p + "user_id ASC"
+	}
 	for _, tc := range []struct {
-		name      string
-		userID    int64
-		order     usagestats.SpendingRankingOrder
-		direction string
-		args      []driver.Value
-		minParam  string
-		limParam  string
+		name  string
+		sort  usagestats.SpendingRankingSort
+		order usagestats.SpendingRankingOrder
+		want  func(p string) string
 	}{
-		{"global asc", 0, usagestats.SpendingRankingOrderAsc, "ASC", []driver.Value{start, end, usagestats.CacheReadRateMinTokens, 20}, "3", "4"},
-		{"global default asc", 0, "", "ASC", []driver.Value{start, end, usagestats.CacheReadRateMinTokens, 20}, "3", "4"},
-		{"user desc", 7, usagestats.SpendingRankingOrderDesc, "DESC", []driver.Value{start, end, int64(7), usagestats.CacheReadRateMinTokens, 20}, "4", "5"},
+		{"cost asc", usagestats.SpendingRankingSortCost, usagestats.SpendingRankingOrderAsc, func(p string) string {
+			return p + "cost ASC, " + p + "actual_cost ASC, " + p + "tokens ASC, " + p + "api_key_id ASC, " + p + "user_id ASC"
+		}},
+		{"body asc", usagestats.SpendingRankingSortRequestBodyBytes, usagestats.SpendingRankingOrderAsc, func(p string) string {
+			return "(" + p + "request_body_bytes_known_count = 0) ASC, " + p + "request_body_bytes_total ASC, " + p + "request_body_bytes_max ASC NULLS LAST, " +
+				p + "cost ASC, " + p + "actual_cost ASC, " + p + "tokens ASC, " + p + "api_key_id ASC, " + p + "user_id ASC"
+		}},
+		{"cache desc (default)", usagestats.SpendingRankingSortCacheReadRate, "", func(p string) string { return rate(p) + " DESC NULLS LAST, " + costDesc(p) }},
+		{"cache asc", usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc, func(p string) string { return rate(p) + " ASC NULLS LAST, " + costDesc(p) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			repo := &usageLogRepository{sql: db}
-			// Totals are window sums over every Key (scoped) before the
-			// token threshold filters the ranked rows.
-			mock.ExpectQuery(`(?s)WITH key_spend AS .*\), scoped AS \(\s+SELECT \*,\s+COALESCE\(SUM\(cost\) OVER \(\), 0\) AS total_cost.*FROM key_spend\s+\), ranked AS \(\s+SELECT \* FROM scoped\s+` +
-				`WHERE tokens >= \$` + tc.minParam + ` AND input_tokens \+ cache_read_tokens \+ cache_creation_tokens > 0\s+` +
-				`ORDER BY ` + rate + ` ` + tc.direction + `, cost DESC, actual_cost DESC, tokens DESC, api_key_id ASC, user_id ASC\s+LIMIT \$` + tc.limParam + `.*` +
-				`ORDER BY ` + finalRate + ` ` + tc.direction + `, r.cost DESC, r.actual_cost DESC, r.tokens DESC, r.api_key_id ASC, r.user_id ASC\s*$`).
-				WithArgs(tc.args...).
-				WillReturnRows(apiKeyRankingRows().
-					AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 0, 2_000_000, 100, 50, 25, 25, int64(0), nil, nil, int64(0), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
-			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, 20, usagestats.SpendingRankingSortCacheReadRate, tc.order)
+			mock.ExpectQuery(`(?s)FROM key_spend\s+ORDER BY `+q(tc.want(""))+`\s+LIMIT \$3.*ORDER BY `+q(tc.want("r."))+`\s*$`).
+				WithArgs(start, end, 20).
+				WillReturnRows(apiKeyRankingRows())
+			_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 20, tc.sort, tc.order)
 			require.NoError(t, err)
-			require.Len(t, got.Ranking, 1)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
 
 	db, _ := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
-	for _, tc := range []struct {
-		sort  usagestats.SpendingRankingSort
-		order usagestats.SpendingRankingOrder
-	}{
-		{usagestats.SpendingRankingSortCost, usagestats.SpendingRankingOrderAsc},
-		{usagestats.SpendingRankingSortRequestBodyBytes, usagestats.SpendingRankingOrderAsc},
-		{usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrder("asc; DROP TABLE usage_logs")},
-	} {
-		_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 20, tc.sort, tc.order)
-		require.Error(t, err, tc)
-	}
-	_, err := repo.GetUserSpendingRanking(context.Background(), start, end, 12, usagestats.SpendingRankingSortCacheReadRate)
+	_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 20, usagestats.SpendingRankingSortCost, usagestats.SpendingRankingOrder("asc; DROP TABLE usage_logs"))
 	require.Error(t, err)
-}
-
-func TestGetAPIKeySpendingRankingCacheReadRateEmptyKeepsScopeTotals(t *testing.T) {
-	db, mock := newSQLMock(t)
-	repo := &usageLogRepository{sql: db}
-	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	end := start.Add(24 * time.Hour)
-	// One statement: totals come from scoped (all Keys), ranked rows are LEFT
-	// JOINed, so no Key passing the threshold yields one totals-only row.
-	mock.ExpectQuery(`(?s)WHERE tokens >= \$4 .*LIMIT \$5.*FROM \(\s+SELECT total_cost, .*FROM scoped LIMIT 1\s+\) t\s+LEFT JOIN ranked r ON TRUE`).
-		WithArgs(start, end, int64(7), usagestats.CacheReadRateMinTokens, 20).
-		WillReturnRows(apiKeyRankingRows().
-			AddRow(nil, "", 0, "", 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0, int64(0), nil, nil, int64(0), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
-	got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 7, 20, usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc)
-	require.NoError(t, err)
-	require.NotNil(t, got.Ranking)
-	require.Empty(t, got.Ranking)
-	require.Equal(t, 60.0, got.TotalCost)
-	require.Equal(t, 40.0, got.TotalActualCost)
-	require.Equal(t, int64(30), got.TotalRequests)
-	require.Equal(t, int64(2600), got.TotalTokens)
-	require.Equal(t, 6.4, got.TotalSubscriptionRevenue)
-	require.Equal(t, 1.5, got.TotalUnclassifiedCost)
-	require.NoError(t, mock.ExpectationsWereMet())
+	_, err = repo.GetUserSpendingRanking(context.Background(), start, end, 12, usagestats.SpendingRankingSortCacheReadRate)
+	require.Error(t, err)
 }
