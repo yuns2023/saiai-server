@@ -726,6 +726,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		sessionKey = "gemini:" + sessionHash
 	}
 
+	// A user-level pointer lets the conversation keep its account (and prompt
+	// cache) when the Key's group changes, e.g. smart switching.
+	c.Request = c.Request.WithContext(service.WithUserSessionPointer(c.Request.Context(), subject.UserID, platform, parsedReq.MetadataUserID))
+
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
 	var stickyBindingSource string
@@ -1365,6 +1369,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			h.bindSuccessOnlyStickyOnSuccess(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account, isClaudeCodeClient, reqLog)
+			h.gatewayService.RecordUserSessionPointer(c.Request.Context(), account)
 
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。

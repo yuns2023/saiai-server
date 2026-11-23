@@ -14,6 +14,7 @@ import (
 
 const stickySessionPrefix = "sticky_session:"
 const pendingStickySessionPrefix = "pending_sticky_session:"
+const userSessionPointerPrefix = "sticky_user_session:"
 const openAIUnpricedModelSuccessPrefix = "openai_unpriced_model_success:"
 
 var incrementOpenAIUnpricedModelSuccessScript = redis.NewScript(`
@@ -37,6 +38,12 @@ func NewGatewayCache(rdb *redis.Client) service.GatewayCache {
 // 格式: sticky_session:{groupID}:{sessionHash}
 func buildSessionKey(groupID int64, sessionHash string) string {
 	return fmt.Sprintf("%s%d:%s", stickySessionPrefix, groupID, sessionHash)
+}
+
+// buildUserSessionPointerKey 构建用户级会话指针 key（与分组无关），digest 已是哈希。
+// 格式: sticky_user_session:{userID}:{digest}
+func buildUserSessionPointerKey(userID int64, digest string) string {
+	return fmt.Sprintf("%s%d:%s", userSessionPointerPrefix, userID, digest)
 }
 
 func buildPendingSessionKey(groupID int64, sessionHash string) string {
@@ -117,6 +124,18 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *gatewayCache) GetUserSessionAccountID(ctx context.Context, userID int64, digest string) (int64, error) {
+	accountID, err := c.rdb.Get(ctx, buildUserSessionPointerKey(userID, digest)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, errors.Join(service.ErrGatewaySessionCacheMiss, err)
+	}
+	return accountID, err
+}
+
+func (c *gatewayCache) SetUserSessionAccountID(ctx context.Context, userID int64, digest string, accountID int64, ttl time.Duration) error {
+	return c.rdb.Set(ctx, buildUserSessionPointerKey(userID, digest), accountID, ttl).Err()
 }
 
 func (c *gatewayCache) GetPendingSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
