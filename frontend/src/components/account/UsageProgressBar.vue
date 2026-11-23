@@ -4,6 +4,7 @@
     :title="tooltip"
     @pointerenter="onPointerEnter"
     @pointerleave="onPointerLeave"
+    @pointerdown="onPointerDown"
     @pointerup="onPointerUp"
   >
     <!-- One line per window: label, bar, percent, reset, A $ · 估 $ -->
@@ -312,8 +313,16 @@ const onPointerEnter = (e: PointerEvent) => {
 const onPointerLeave = (e: PointerEvent) => {
   if (e.pointerType === 'mouse') closeDetails()
 }
+// A touch that moved (a scroll gesture ending on the bar) is not a tap.
+let touchStart: { x: number; y: number } | null = null
+const onPointerDown = (e: PointerEvent) => {
+  touchStart = e.pointerType === 'mouse' ? null : { x: e.clientX, y: e.clientY }
+}
 const onPointerUp = (e: PointerEvent) => {
   if (e.pointerType === 'mouse') return
+  const start = touchStart
+  touchStart = null
+  if (!start || Math.abs(e.clientX - start.x) > 10 || Math.abs(e.clientY - start.y) > 10) return
   if (detailsOpen.value) closeDetails()
   else openDetails()
 }

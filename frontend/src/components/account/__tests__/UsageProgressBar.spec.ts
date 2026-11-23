@@ -133,7 +133,12 @@ describe('UsageProgressBar', () => {
     // Touch: tap toggles; hover events from touch are ignored.
     await wrapper.trigger('pointerenter', { pointerType: 'touch' })
     expect(details.isVisible()).toBe(false)
-    await wrapper.trigger('pointerup', { pointerType: 'touch' })
+    // a scroll gesture ending on the bar is not a tap
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 40 })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 12, clientY: 102 })
     expect(details.isVisible()).toBe(true)
 
     // Any scroll (the table scrolls in its own container) closes it.
