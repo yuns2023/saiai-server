@@ -14,6 +14,9 @@ interface CacheEntry {
   data: AccountUsageInfo
   // manualRefreshToken of the page when this result was requested.
   refreshToken: number
+  // Account shape the result belongs to (platform/type/snapshot); a change
+  // means the cached result describes a different account state.
+  versionKey: string
   fetchedAt: number
 }
 
@@ -23,9 +26,13 @@ export const ACCOUNT_USAGE_CACHE_TTL_MS = 60_000
 const cache = new Map<number, CacheEntry>()
 const inflight = new Map<string, Promise<AccountUsageInfo>>()
 
-export function getCachedAccountUsage(accountId: number, refreshToken: number): AccountUsageInfo | null {
+export function getCachedAccountUsage(
+  accountId: number,
+  refreshToken: number,
+  versionKey: string
+): AccountUsageInfo | null {
   const entry = cache.get(accountId)
-  if (!entry || entry.refreshToken !== refreshToken) return null
+  if (!entry || entry.refreshToken !== refreshToken || entry.versionKey !== versionKey) return null
   if (Date.now() - entry.fetchedAt > ACCOUNT_USAGE_CACHE_TTL_MS) return null
   return entry.data
 }
@@ -38,15 +45,16 @@ export function fetchAccountUsageShared(
   accountId: number,
   source: 'passive' | 'active' | undefined,
   refreshToken: number,
+  versionKey: string,
   fetcher: () => Promise<AccountUsageInfo>
 ): Promise<AccountUsageInfo> {
-  const key = `${accountId}:${source ?? 'default'}:${refreshToken}`
+  const key = `${accountId}:${source ?? 'default'}:${refreshToken}:${versionKey}`
   const pending = inflight.get(key)
   if (pending) return pending
 
   const request = fetcher()
     .then((data) => {
-      cache.set(accountId, { data, refreshToken, fetchedAt: Date.now() })
+      cache.set(accountId, { data, refreshToken, versionKey, fetchedAt: Date.now() })
       return data
     })
     .finally(() => {

@@ -7,7 +7,7 @@
         type="button"
         class="rounded-sm px-1.5 py-0.5 text-[9px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
         :title="t('admin.accounts.usageWindow.deferredHint')"
-        @click="loadUsage(autoSource, { force: true })"
+        @click="queryDeferredUsage"
       >
         {{ t('admin.accounts.usageWindow.activeQuery') }}
       </button>
@@ -406,6 +406,15 @@ const hasOpenAIUsageFallback = computed(() => {
 
 const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))
 
+// Cached results are only reused for the same account shape.
+const usageVersionKey = computed(
+  () => `${props.account.platform}:${props.account.type}:${openAIUsageRefreshKey.value}`
+)
+
+// The user explicitly queried this cell (deferred 查询 or the active query
+// button); a skipped account then follows page refreshes like the others.
+const manuallyQueried = ref(false)
+
 // Disabled and error accounts are not queried automatically (their windows are
 // not in use and an error account often cannot be queried anyway).
 const autoLoadAllowed = computed(() => {
@@ -649,7 +658,7 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
 
 const requestUsage = (source?: 'passive' | 'active') => {
   const accountId = props.account.id
-  return fetchAccountUsageShared(accountId, source, props.manualRefreshToken, () =>
+  return fetchAccountUsageShared(accountId, source, props.manualRefreshToken, usageVersionKey.value, () =>
     source ? adminAPI.accounts.getUsage(accountId, source) : adminAPI.accounts.getUsage(accountId)
   )
 }
@@ -658,7 +667,7 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
   if (!shouldFetchUsage.value) return
 
   if (!options.force) {
-    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken)
+    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken, usageVersionKey.value)
     if (cached) {
       usageInfo.value = cached
       error.value = null
@@ -674,14 +683,21 @@ const loadUsage = async (source?: 'passive' | 'active', options: { force?: boole
   try {
     usageInfo.value = await requestUsage(source)
   } catch (e: any) {
-    error.value = t('common.error')
+    // A failed refresh keeps the previous result on screen.
+    if (!usageInfo.value) error.value = t('common.error')
     console.error('Failed to load usage:', e)
   } finally {
     loading.value = false
   }
 }
 
+const queryDeferredUsage = () => {
+  manuallyQueried.value = true
+  return loadUsage(autoSource.value, { force: true })
+}
+
 const loadActiveUsage = async () => {
+  manuallyQueried.value = true
   activeQueryLoading.value = true
   try {
     usageInfo.value = await requestUsage('active')
@@ -800,10 +816,38 @@ watch(
     if (nextToken === prevToken) return
     if (!shouldFetchUsage.value) return
     // A skipped account stays skipped on page refresh unless it was queried.
-    if (!autoLoadAllowed.value && !usageInfo.value) return
+    if (!autoLoadAllowed.value && !manuallyQueried.value) return
 
     loadUsage(autoSource.value, { force: true }).catch((e) => {
       console.error('Failed to refresh usage after manual refresh:', e)
+    })
+  }
+)
+
+// Status changed by an edit or auto refresh: an account that became active is
+// queried; one that became disabled/error goes back to the deferred state.
+watch(autoLoadAllowed, (allowed) => {
+  if (!shouldFetchUsage.value) return
+  if (allowed) {
+    loadUsage(autoSource.value).catch((e) => {
+      console.error('Failed to load usage after status change:', e)
+    })
+  } else if (!manuallyQueried.value) {
+    usageInfo.value = null
+    error.value = null
+  }
+})
+
+// Platform/type changed: the old result describes another account shape.
+watch(
+  () => `${props.account.platform}:${props.account.type}`,
+  () => {
+    usageInfo.value = null
+    error.value = null
+    manuallyQueried.value = false
+    if (!shouldAutoLoadUsageOnMount.value) return
+    loadUsage(autoSource.value).catch((e) => {
+      console.error('Failed to load usage after account type change:', e)
     })
   }
 )

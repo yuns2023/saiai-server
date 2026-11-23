@@ -95,6 +95,72 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('5h|16')
   })
 
+  it('状态从停用变回启用会自动查询；变成错误后回到“-”，刷新也不再查', async () => {
+    getUsage.mockResolvedValue(anthropicUsage)
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6101, platform: 'anthropic', type: 'oauth', status: 'inactive' }), manualRefreshToken: 0 },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    expect(getUsage).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ account: makeAccount({ id: 6101, platform: 'anthropic', type: 'oauth', status: 'active' }) })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('5h|16')
+
+    await wrapper.setProps({ account: makeAccount({ id: 6101, platform: 'anthropic', type: 'oauth', status: 'error' }) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="usage-deferred"]').exists()).toBe(true)
+    await wrapper.setProps({ manualRefreshToken: 1 })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(1)
+  })
+
+  it('手动查询过的错误账号会跟随页面刷新', async () => {
+    getUsage.mockResolvedValue(anthropicUsage)
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6102, platform: 'anthropic', type: 'oauth', status: 'error' }), manualRefreshToken: 0 },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    await wrapper.find('[data-testid="usage-deferred"] button').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ manualRefreshToken: 1 })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(2)
+  })
+
+  it('刷新失败时保留上一次的结果', async () => {
+    getUsage.mockResolvedValueOnce(anthropicUsage).mockRejectedValueOnce({ status: 500 })
+    const wrapper = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6103, platform: 'anthropic', type: 'oauth' }), manualRefreshToken: 0 },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    await wrapper.setProps({ manualRefreshToken: 1 })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('5h|16')
+    expect(wrapper.text()).not.toContain('common.error')
+  })
+
+  it('账号类型变化后不复用旧缓存', async () => {
+    getUsage.mockResolvedValue(anthropicUsage)
+    const first = mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6104, platform: 'anthropic', type: 'oauth' }) },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    first.unmount()
+    mount(AccountUsageCell, {
+      props: { account: makeAccount({ id: 6104, platform: 'anthropic', type: 'setup-token' }) },
+      global: { stubs: barStub }
+    })
+    await flushPromises()
+    expect(getUsage).toHaveBeenCalledTimes(2)
+  })
+
   it('重新挂载（滚动/列表重载）复用缓存，不重复请求', async () => {
     getUsage.mockResolvedValue(anthropicUsage)
     const account = makeAccount({ id: 6010, platform: 'anthropic', type: 'oauth' })

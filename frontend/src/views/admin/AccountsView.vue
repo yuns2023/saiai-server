@@ -329,6 +329,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import { clearAccountUsageCache } from '@/utils/accountUsageCache'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
@@ -442,6 +443,9 @@ const todayStatsError = ref<string | null>(null)
 const todayStatsReqSeq = ref(0)
 const pendingTodayStatsRefresh = ref(false)
 const usageManualRefreshToken = ref(0)
+// The refresh token restarts at 0 on every visit; drop the previous visit's
+// usage results so they are not reused.
+clearAccountUsageCache()
 
 const buildDefaultTodayStats = (): WindowStats => ({
   requests: 0,
