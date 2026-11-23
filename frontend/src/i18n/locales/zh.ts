@@ -3236,6 +3236,8 @@ export default {
         statsHint: '请求数、Token 与 A/U 金额按请求统计口径计算，起点可能与标准价窗口不同',
         rollingHint: '*上游重置时间未知，按滚动窗口统计',
         estimatedCapacity: '估 ${cost}',
+        standardCostLabel: '标准',
+        estimatedCapacityLabel: '估容量',
         estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）',
         restartedChip: '自 {time}',
         restartedHint: '统计自 {time} 起（{source}）：上游在窗口中途清零了用量，之前的用量不计入标准价、A/U 和估算',
@@ -3448,6 +3450,7 @@ export default {
       interceptWarmupRequests: '拦截预热请求',
       interceptWarmupRequestsDesc: '启用后，标题生成等预热请求将返回 mock 响应，不消耗上游 token',
       autoPauseOnExpired: '过期自动暂停调度',
+      expiresShort: '过期',
       autoPauseOnExpiredDesc: '启用后，账号过期将自动暂停调度',
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {

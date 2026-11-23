@@ -138,6 +138,8 @@
           :data="accounts"
           :loading="loading"
           row-key="id"
+          dense
+          :estimate-row-height="110"
           default-sort-key="name"
           default-sort-order="asc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
@@ -160,19 +162,28 @@
               class="rounded-sm border-gray-300 text-primary-600 focus:ring-primary-500 disabled:cursor-not-allowed disabled:opacity-40"
             />
           </template>
-          <template #cell-id="{ row }">
-            <button
-              type="button"
-              class="rounded-sm px-1.5 py-0.5 font-mono text-xs text-gray-600 hover:bg-gray-100 hover:text-primary-600 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-              :title="`Copy account ID ${row.id}`"
-              @click="copyAccountId(row.id)"
-            >
-              #{{ row.id }}
-            </button>
-          </template>
           <template #cell-name="{ row, value }">
-            <div class="flex w-64 flex-col whitespace-normal [overflow-wrap:anywhere]">
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            <div class="flex w-48 flex-col gap-0.5 whitespace-normal [overflow-wrap:anywhere]">
+              <div class="flex items-start gap-1">
+                <span class="line-clamp-2 font-medium text-gray-900 dark:text-white" :title="value">{{ value }}</span>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-sm px-1 font-mono text-[11px] leading-5 text-gray-400 hover:bg-gray-100 hover:text-primary-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                  :title="`Copy account ID ${row.id}`"
+                  @click="copyAccountId(row.id)"
+                >
+                  #{{ row.id }}
+                </button>
+              </div>
+              <div class="flex flex-wrap items-center gap-1">
+                <PlatformTypeBadge :platform="row.platform" :type="row.type" :plan-type="row.credentials?.plan_type" :privacy-mode="row.extra?.privacy_mode" />
+                <span
+                  v-if="getAntigravityTierLabel(row)"
+                  :class="['inline-block rounded-sm px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
+                >
+                  {{ getAntigravityTierLabel(row) }}
+                </span>
+              </div>
               <span
                 v-if="row.extra?.email_address"
                 class="text-xs text-gray-500 dark:text-gray-400"
@@ -180,6 +191,14 @@
               >
                 {{ row.extra.email_address }}
               </span>
+              <div
+                v-if="row.owner_user_id"
+                class="text-xs text-gray-500 dark:text-gray-400"
+                :title="row.owner_email ? `${t('admin.accounts.columns.owner')}: ${row.owner_email} #${row.owner_user_id}` : undefined"
+                data-testid="account-owner"
+              >
+                {{ t('admin.accounts.columns.owner') }}: {{ row.owner_email || '' }} <span class="text-gray-400 dark:text-dark-500">#{{ row.owner_user_id }}</span>
+              </div>
               <AccountHostedBadges :account="row" />
             </div>
           </template>
@@ -187,30 +206,16 @@
             <span v-if="value" :title="value" class="block max-w-xs truncate text-sm text-gray-600 dark:text-gray-300">{{ value }}</span>
             <span v-else class="text-sm text-gray-400 dark:text-dark-500">-</span>
           </template>
-          <template #cell-platform_type="{ row }">
-            <div class="flex flex-wrap items-center gap-1">
-              <PlatformTypeBadge :platform="row.platform" :type="row.type" :plan-type="row.credentials?.plan_type" :privacy-mode="row.extra?.privacy_mode" />
-              <span
-                v-if="getAntigravityTierLabel(row)"
-                :class="['inline-block rounded-sm px-1.5 py-0.5 text-[10px] font-medium', getAntigravityTierClass(row)]"
-              >
-                {{ getAntigravityTierLabel(row) }}
-              </span>
-            </div>
-          </template>
-          <template #cell-owner="{ row }">
-            <AccountOwnerCell :owner-user-id="row.owner_user_id" :owner-email="row.owner_email" />
-          </template>
           <template #cell-capacity="{ row }">
             <AccountCapacityCell :account="row" />
           </template>
-          <template #cell-status="{ row }">
-            <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
-          </template>
           <template #cell-schedulable="{ row }">
+            <div class="flex items-center gap-2">
             <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
+            <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+            </div>
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -248,21 +253,21 @@
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
           </template>
           <template #cell-last_used_at="{ row }">
-            <span class="text-sm text-gray-500 dark:text-dark-400" :title="accountLastUsedTitle(row)">{{ formatAccountLastUsed(row) }}</span>
-          </template>
-          <template #cell-expires_at="{ row, value }">
-            <div class="flex flex-col items-start gap-1">
-              <span class="text-sm text-gray-500 dark:text-dark-400">{{ formatExpiresAt(value) }}</span>
-              <div v-if="isExpired(value) || (row.auto_pause_on_expired && value)" class="flex items-center gap-1">
+            <div class="flex flex-col items-start gap-0.5 text-xs">
+              <span class="text-gray-500 dark:text-dark-400" :title="accountLastUsedTitle(row)">{{ formatAccountLastUsed(row) }}</span>
+              <span v-if="row.expires_at" class="text-gray-400 dark:text-dark-500" :title="t('admin.accounts.columns.expiresAt')">
+                {{ t('admin.accounts.expiresShort') }} {{ formatExpiresAt(row.expires_at) }}
+              </span>
+              <div v-if="isExpired(row.expires_at) || (row.auto_pause_on_expired && row.expires_at)" class="flex items-center gap-1">
                 <span
-                  v-if="isExpired(value)"
-                  class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  v-if="isExpired(row.expires_at)"
+                  class="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                 >
                   {{ t('admin.accounts.expired') }}
                 </span>
                 <span
-                  v-if="row.auto_pause_on_expired && value"
-                  class="inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
+                  v-if="row.auto_pause_on_expired && row.expires_at"
+                  class="inline-flex items-center rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
                 >
                   {{ t('admin.accounts.autoPauseOnExpired') }}
                 </span>
@@ -349,7 +354,6 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
-import AccountOwnerCell from '@/components/account/AccountOwnerCell.vue'
 import AccountHostedBadges from '@/components/account/AccountHostedBadges.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -938,13 +942,27 @@ function getAntigravityTierClass(row: any): string {
 const allColumns = computed(() => {
   const c = [
     { key: 'select', label: '', sortable: false },
-    { key: 'id', label: 'ID', sortable: true },
-    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
-    { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
-    { key: 'owner', label: t('admin.accounts.columns.owner'), sortable: false },
+    // Merged columns (ID + platform/type inside name, status inside schedulable,
+    // expiry inside last used) keep every former sort via header sortOptions.
+    {
+      key: 'name',
+      label: t('admin.accounts.columns.name'),
+      sortable: false,
+      sortOptions: [
+        { key: 'name', label: t('admin.accounts.columns.name') },
+        { key: 'id', label: 'ID' }
+      ]
+    },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
-    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
-    { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
+    {
+      key: 'schedulable',
+      label: `${t('admin.accounts.columns.schedulable')} / ${t('admin.accounts.columns.status')}`,
+      sortable: false,
+      sortOptions: [
+        { key: 'schedulable', label: t('admin.accounts.columns.schedulable') },
+        { key: 'status', label: t('admin.accounts.columns.status') }
+      ]
+    },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
@@ -955,8 +973,15 @@ const allColumns = computed(() => {
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
-    { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
-    { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
+    {
+      key: 'last_used_at',
+      label: `${t('admin.accounts.columns.lastUsed')} / ${t('admin.accounts.columns.expiresAt')}`,
+      sortable: false,
+      sortOptions: [
+        { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed') },
+        { key: 'expires_at', label: t('admin.accounts.columns.expiresAt') }
+      ]
+    },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
     { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
   )
@@ -965,13 +990,13 @@ const allColumns = computed(() => {
 
 // Columns that can be toggled (exclude fixed identity/action columns)
 const toggleableColumns = computed(() =>
-  allColumns.value.filter(col => col.key !== 'select' && col.key !== 'id' && col.key !== 'name' && col.key !== 'actions')
+  allColumns.value.filter(col => col.key !== 'select' && col.key !== 'name' && col.key !== 'actions')
 )
 
 const columnWidths: Record<string, string> = {
-  select: 'w-12', id: 'w-20', name: 'w-72', platform_type: 'w-44', owner: 'min-w-40',
-  capacity: 'w-24', status: 'w-40', schedulable: 'w-20',
-  today_stats: 'min-w-40', groups: 'min-w-80', usage: 'min-w-60'
+  select: 'w-10', name: 'w-52',
+  capacity: 'w-24', schedulable: 'w-40',
+  today_stats: 'min-w-36', groups: 'min-w-56', usage: 'min-w-64'
 }
 
 // Filtered columns based on visibility
