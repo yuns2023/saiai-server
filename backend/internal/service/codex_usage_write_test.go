@@ -45,7 +45,7 @@ func (r *codexFenceRepo) SetRateLimited(_ context.Context, _ int64, resetAt time
 	return nil
 }
 
-func (r *codexFenceRepo) ListWithFilters(_ context.Context, params pagination.PaginationParams, _, _, _, _ string, _ int64) ([]Account, *pagination.PaginationResult, error) {
+func (r *codexFenceRepo) ListWithFilters(_ context.Context, params pagination.PaginationParams, _, _, _, _ string, _ int64, _ AccountListSort) ([]Account, *pagination.PaginationResult, error) {
 	return r.accounts, &pagination.PaginationResult{Total: int64(len(r.accounts)), Page: params.Page, PageSize: params.PageSize}, nil
 }
 
@@ -263,7 +263,7 @@ func TestCodexExtraRateLimitSyncRespectsResetBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, fresh.RateLimitResetAt)
 	admin := &adminServiceImpl{accountRepo: repo, rateLimits: limits}
-	accounts, _, err := admin.ListAccounts(context.Background(), 1, 20, PlatformOpenAI, "", "", "", 0)
+	accounts, _, err := admin.ListAccounts(context.Background(), 1, 20, PlatformOpenAI, "", "", "", 0, AccountListSort{})
 	require.NoError(t, err)
 	require.Nil(t, accounts[0].RateLimitResetAt)
 	repo.requireNoWrite(t, limits)

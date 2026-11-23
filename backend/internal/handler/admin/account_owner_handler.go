@@ -102,16 +102,16 @@ func parseOwnerFilter(c *gin.Context) (int64, error) {
 
 // listAccountsByOwner applies the regular list filters in memory to one
 // owner's accounts and paginates the result.
-func (h *AccountHandler) listAccountsByOwner(ctx context.Context, ownerUserID int64, page, pageSize int, platform, accountType, status, search string, groupID int64) ([]service.Account, int64, error) {
+func (h *AccountHandler) listAccountsByOwner(ctx context.Context, ownerUserID int64, page, pageSize int, platform, accountType, status, search string, groupID int64, listSort service.AccountListSort) ([]service.Account, int64, error) {
 	all, err := h.hostedOwnerService.ListAccountsOwnedBy(ctx, ownerUserID)
 	if err != nil {
 		return nil, 0, err
 	}
-	accounts, total := filterOwnedAccounts(all, page, pageSize, platform, accountType, status, search, groupID)
+	accounts, total := filterOwnedAccounts(all, page, pageSize, platform, accountType, status, search, groupID, listSort)
 	return accounts, total, nil
 }
 
-func filterOwnedAccounts(all []service.Account, page, pageSize int, platform, accountType, status, search string, groupID int64) ([]service.Account, int64) {
+func filterOwnedAccounts(all []service.Account, page, pageSize int, platform, accountType, status, search string, groupID int64, listSort service.AccountListSort) ([]service.Account, int64) {
 	needle := strings.ToLower(search)
 	now := time.Now()
 	filtered := make([]service.Account, 0, len(all))
@@ -136,8 +136,8 @@ func filterOwnedAccounts(all []service.Account, page, pageSize int, platform, ac
 		}
 		filtered = append(filtered, account)
 	}
-	// Same order as the regular admin list (newest first).
-	sort.SliceStable(filtered, func(i, j int) bool { return filtered[i].ID > filtered[j].ID })
+	// Same order as the regular admin list (repository accountListOrder).
+	sortOwnedAccounts(filtered, listSort)
 	total := int64(len(filtered))
 	if page < 1 {
 		page = 1
@@ -188,8 +188,88 @@ func (h *AccountHandler) exportAccountsByOwner(ctx context.Context, ownerUserID 
 	if err != nil {
 		return nil, err
 	}
-	accounts, _ := filterOwnedAccounts(all, 1, len(all)+1, platform, accountType, status, search, 0)
+	accounts, _ := filterOwnedAccounts(all, 1, len(all)+1, platform, accountType, status, search, 0, service.AccountListSort{})
 	return accounts, nil
+}
+
+// sortOwnedAccounts mirrors the repository admin list order in memory: the
+// primary key, then id in the same direction; NULL timestamps always last.
+// Name compares lower-cased bytes, which can differ from the database
+// collation for non-ASCII names (owner lists are small and admin-only).
+func sortOwnedAccounts(accounts []service.Account, listSort service.AccountListSort) {
+	if listSort.IsDefault() {
+		sort.SliceStable(accounts, func(i, j int) bool { return accounts[i].ID > accounts[j].ID })
+		return
+	}
+	desc := listSort.Desc
+	sort.SliceStable(accounts, func(i, j int) bool {
+		a, b := &accounts[i], &accounts[j]
+		var c int
+		switch listSort.By {
+		case service.AccountSortByName:
+			c = strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		case service.AccountSortByStatus:
+			c = strings.Compare(a.Status, b.Status)
+		case service.AccountSortBySchedulable:
+			c = compareBool(a.Schedulable, b.Schedulable)
+		case service.AccountSortByPriority:
+			c = compareOrdered(a.Priority, b.Priority)
+		case service.AccountSortByRateMultiplier:
+			c = compareOrdered(ownedRateMultiplier(a), ownedRateMultiplier(b))
+		case service.AccountSortByLastUsedAt, service.AccountSortByExpiresAt:
+			ta, tb := a.LastUsedAt, b.LastUsedAt
+			if listSort.By == service.AccountSortByExpiresAt {
+				ta, tb = a.ExpiresAt, b.ExpiresAt
+			}
+			switch {
+			case ta == nil && tb == nil:
+				c = 0
+			case ta == nil:
+				return false // NULLs last in both directions
+			case tb == nil:
+				return true
+			default:
+				c = ta.Compare(*tb)
+			}
+		}
+		if c == 0 {
+			c = compareOrdered(a.ID, b.ID)
+		}
+		if desc {
+			return c > 0
+		}
+		return c < 0
+	})
+}
+
+// ownedRateMultiplier is the stored rate_multiplier (NOT NULL, default 1.0).
+func ownedRateMultiplier(a *service.Account) float64 {
+	if a.RateMultiplier == nil {
+		return 1.0
+	}
+	return *a.RateMultiplier
+}
+
+func compareBool(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case !a:
+		return -1
+	default:
+		return 1
+	}
+}
+
+func compareOrdered[T int | int64 | float64](a, b T) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func containsInt64(values []int64, target int64) bool {

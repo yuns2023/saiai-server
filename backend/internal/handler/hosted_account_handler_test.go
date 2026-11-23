@@ -47,7 +47,7 @@ type hostedHandlerAccounts struct {
 	calls int
 }
 
-func (r *hostedHandlerAccounts) ListWithFilters(_ context.Context, params pagination.PaginationParams, _, _, _, _ string, groupID int64) ([]service.Account, *pagination.PaginationResult, error) {
+func (r *hostedHandlerAccounts) ListWithFilters(_ context.Context, params pagination.PaginationParams, _, _, _, _ string, groupID int64, _ service.AccountListSort) ([]service.Account, *pagination.PaginationResult, error) {
 	if groupID != 10 {
 		panic("unscoped account query")
 	}

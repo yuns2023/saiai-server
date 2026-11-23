@@ -57,7 +57,7 @@ func TestListAccountsByOwnerFiltersInMemory(t *testing.T) {
 		{ID: 3, Name: "Gamma", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusError, GroupIDs: []int64{8}},
 	}
 	filter := func(platform, kind, status, search string, group int64, page, size int) ([]int64, int64) {
-		out, total := filterOwnedAccounts(accounts, page, size, platform, kind, status, search, group)
+		out, total := filterOwnedAccounts(accounts, page, size, platform, kind, status, search, group, service.AccountListSort{})
 		ids := make([]int64, 0, len(out))
 		for _, a := range out {
 			ids = append(ids, a.ID)
