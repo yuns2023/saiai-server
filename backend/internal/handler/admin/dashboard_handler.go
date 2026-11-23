@@ -593,6 +593,10 @@ func parseRankingSort(c *gin.Context) (usagestats.SpendingRankingSort, bool) {
 		response.BadRequest(c, "sort must be cost or request_body_bytes")
 		return "", false
 	}
+	if order := strings.TrimSpace(c.Query("order")); order != "" && order != string(usagestats.SpendingRankingOrderDesc) {
+		response.BadRequest(c, "order must be desc")
+		return "", false
+	}
 	return sort, true
 }
 

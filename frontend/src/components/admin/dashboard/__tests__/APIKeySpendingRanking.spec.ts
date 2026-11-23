@@ -222,7 +222,17 @@ describe('APIKeySpendingRanking', () => {
     await flushPromises()
     expect(getRanking).toHaveBeenCalledTimes(5)
     expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'asc' }))
-    // Empty filtered result: say why, using the default threshold when the response has none.
+    // Empty filtered result: keep the scope totals and say why, using the
+    // default threshold when the response has none.
+    expect(wrapper.get('[data-testid="key-ranking-empty"]').text()).toBe('admin.dashboard.rankingCacheReadRateEmpty{"tokens":"1M"}')
+    expect(wrapper.text()).toContain('$100.0000')
+    expect(wrapper.find('table').exists()).toBe(false)
+
+    // No usage at all in the scope: no totals line, just the empty text.
+    getRanking.mockResolvedValue(makeResponse({ ranking: [], total_cost: 0, total_actual_cost: 0, total_requests: 0, total_tokens: 0 }))
+    await wrapper.get('[data-testid="key-ranking-order"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="key-ranking-total-revenue"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="key-ranking-empty"]').text()).toBe('admin.dashboard.rankingCacheReadRateEmpty{"tokens":"1M"}')
   })
 })

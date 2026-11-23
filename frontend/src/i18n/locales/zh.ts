@@ -1520,7 +1520,7 @@ export default {
       rankingSortBodySize: '按请求体大小',
       rankingSortCacheReadRate: '按缓存读取率',
       rankingCacheReadRateBasis: '按缓存读取率排序，仅含 Token ≥ {tokens} 的 Key',
-      rankingCacheReadRateEmpty: '所选范围内没有 Token ≥ {tokens} 的 Key',
+      rankingCacheReadRateEmpty: '所选范围内没有总 Token ≥ {tokens} 且有输入 Token 的 Key',
       rankingOrderAsc: '从低到高 ↑',
       rankingOrderDesc: '从高到低 ↓',
       rankingOrderToggle: '切换排序方向',

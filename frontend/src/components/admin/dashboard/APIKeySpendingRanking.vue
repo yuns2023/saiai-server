@@ -91,7 +91,7 @@
         {{ t('admin.dashboard.keyRankingRetry') }}
       </button>
     </div>
-    <template v-else-if="ranking && ranking.ranking.length">
+    <template v-else-if="ranking && (ranking.ranking.length || ranking.total_requests > 0)">
       <p class="mb-3 text-xs text-gray-500 dark:text-gray-400" aria-live="polite">
         {{ t('admin.dashboard.keyRankingScopeTotal') }}:
         {{ t('admin.dashboard.standard') }}
@@ -106,7 +106,10 @@
         · {{ ranking.total_requests.toLocaleString() }} {{ t('admin.dashboard.requests') }}
         · {{ formatTokenCount(ranking.total_tokens) }} Token
       </p>
-      <div class="overflow-x-auto">
+      <p v-if="!ranking.ranking.length" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="key-ranking-empty">
+        {{ emptyText }}
+      </p>
+      <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[980px] text-sm">
           <thead class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
             <tr>
@@ -186,11 +189,7 @@
         </table>
       </div>
     </template>
-    <p v-else class="py-8 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="key-ranking-empty">
-      {{ sort === 'cache_read_rate'
-        ? t('admin.dashboard.rankingCacheReadRateEmpty', { tokens: formatTokenCount(cacheReadRateMinTokens) })
-        : t('admin.dashboard.noDataAvailable') }}
-    </p>
+    <p v-else class="py-8 text-center text-sm text-gray-500 dark:text-gray-400" data-testid="key-ranking-empty">{{ emptyText }}</p>
   </section>
 </template>
 
@@ -234,6 +233,9 @@ const sortOptions = computed<{ value: APIKeyRankingSort; label: string }[]>(() =
   { value: 'cache_read_rate', label: t('admin.dashboard.rankingSortCacheReadRate') }
 ])
 const cacheReadRateMinTokens = computed(() => ranking.value?.cache_read_rate_min_tokens ?? defaultCacheReadRateMinTokens)
+const emptyText = computed(() => sort.value === 'cache_read_rate'
+  ? t('admin.dashboard.rankingCacheReadRateEmpty', { tokens: formatTokenCount(cacheReadRateMinTokens.value) })
+  : t('admin.dashboard.noDataAvailable'))
 const sortBasis = computed(() => {
   if (sort.value === 'cache_read_rate') {
     return t('admin.dashboard.rankingCacheReadRateBasis', { tokens: formatTokenCount(cacheReadRateMinTokens.value) })

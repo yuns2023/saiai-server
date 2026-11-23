@@ -51,11 +51,11 @@ func spendingRankingOrderBy(sort usagestats.SpendingRankingSort, order usagestat
 	case usagestats.SpendingRankingSortRequestBodyBytes:
 		return prefix + "request_body_bytes_total DESC, " + prefix + "request_body_bytes_max DESC NULLS LAST, " + costOrder, nil
 	case usagestats.SpendingRankingSortCacheReadRate:
-		direction := "DESC"
+		direction := "ASC" // default: worst caching first, as ParseSpendingRankingOrder
 		switch order {
-		case usagestats.SpendingRankingOrderAsc:
-			direction = "ASC"
-		case "", usagestats.SpendingRankingOrderDesc:
+		case "", usagestats.SpendingRankingOrderAsc:
+		case usagestats.SpendingRankingOrderDesc:
+			direction = "DESC"
 		default:
 			return "", fmt.Errorf("unsupported ranking order %q", order)
 		}
@@ -93,8 +93,9 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 //
 // The cache read rate sort only ranks Keys with at least
 // usagestats.CacheReadRateMinTokens tokens; the totals still cover every Key in
-// the scope (they are computed before that filter), but an empty filtered
-// result carries no totals.
+// the scope (they are computed before that filter). The totals are read from
+// the ranked rows, so when no Key passes the threshold they are loaded with a
+// second, unfiltered query.
 func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")
@@ -208,6 +209,15 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
+	}
+	if len(result.Ranking) == 0 && sort == usagestats.SpendingRankingSortCacheReadRate {
+		scope, scopeErr := r.GetAPIKeySpendingRanking(ctx, startTime, endTime, userID, 1, usagestats.SpendingRankingSortCost, "")
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		result.TotalCost, result.TotalActualCost = scope.TotalCost, scope.TotalActualCost
+		result.TotalRequests, result.TotalTokens = scope.TotalRequests, scope.TotalTokens
+		result.TotalSubscriptionRevenueStats = scope.TotalSubscriptionRevenueStats
 	}
 	return result, nil
 }

@@ -178,6 +178,7 @@ func TestGetAPIKeySpendingRankingSortByCacheReadRate(t *testing.T) {
 		limParam  string
 	}{
 		{"global asc", 0, usagestats.SpendingRankingOrderAsc, "ASC", []driver.Value{start, end, usagestats.CacheReadRateMinTokens, 20}, "3", "4"},
+		{"global default asc", 0, "", "ASC", []driver.Value{start, end, usagestats.CacheReadRateMinTokens, 20}, "3", "4"},
 		{"user desc", 7, usagestats.SpendingRankingOrderDesc, "DESC", []driver.Value{start, end, int64(7), usagestats.CacheReadRateMinTokens, 20}, "4", "5"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,10 +191,12 @@ func TestGetAPIKeySpendingRankingSortByCacheReadRate(t *testing.T) {
 				`ORDER BY ` + rate + ` ` + tc.direction + `, cost DESC, actual_cost DESC, tokens DESC, api_key_id ASC, user_id ASC\s+LIMIT \$` + tc.limParam + `.*` +
 				`ORDER BY ` + finalRate + ` ` + tc.direction + `, r.cost DESC, r.actual_cost DESC, r.tokens DESC, r.api_key_id ASC, r.user_id ASC\s*$`).
 				WithArgs(tc.args...).
-				WillReturnRows(apiKeyRankingRows())
-			_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, 20, usagestats.SpendingRankingSortCacheReadRate, tc.order)
+				WillReturnRows(apiKeyRankingRows().
+					AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 0, 2_000_000, 100, 50, 25, 25, int64(0), nil, nil, int64(0), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
+			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, 20, usagestats.SpendingRankingSortCacheReadRate, tc.order)
 			require.NoError(t, err)
-			require.NoError(t, mock.ExpectationsWereMet())
+			require.Len(t, got.Ranking, 1)
+			require.NoError(t, mock.ExpectationsWereMet()) // no second (totals) query
 		})
 	}
 
@@ -211,5 +214,37 @@ func TestGetAPIKeySpendingRankingSortByCacheReadRate(t *testing.T) {
 		require.Error(t, err, tc)
 	}
 	_, err := repo.GetUserSpendingRanking(context.Background(), start, end, 12, usagestats.SpendingRankingSortCacheReadRate)
+	require.Error(t, err)
+}
+
+func TestGetAPIKeySpendingRankingCacheReadRateEmptyKeepsScopeTotals(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	mock.ExpectQuery(`(?s)WHERE tokens >= \$4 .*LIMIT \$5`).WithArgs(start, end, int64(7), usagestats.CacheReadRateMinTokens, 20).
+		WillReturnRows(apiKeyRankingRows())
+	// Totals come from an unfiltered cost query limited to one row.
+	mock.ExpectQuery(`(?s)WHERE TRUE\s+ORDER BY cost DESC.*LIMIT \$4`).WithArgs(start, end, int64(7), 1).
+		WillReturnRows(apiKeyRankingRows().
+			AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 0, 200, 100, 50, 25, 25, int64(0), nil, nil, int64(0), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
+	got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 7, 20, usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc)
+	require.NoError(t, err)
+	require.NotNil(t, got.Ranking)
+	require.Empty(t, got.Ranking)
+	require.Equal(t, 60.0, got.TotalCost)
+	require.Equal(t, 40.0, got.TotalActualCost)
+	require.Equal(t, int64(30), got.TotalRequests)
+	require.Equal(t, int64(2600), got.TotalTokens)
+	require.Equal(t, 6.4, got.TotalSubscriptionRevenue)
+	require.Equal(t, 1.5, got.TotalUnclassifiedCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	// The totals query failing fails the request rather than showing zero totals.
+	db, mock = newSQLMock(t)
+	repo = &usageLogRepository{sql: db}
+	mock.ExpectQuery(`WHERE tokens >=`).WillReturnRows(apiKeyRankingRows())
+	mock.ExpectQuery(`WHERE TRUE`).WillReturnError(errors.New("unavailable"))
+	_, err = repo.GetAPIKeySpendingRanking(context.Background(), start, end, 7, 20, usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc)
 	require.Error(t, err)
 }

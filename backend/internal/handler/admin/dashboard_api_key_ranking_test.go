@@ -208,4 +208,10 @@ func TestUserSpendingRankingRejectsCacheReadRateSort(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet, "/x?sort=cache_read_rate", nil)
 	_, ok := parseRankingSort(c)
 	require.False(t, ok)
+	for query, want := range map[string]bool{"sort=cost&order=asc": false, "order=up": false, "sort=cost&order=desc": true, "": true} {
+		c, _ = gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/x?"+query, nil)
+		_, ok = parseRankingSort(c)
+		require.Equal(t, want, ok, query)
+	}
 }

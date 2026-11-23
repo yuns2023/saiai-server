@@ -1511,7 +1511,7 @@ export default {
       rankingSortBodySize: 'By request size',
       rankingSortCacheReadRate: 'By cache read rate',
       rankingCacheReadRateBasis: 'Ranked by cache read rate; only Keys with ≥ {tokens} tokens',
-      rankingCacheReadRateEmpty: 'No Key has ≥ {tokens} tokens in the selected range',
+      rankingCacheReadRateEmpty: 'No Key in the selected range has ≥ {tokens} total tokens and any input tokens',
       rankingOrderAsc: 'Low to high ↑',
       rankingOrderDesc: 'High to low ↓',
       rankingOrderToggle: 'Toggle sort direction',
