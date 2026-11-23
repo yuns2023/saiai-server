@@ -284,7 +284,13 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 }
 
 func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64) error {
-	rows, err := tx.QueryContext(ctx,
+	// QueryRow + Scan closes the result before the outbox insert below runs on
+	// the same transaction. Keeping a *sql.Rows open there made lib/pq fail
+	// with "unexpected Parse response 'C'" exactly when usage crossed the
+	// limit; the rollback then left quota_used below the limit, so every later
+	// request crossed it again and no usage was recorded at all.
+	var newUsed, limit float64
+	err := tx.QueryRowContext(ctx,
 		`UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
 			|| jsonb_build_object('quota_used', COALESCE((extra->>'quota_used')::numeric, 0) + $1)
@@ -321,24 +327,11 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 		RETURNING
 			COALESCE((extra->>'quota_used')::numeric, 0),
 			COALESCE((extra->>'quota_limit')::numeric, 0)`,
-		amount, accountID)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var newUsed, limit float64
-	if rows.Next() {
-		if err := rows.Scan(&newUsed, &limit); err != nil {
-			return err
-		}
-	} else {
-		if err := rows.Err(); err != nil {
-			return err
-		}
+		amount, accountID).Scan(&newUsed, &limit)
+	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrAccountNotFound
 	}
-	if err := rows.Err(); err != nil {
+	if err != nil {
 		return err
 	}
 	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
