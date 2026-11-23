@@ -250,6 +250,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 		search = search[:100]
 	}
 	lite := parseBoolQueryWithDefault(c.Query("lite"), false)
+	// Unknown sort_by falls back to the default id DESC order (never an error).
+	listSort := service.NormalizeAccountListSort(c.Query("sort_by"), c.Query("sort_order"))
 
 	var groupID int64
 	if groupIDStr := c.Query("group"); groupIDStr != "" {
@@ -280,9 +282,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 		total    int64
 	)
 	if ownerUserID > 0 && h.hostedOwnerService != nil {
-		accounts, total, err = h.listAccountsByOwner(c.Request.Context(), ownerUserID, page, pageSize, platform, accountType, status, search, groupID)
+		accounts, total, err = h.listAccountsByOwner(c.Request.Context(), ownerUserID, page, pageSize, platform, accountType, status, search, groupID, listSort)
 	} else {
-		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID)
+		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, listSort)
 	}
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -406,7 +408,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 	h.fillOwnerEmails(c.Request.Context(), accounts, result)
 
-	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, lite)
+	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, lite, listSort)
 	if etag != "" {
 		c.Header("ETag", etag)
 		c.Header("Vary", "If-None-Match")
@@ -425,6 +427,7 @@ func buildAccountsListETag(
 	page, pageSize int,
 	platform, accountType, status, search string,
 	lite bool,
+	listSort service.AccountListSort,
 ) string {
 	payload := struct {
 		Total       int64                    `json:"total"`
@@ -435,6 +438,8 @@ func buildAccountsListETag(
 		Status      string                   `json:"status"`
 		Search      string                   `json:"search"`
 		Lite        bool                     `json:"lite"`
+		SortBy      string                   `json:"sort_by"`
+		SortDesc    bool                     `json:"sort_desc"`
 		Items       []AccountWithConcurrency `json:"items"`
 	}{
 		Total:       total,
@@ -445,6 +450,8 @@ func buildAccountsListETag(
 		Status:      status,
 		Search:      search,
 		Lite:        lite,
+		SortBy:      listSort.By,
+		SortDesc:    listSort.Desc,
 		Items:       items,
 	}
 	raw, err := json.Marshal(payload)
@@ -2312,7 +2319,7 @@ func (h *AccountHandler) BatchRefreshTier(c *gin.Context) {
 	accounts := make([]*service.Account, 0)
 
 	if len(req.AccountIDs) == 0 {
-		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0)
+		allAccounts, _, err := h.adminService.ListAccounts(ctx, 1, 10000, "gemini", "oauth", "", "", 0, service.AccountListSort{})
 		if err != nil {
 			response.ErrorFrom(c, err)
 			return

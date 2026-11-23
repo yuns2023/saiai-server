@@ -19,13 +19,15 @@ type accountRepoStubForAdminList struct {
 	listWithFiltersType     string
 	listWithFiltersStatus   string
 	listWithFiltersSearch   string
+	listWithFiltersSort     AccountListSort
 	listWithFiltersAccounts []Account
 	listWithFiltersResult   *pagination.PaginationResult
 	listWithFiltersErr      error
 }
 
-func (s *accountRepoStubForAdminList) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]Account, *pagination.PaginationResult, error) {
+func (s *accountRepoStubForAdminList) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, sort AccountListSort) ([]Account, *pagination.PaginationResult, error) {
 	s.listWithFiltersCalls++
+	s.listWithFiltersSort = sort
 	s.listWithFiltersParams = params
 	s.listWithFiltersPlatform = platform
 	s.listWithFiltersType = accountType
@@ -172,7 +174,7 @@ func TestAdminService_ListAccounts_WithSearch(t *testing.T) {
 		}
 		svc := &adminServiceImpl{accountRepo: repo}
 
-		accounts, total, err := svc.ListAccounts(context.Background(), 1, 20, PlatformGemini, AccountTypeOAuth, StatusActive, "acc", 0)
+		accounts, total, err := svc.ListAccounts(context.Background(), 1, 20, PlatformGemini, AccountTypeOAuth, StatusActive, "acc", 0, AccountListSort{By: AccountSortByLastUsedAt})
 		require.NoError(t, err)
 		require.Equal(t, int64(10), total)
 		require.Equal(t, []Account{{ID: 1, Name: "acc"}}, accounts)
@@ -183,6 +185,7 @@ func TestAdminService_ListAccounts_WithSearch(t *testing.T) {
 		require.Equal(t, AccountTypeOAuth, repo.listWithFiltersType)
 		require.Equal(t, StatusActive, repo.listWithFiltersStatus)
 		require.Equal(t, "acc", repo.listWithFiltersSearch)
+		require.Equal(t, AccountListSort{By: AccountSortByLastUsedAt}, repo.listWithFiltersSort)
 	})
 }
 

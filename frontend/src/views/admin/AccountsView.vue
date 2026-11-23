@@ -143,6 +143,8 @@
           default-sort-key="name"
           default-sort-order="asc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
+          :server-side-sort="true"
+          @sort="handleSort"
         >
           <template #header-select>
             <input
@@ -321,13 +323,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useTableLoader } from '@/composables/useTableLoader'
+import { DEFAULT_ACCOUNT_LIST_SORT, normalizeAccountListSort, readPersistedAccountListSort, type AccountSortOrder } from '@/utils/accountListSort'
 import { useSwipeSelect } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useClipboard } from '@/composables/useClipboard'
@@ -626,7 +629,9 @@ const {
 } = useTableLoader<Account, any>({
   fetchFn: adminAPI.accounts.list,
   // owner_user_id stays undefined (not sent) unless a positive user ID is entered.
-  initialParams: { platform: '', type: '', status: '', group: '', search: '', owner_user_id: undefined }
+  // sort_by/sort_order are set from the persisted header sort before the
+  // first load (onMounted) and on every header click (handleSort).
+  initialParams: { platform: '', type: '', status: '', group: '', search: '', owner_user_id: undefined, ...DEFAULT_ACCOUNT_LIST_SORT }
 })
 
 const selectableAccounts = computed(() => accounts.value.filter((account) => !isRetiredPlatform(account.platform)))
@@ -664,8 +669,14 @@ useSwipeSelect(accountTableRef, {
   deselect
 })
 
+// Bumped by every full list load (sort, filter, page change); an incremental
+// refresh started under an older generation discards its response so it can
+// never overwrite the newer order or page.
+let listGeneration = 0
+
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
+  listGeneration += 1
 }
 
 const isFirstLoad = ref(true)
@@ -713,6 +724,24 @@ const handlePageSizeChange = (size: number) => {
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
   baseHandlePageSizeChange(size)
+}
+
+// Server-side sort: a header click re-queries from page 1 (page size kept).
+const handleSort = (key: string, order: 'asc' | 'desc') => {
+  const next = normalizeAccountListSort(key, order)
+  params.sort_by = next.sort_by
+  params.sort_order = next.sort_order
+  reload()
+}
+
+// Adopts the sort DataTable persisted (its effective header sort). Returns
+// whether the list params changed.
+const syncSortFromTable = () => {
+  const next = readPersistedAccountListSort(ACCOUNT_SORT_STORAGE_KEY)
+  if (next.sort_by === params.sort_by && next.sort_order === params.sort_order) return false
+  params.sort_by = next.sort_by
+  params.sort_order = next.sort_order
+  return true
 }
 
 watch(loading, (isLoading, wasLoading) => {
@@ -831,6 +860,7 @@ const mergeAccountsIncrementally = (nextRows: Account[]) => {
 const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   autoRefreshFetching.value = true
+  const generation = listGeneration
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -842,9 +872,12 @@ const refreshAccountsIncrementally = async () => {
         group?: string
         search?: string
         owner_user_id?: number
+        sort_by?: string
+        sort_order?: AccountSortOrder
       },
       { etag: autoRefreshETag.value }
     )
+    if (generation !== listGeneration) return
 
     if (result.etag) {
       autoRefreshETag.value = result.etag
@@ -1004,6 +1037,17 @@ const cols = computed(() =>
   allColumns.value.filter(col =>
     col.key === 'select' || col.key === 'id' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
   ).map(col => ({ ...col, class: columnWidths[col.key] || '' }))
+)
+
+// Hiding the sorted column makes DataTable fall back to its default arrow
+// (and persist it) without emitting 'sort'; follow it after DataTable's own
+// post-flush watchers ran so the data order matches the header.
+watch(
+  () => cols.value.map((col) => col.key).join(','),
+  async () => {
+    await nextTick()
+    if (syncSortFromTable()) reload()
+  }
 )
 
 const copyAccountId = async (id: number) => {
@@ -1438,6 +1482,10 @@ const handleClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(async () => {
+  // DataTable (mounted first) has resolved and persisted its initial sort;
+  // send the same one on the first request.
+  await nextTick()
+  syncSortFromTable()
   load()
   try {
     const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
