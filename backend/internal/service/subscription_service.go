@@ -571,7 +571,8 @@ type subscriptionPeriodRestarter interface {
 
 // restartSubscriptionPeriod starts a new period for an expired subscription
 // that is renewed: StartsAt moves to startsAt, so the usage-window grid and
-// the expiry line up again, and all usage starts from zero. Repositories
+// the expiry line up again, all windows restart at startsAt and all usage
+// starts from zero. Repositories
 // without RestartPeriod (test stubs) only extend the expiry.
 func (s *SubscriptionService) restartSubscriptionPeriod(ctx context.Context, id int64, startsAt, expiresAt time.Time) error {
 	if restarter, ok := s.userSubRepo.(subscriptionPeriodRestarter); ok {
@@ -721,7 +722,7 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 			restartedAt := now
 			current.StartsAt = now
 			current.DailyWindowStart, current.WeeklyWindowStart, current.MonthlyWindowStart = &restartedAt, &restartedAt, &restartedAt
-			current.FiveHourWindowStart = nil
+			current.FiveHourWindowStart = &restartedAt
 			current.DailyUsageUSD, current.WeeklyUsageUSD, current.MonthlyUsageUSD, current.FiveHourUsageUSD = 0, 0, 0, 0
 		} else if err := s.userSubRepo.ExtendExpiry(txCtx, subscriptionID, newExpiresAt); err != nil {
 			return err

@@ -302,8 +302,10 @@ func (r *userSubscriptionRepository) ExtendExpiry(ctx context.Context, subscript
 
 // RestartPeriod starts a new period for a renewed expired subscription:
 // StartsAt and ExpiresAt move, the daily/weekly/monthly windows restart at
-// startsAt and all usage is cleared. The five-hour window is cleared and
-// starts with the next request.
+// startsAt and all usage is cleared. The five-hour window also restarts at
+// startsAt (it is not left unset, so a late maintenance task from the old
+// period has nothing to fill; a window that ends before the first request is
+// restarted by that request as usual).
 func (r *userSubscriptionRepository) RestartPeriod(ctx context.Context, id int64, startsAt, expiresAt time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.UserSubscription.UpdateOneID(id).
@@ -312,7 +314,7 @@ func (r *userSubscriptionRepository) RestartPeriod(ctx context.Context, id int64
 		SetDailyWindowStart(startsAt).
 		SetWeeklyWindowStart(startsAt).
 		SetMonthlyWindowStart(startsAt).
-		ClearFiveHourWindowStart().
+		SetFiveHourWindowStart(startsAt).
 		SetDailyUsageUsd(0).
 		SetWeeklyUsageUsd(0).
 		SetMonthlyUsageUsd(0).
@@ -352,8 +354,23 @@ func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int
 			AND (daily_window_start IS NULL OR weekly_window_start IS NULL OR monthly_window_start IS NULL)
 	`
 	client := clientFromContext(ctx, r.client)
-	_, err := client.ExecContext(ctx, updateSQL, dailyStart, weeklyStart, monthlyStart, id)
-	return err
+	result, err := client.ExecContext(ctx, updateSQL, dailyStart, weeklyStart, monthlyStart, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected > 0 {
+		return err
+	}
+	// Nothing to fill: fine when the windows are already set, an error when
+	// the subscription is gone.
+	exists, err := client.UserSubscription.Query().Where(usersubscription.IDEQ(id)).Exist(ctx)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return service.ErrSubscriptionNotFound
+	}
+	return nil
 }
 
 func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {

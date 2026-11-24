@@ -390,6 +390,8 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows_KeepsWindowsAlreadySet()
 	s.Require().WithinDuration(stale, *got.DailyWindowStart, time.Microsecond)
 	s.Require().WithinDuration(set, *got.WeeklyWindowStart, time.Microsecond)
 	s.Require().WithinDuration(set, *got.MonthlyWindowStart, time.Microsecond)
+
+	s.Require().ErrorIs(s.repo.ActivateWindows(s.ctx, 999999, stale, stale, stale), service.ErrSubscriptionNotFound)
 }
 
 func (s *UserSubscriptionRepoSuite) TestRestartPeriod() {
@@ -413,7 +415,7 @@ func (s *UserSubscriptionRepoSuite) TestRestartPeriod() {
 	s.Require().WithinDuration(startsAt, *got.DailyWindowStart, time.Microsecond)
 	s.Require().WithinDuration(startsAt, *got.WeeklyWindowStart, time.Microsecond)
 	s.Require().WithinDuration(startsAt, *got.MonthlyWindowStart, time.Microsecond)
-	s.Require().Nil(got.FiveHourWindowStart)
+	s.Require().WithinDuration(startsAt, *got.FiveHourWindowStart, time.Microsecond)
 	s.Require().Zero(got.DailyUsageUSD)
 	s.Require().Zero(got.WeeklyUsageUSD)
 	s.Require().Zero(got.MonthlyUsageUSD)
