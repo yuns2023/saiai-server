@@ -420,3 +420,66 @@ func TestUsageBillingRepositoryApply_UnsetRateLimitWindowStartsAtCost(t *testing
 	require.InDelta(t, 1.25, u7d, 1e-9)
 	require.True(t, started)
 }
+
+// Crossing the account quota limit enqueues a scheduler outbox event on the
+// same transaction. It used to run while the UPDATE ... RETURNING rows were
+// still open, which failed with "pq: unexpected Parse response 'C'", rolled
+// the whole charge back and repeated on every later request.
+func TestUsageBillingRepositoryApply_AccountQuotaCrossingCommitsAndEnqueues(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        "usage-billing-quota-cross-" + uuid.NewString() + "@example.invalid",
+		PasswordHash: "TEST_ONLY",
+		Balance:      100,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID: user.ID,
+		Key:    "sk-usage-billing-quota-cross-" + uuid.NewString(),
+		Name:   "billing-quota-cross",
+	})
+	account := mustCreateAccount(t, client, &service.Account{
+		Name: "usage-billing-quota-cross-" + uuid.NewString(),
+		Type: service.AccountTypeAPIKey,
+		Extra: map[string]any{
+			"quota_limit": 10.0,
+			"quota_used":  9.0,
+		},
+	})
+
+	countOutbox := func() int {
+		var n int
+		require.NoError(t, integrationDB.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM scheduler_outbox WHERE account_id = $1 AND event_type = $2",
+			account.ID, service.SchedulerOutboxEventAccountChanged).Scan(&n))
+		return n
+	}
+	apply := func(cost float64) {
+		res, err := repo.Apply(ctx, &service.UsageBillingCommand{
+			RequestID:        uuid.NewString(),
+			APIKeyID:         apiKey.ID,
+			UserID:           user.ID,
+			AccountID:        account.ID,
+			AccountType:      service.AccountTypeAPIKey,
+			BalanceCost:      cost,
+			AccountQuotaCost: cost,
+		})
+		require.NoError(t, err)
+		require.True(t, res.Applied)
+	}
+	before := countOutbox()
+
+	apply(2) // 9 -> 11 crosses the limit
+	require.Equal(t, before+1, countOutbox())
+
+	apply(1) // already over the limit: no new event
+	require.Equal(t, before+1, countOutbox())
+
+	var quotaUsed, balance float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COALESCE((extra->>'quota_used')::numeric, 0) FROM accounts WHERE id = $1", account.ID).Scan(&quotaUsed))
+	require.InDelta(t, 12.0, quotaUsed, 0.000001)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
+	require.InDelta(t, 97.0, balance, 0.000001)
+}
