@@ -2768,6 +2768,7 @@ export default {
       resetInMinutes: '{minutes} 分钟后重置',
       resetInHoursMinutes: '{hours} 小时 {minutes} 分钟后重置',
       resetInDaysHours: '{days} 天 {hours} 小时后重置',
+      endsWithSubscription: '随订阅到期，不再重置',
       daysRemaining: '天剩余',
       remainingDays: '剩余天数',
       noExpiration: '无过期时间',
@@ -6194,6 +6195,7 @@ export default {
     daysRemaining: '剩余 {days} 天',
     expiresOn: '{date} 到期',
     resetIn: '{time} 后重置',
+    endsWithSubscription: '随订阅到期，不再重置',
     windowNotActive: '等待首次使用',
     usageOf: '已用 {used} / {limit}'
   },

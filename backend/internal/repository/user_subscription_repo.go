@@ -300,6 +300,27 @@ func (r *userSubscriptionRepository) ExtendExpiry(ctx context.Context, subscript
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
+// RestartPeriod starts a new period for a renewed expired subscription:
+// StartsAt and ExpiresAt move, the daily/weekly/monthly windows restart at
+// startsAt and all usage is cleared. The five-hour window is cleared and
+// starts with the next request.
+func (r *userSubscriptionRepository) RestartPeriod(ctx context.Context, id int64, startsAt, expiresAt time.Time) error {
+	client := clientFromContext(ctx, r.client)
+	_, err := client.UserSubscription.UpdateOneID(id).
+		SetStartsAt(startsAt).
+		SetExpiresAt(expiresAt).
+		SetDailyWindowStart(startsAt).
+		SetWeeklyWindowStart(startsAt).
+		SetMonthlyWindowStart(startsAt).
+		ClearFiveHourWindowStart().
+		SetDailyUsageUsd(0).
+		SetWeeklyUsageUsd(0).
+		SetMonthlyUsageUsd(0).
+		SetFiveHourUsageUsd(0).
+		Save(ctx)
+	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+}
+
 func (r *userSubscriptionRepository) UpdateStatus(ctx context.Context, subscriptionID int64, status string) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.UserSubscription.UpdateOneID(subscriptionID).
@@ -316,12 +337,12 @@ func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscripti
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
-func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, dailyStart, weeklyStart, monthlyStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.UserSubscription.UpdateOneID(id).
-		SetDailyWindowStart(start).
-		SetWeeklyWindowStart(start).
-		SetMonthlyWindowStart(start).
+		SetDailyWindowStart(dailyStart).
+		SetWeeklyWindowStart(weeklyStart).
+		SetMonthlyWindowStart(monthlyStart).
 		Save(ctx)
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
@@ -377,13 +398,13 @@ func (r *userSubscriptionRepository) ResetEndedUsageWindow(ctx context.Context, 
 	switch window {
 	case service.SubscriptionUsageWindowDaily:
 		updateSQL = `UPDATE user_subscriptions SET daily_usage_usd = 0, daily_window_start = $1, updated_at = NOW()
-			WHERE id = $2 AND deleted_at IS NULL AND daily_window_start IS NOT DISTINCT FROM $3`
+			WHERE id = $2 AND deleted_at IS NULL AND daily_window_start IS NOT DISTINCT FROM $3 AND $1 > $3`
 	case service.SubscriptionUsageWindowWeekly:
 		updateSQL = `UPDATE user_subscriptions SET weekly_usage_usd = 0, weekly_window_start = $1, updated_at = NOW()
-			WHERE id = $2 AND deleted_at IS NULL AND weekly_window_start IS NOT DISTINCT FROM $3`
+			WHERE id = $2 AND deleted_at IS NULL AND weekly_window_start IS NOT DISTINCT FROM $3 AND $1 > $3`
 	case service.SubscriptionUsageWindowMonthly:
 		updateSQL = `UPDATE user_subscriptions SET monthly_usage_usd = 0, monthly_window_start = $1, updated_at = NOW()
-			WHERE id = $2 AND deleted_at IS NULL AND monthly_window_start IS NOT DISTINCT FROM $3`
+			WHERE id = $2 AND deleted_at IS NULL AND monthly_window_start IS NOT DISTINCT FROM $3 AND $1 > $3`
 	default:
 		return fmt.Errorf("unknown subscription usage window %q", window)
 	}

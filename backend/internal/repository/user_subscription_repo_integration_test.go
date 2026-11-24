@@ -362,7 +362,7 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
 	sub := s.mustCreateSubscription(user.ID, group.ID, nil)
 
 	activateAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-	err := s.repo.ActivateWindows(s.ctx, sub.ID, activateAt)
+	err := s.repo.ActivateWindows(s.ctx, sub.ID, activateAt, activateAt, activateAt)
 	s.Require().NoError(err, "ActivateWindows")
 
 	got, err := s.repo.GetByID(s.ctx, sub.ID)
@@ -371,6 +371,34 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
 	s.Require().NotNil(got.WeeklyWindowStart)
 	s.Require().NotNil(got.MonthlyWindowStart)
 	s.Require().WithinDuration(activateAt, *got.DailyWindowStart, time.Microsecond)
+}
+
+func (s *UserSubscriptionRepoSuite) TestRestartPeriod() {
+	user := s.mustCreateUser("restart-period@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-restart-period")
+	old := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(old).SetExpiresAt(old.Add(30 * 24 * time.Hour)).
+			SetDailyWindowStart(old).SetWeeklyWindowStart(old).SetMonthlyWindowStart(old).SetFiveHourWindowStart(old).
+			SetDailyUsageUsd(1).SetWeeklyUsageUsd(2).SetMonthlyUsageUsd(3).SetFiveHourUsageUsd(4)
+	})
+
+	startsAt := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+	expiresAt := startsAt.Add(30 * 24 * time.Hour)
+	s.Require().NoError(s.repo.RestartPeriod(s.ctx, sub.ID, startsAt, expiresAt))
+
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().WithinDuration(startsAt, got.StartsAt, time.Microsecond)
+	s.Require().WithinDuration(expiresAt, got.ExpiresAt, time.Microsecond)
+	s.Require().WithinDuration(startsAt, *got.DailyWindowStart, time.Microsecond)
+	s.Require().WithinDuration(startsAt, *got.WeeklyWindowStart, time.Microsecond)
+	s.Require().WithinDuration(startsAt, *got.MonthlyWindowStart, time.Microsecond)
+	s.Require().Nil(got.FiveHourWindowStart)
+	s.Require().Zero(got.DailyUsageUSD)
+	s.Require().Zero(got.WeeklyUsageUSD)
+	s.Require().Zero(got.MonthlyUsageUSD)
+	s.Require().Zero(got.FiveHourUsageUSD)
 }
 
 func (s *UserSubscriptionRepoSuite) TestEnsureFiveHourWindow_Expired() {
@@ -623,7 +651,7 @@ func (s *UserSubscriptionRepoSuite) TestActiveExpiredBoundaries_UsageAndReset_Ba
 	s.Require().Equal(active.ID, got.ID, "expected active subscription")
 
 	activateAt := time.Now().Add(-25 * time.Hour)
-	s.Require().NoError(s.repo.ActivateWindows(s.ctx, active.ID, activateAt), "ActivateWindows")
+	s.Require().NoError(s.repo.ActivateWindows(s.ctx, active.ID, activateAt, activateAt, activateAt), "ActivateWindows")
 	s.Require().NoError(s.repo.IncrementUsage(s.ctx, active.ID, 1.25), "IncrementUsage")
 
 	after, err := s.repo.GetByID(s.ctx, active.ID)
