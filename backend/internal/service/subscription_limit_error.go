@@ -112,6 +112,11 @@ func withSubscriptionLimitDetail(err error, sub *UserSubscription, group *Group)
 		if limitErr.resetAt != nil && !limitErr.resetAt.After(time.Now()) {
 			limitErr.resetAt = nil
 		}
+		// A window that would reset at or after the expiry never resets: it
+		// ends with the subscription, so no reset time is promised.
+		if limitErr.resetAt != nil && !sub.ExpiresAt.IsZero() && !limitErr.resetAt.Before(sub.ExpiresAt) {
+			limitErr.resetAt = nil
+		}
 	}
 	return limitErr
 }

@@ -117,9 +117,7 @@
                 class="text-xs text-gray-500 dark:text-dark-400"
               >
                 {{
-                  t('userSubscriptions.resetIn', {
-                    time: formatResetTime(subscription.five_hour_window_start, 5)
-                  })
+                  resetLabel(subscription.five_hour_window_start, 5, subscription.expires_at)
                 }}
               </p>
             </div>
@@ -158,9 +156,7 @@
                 class="text-xs text-gray-500 dark:text-dark-400"
               >
                 {{
-                  t('userSubscriptions.resetIn', {
-                    time: formatResetTime(subscription.daily_window_start, 24)
-                  })
+                  resetLabel(subscription.daily_window_start, 24, subscription.expires_at)
                 }}
               </p>
             </div>
@@ -199,9 +195,7 @@
                 class="text-xs text-gray-500 dark:text-dark-400"
               >
                 {{
-                  t('userSubscriptions.resetIn', {
-                    time: formatResetTime(subscription.weekly_window_start, 168)
-                  })
+                  resetLabel(subscription.weekly_window_start, 168, subscription.expires_at)
                 }}
               </p>
             </div>
@@ -240,9 +234,7 @@
                 class="text-xs text-gray-500 dark:text-dark-400"
               >
                 {{
-                  t('userSubscriptions.resetIn', {
-                    time: formatResetTime(subscription.monthly_window_start, 720)
-                  })
+                  resetLabel(subscription.monthly_window_start, 720, subscription.expires_at)
                 }}
               </p>
             </div>
@@ -350,6 +342,20 @@ function getExpirationClass(expiresAt: string): string {
   if (days <= 3) return 'text-red-600 dark:text-red-400'
   if (days <= 7) return 'text-orange-600 dark:text-orange-400'
   return 'text-gray-700 dark:text-gray-300'
+}
+
+// A window whose reset falls at or after the expiry never resets: it ends
+// with the subscription (the monthly window of a 30-day subscription).
+function resetLabel(
+  windowStart: string | null,
+  windowHours: number,
+  expiresAt: string | null | undefined
+): string {
+  if (windowStart && expiresAt) {
+    const end = new Date(windowStart).getTime() + windowHours * 60 * 60 * 1000
+    if (end >= new Date(expiresAt).getTime()) return t('userSubscriptions.endsWithSubscription')
+  }
+  return t('userSubscriptions.resetIn', { time: formatResetTime(windowStart, windowHours) })
 }
 
 function formatResetTime(windowStart: string | null, windowHours: number): string {

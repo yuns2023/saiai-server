@@ -48,7 +48,7 @@ func TestValidateAndCheckLimitsReportsResetTime(t *testing.T) {
 	now := time.Now()
 	monthStart := now.Add(-24 * time.Hour)
 	group := &Group{Name: "CC3000", MonthlyLimitUSD: &limit}
-	sub := &UserSubscription{Status: SubscriptionStatusActive, ExpiresAt: now.Add(time.Hour), DailyWindowStart: &now, WeeklyWindowStart: &now, MonthlyWindowStart: &monthStart, FiveHourWindowStart: &now, MonthlyUsageUSD: 11}
+	sub := &UserSubscription{Status: SubscriptionStatusActive, ExpiresAt: now.Add(30 * 24 * time.Hour), DailyWindowStart: &now, WeeklyWindowStart: &now, MonthlyWindowStart: &monthStart, FiveHourWindowStart: &now, MonthlyUsageUSD: 11}
 
 	_, err := (&SubscriptionService{}).ValidateAndCheckLimits(sub, group)
 	require.ErrorIs(t, err, ErrMonthlyLimitExceeded)

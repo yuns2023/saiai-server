@@ -1402,7 +1402,7 @@ func (stubUserSubscriptionRepo) UpdateStatus(ctx context.Context, subscriptionID
 func (stubUserSubscriptionRepo) UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start, _, _ time.Time) error {
 	return errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) EnsureFiveHourWindow(ctx context.Context, id int64, newWindowStart time.Time) error {

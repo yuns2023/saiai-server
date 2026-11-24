@@ -53,24 +53,36 @@ func (s *UserSubscription) IsWindowActivated() bool {
 }
 
 func (s *UserSubscription) NeedsDailyReset() bool {
+	return s.needsDailyResetAt(time.Now())
+}
+
+func (s *UserSubscription) needsDailyResetAt(now time.Time) bool {
 	if s.DailyWindowStart == nil {
 		return false
 	}
-	return time.Since(*s.DailyWindowStart) >= 24*time.Hour
+	return now.Sub(*s.DailyWindowStart) >= 24*time.Hour
 }
 
 func (s *UserSubscription) NeedsWeeklyReset() bool {
+	return s.needsWeeklyResetAt(time.Now())
+}
+
+func (s *UserSubscription) needsWeeklyResetAt(now time.Time) bool {
 	if s.WeeklyWindowStart == nil {
 		return false
 	}
-	return time.Since(*s.WeeklyWindowStart) >= 7*24*time.Hour
+	return now.Sub(*s.WeeklyWindowStart) >= 7*24*time.Hour
 }
 
 func (s *UserSubscription) NeedsMonthlyReset() bool {
+	return s.needsMonthlyResetAt(time.Now())
+}
+
+func (s *UserSubscription) needsMonthlyResetAt(now time.Time) bool {
 	if s.MonthlyWindowStart == nil {
 		return false
 	}
-	return time.Since(*s.MonthlyWindowStart) >= 30*24*time.Hour
+	return now.Sub(*s.MonthlyWindowStart) >= 30*24*time.Hour
 }
 
 func (s *UserSubscription) NeedsFiveHourReset() bool {
@@ -102,6 +114,17 @@ func (s *UserSubscription) MonthlyResetTime() *time.Time {
 	}
 	t := s.MonthlyWindowStart.Add(30 * 24 * time.Hour)
 	return &t
+}
+
+// EffectiveResetTime caps a window's reset time at the subscription expiry:
+// a window that would reset at or after the expiry never resets, it ends
+// with the subscription.
+func (s *UserSubscription) EffectiveResetTime(windowStart time.Time, period time.Duration) time.Time {
+	t := windowStart.Add(period)
+	if !s.ExpiresAt.IsZero() && t.After(s.ExpiresAt) {
+		return s.ExpiresAt
+	}
+	return t
 }
 
 func (s *UserSubscription) FiveHourResetTime() *time.Time {
