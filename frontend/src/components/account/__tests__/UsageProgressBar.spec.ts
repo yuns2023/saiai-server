@@ -101,9 +101,75 @@ describe('UsageProgressBar', () => {
     const wrapper = mount(UsageProgressBar, {
       props: { label: '7d', utilization: 12, color: 'emerald', windowStats: stats, standardCost: 0, estimatedCapacity: 123.456 }
     })
-    expect(wrapper.get('[data-testid="window-standard-cost"]').text()).toBe('admin.accounts.usageWindow.standardCost')
+    expect(wrapper.get('[data-testid="window-standard-cost"]').text()).toBe('$0.00')
     expect(wrapper.find('[data-testid="window-estimated-capacity"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('req')
+  })
+
+  it('keeps one line per window: A and the estimate inline, the rest only on hover', async () => {
+    const stats = { requests: 2100, tokens: 428_600_000, cost: 136.03, standard_cost: 136.21, user_cost: 7.08 }
+    const wrapper = mount(UsageProgressBar, {
+      attachTo: document.body,
+      props: {
+        label: '5h', utilization: 16, color: 'indigo', resetsAt: '2026-03-17T02:30:00Z',
+        windowStats: stats, standardCost: 136.21, estimatedCapacity: 851.31
+      }
+    })
+    const summary = wrapper.get('[data-testid="window-summary"]').text()
+    expect(summary).toContain('A $136')
+    expect(summary).not.toContain('136.03')
+    expect(summary).toContain('admin.accounts.usageWindow.estimatedCapacity')
+
+    const details = wrapper.get('[data-testid="window-stats"]')
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerenter', { pointerType: 'mouse' })
+    expect(details.isVisible()).toBe(true)
+    expect(details.text()).toContain('$136.03')
+    expect(details.text()).toContain('$136.21')
+    expect(details.text()).toContain('$851.31')
+    await wrapper.trigger('pointerleave', { pointerType: 'mouse' })
+    expect(details.isVisible()).toBe(false)
+
+    // Touch: tap toggles; hover events from touch are ignored.
+    await wrapper.trigger('pointerenter', { pointerType: 'touch' })
+    expect(details.isVisible()).toBe(false)
+    // a scroll gesture ending on the bar is not a tap
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 40 })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 12, clientY: 102 })
+    expect(details.isVisible()).toBe(true)
+
+    // A cancelled touch (browser took over the gesture) leaves no stale start.
+    // (details are open here) a pointerup without its pointerdown is ignored
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 12, clientY: 102 })
+    expect(details.isVisible()).toBe(true)
+    // tap closes
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointercancel', { pointerType: 'touch' })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    expect(details.isVisible()).toBe(false)
+    await wrapper.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    await wrapper.trigger('pointerup', { pointerType: 'touch', clientX: 10, clientY: 100 })
+    expect(details.isVisible()).toBe(true)
+
+    // Any scroll (the table scrolls in its own container) closes it.
+    document.body.dispatchEvent(new Event('scroll'))
+    await wrapper.vm.$nextTick()
+    expect(details.isVisible()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('has no summary or hover details for an idle window without estimates', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: { label: '5h', utilization: 0, color: 'indigo', windowStats: { requests: 0, tokens: 0, cost: 0, standard_cost: 0, user_cost: 0 } }
+    })
+    expect(wrapper.find('[data-testid="window-summary"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="window-stats"]').exists()).toBe(false)
   })
 
   it('labels an estimate whose sample is at least 15 minutes old', async () => {
@@ -134,7 +200,7 @@ describe('UsageProgressBar', () => {
       balance_cost: 100.25, subscription_cost: 250, subscription_revenue: 160, subscription_revenue_unpriced_cost: 0,
     }
     const wrapper = mount(UsageProgressBar, { props: { label: '7d', utilization: 36, color: 'emerald', windowStats: stats } })
-    expect(wrapper.get('[data-testid="window-revenue"]').text()).toBe('U 260.25')
+    expect(wrapper.get('[data-testid="window-revenue"]').text()).toBe('260.25')
     expect(wrapper.text()).not.toContain('≈¥')
   })
 

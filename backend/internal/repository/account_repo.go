@@ -569,10 +569,10 @@ func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *accountRepository) List(ctx context.Context, params pagination.PaginationParams) ([]service.Account, *pagination.PaginationResult, error) {
-	return r.ListWithFilters(ctx, params, "", "", "", "", 0)
+	return r.ListWithFilters(ctx, params, "", "", "", "", 0, service.AccountListSort{})
 }
 
-func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]service.Account, *pagination.PaginationResult, error) {
+func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, sort service.AccountListSort) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.client.Account.Query()
 
 	if platform != "" {
@@ -616,7 +616,7 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 	accounts, err := q.
 		Offset(params.Offset()).
 		Limit(params.Limit()).
-		Order(dbent.Desc(dbaccount.FieldID)).
+		Order(accountListOrder(sort)...).
 		All(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -627,6 +627,49 @@ func (r *accountRepository) ListWithFilters(ctx context.Context, params paginati
 		return nil, nil, err
 	}
 	return outAccounts, paginationResultFromTotal(int64(total), params), nil
+}
+
+// accountListOrder maps a whitelisted admin sort onto ent order terms. Column
+// names come only from ent constants, never from request input. Every order
+// ends with id in the same direction so pages are deterministic, and nullable
+// timestamps sort NULLs last in both directions.
+func accountListOrder(sort service.AccountListSort) []dbaccount.OrderOption {
+	if sort.IsDefault() {
+		return []dbaccount.OrderOption{dbaccount.ByID(entsql.OrderDesc())}
+	}
+	dir := entsql.OrderAsc()
+	if sort.Desc {
+		dir = entsql.OrderDesc()
+	}
+	var primary dbaccount.OrderOption
+	switch sort.By {
+	case service.AccountSortByID:
+		return []dbaccount.OrderOption{dbaccount.ByID(dir)}
+	case service.AccountSortByName:
+		primary = func(s *entsql.Selector) {
+			s.OrderExprFunc(func(b *entsql.Builder) {
+				b.WriteString("LOWER(").WriteString(s.C(dbaccount.FieldName)).WriteString(")")
+				if sort.Desc {
+					b.WriteString(" DESC")
+				}
+			})
+		}
+	case service.AccountSortByStatus:
+		primary = dbaccount.ByStatus(dir)
+	case service.AccountSortBySchedulable:
+		primary = dbaccount.BySchedulable(dir)
+	case service.AccountSortByPriority:
+		primary = dbaccount.ByPriority(dir)
+	case service.AccountSortByRateMultiplier:
+		primary = dbaccount.ByRateMultiplier(dir)
+	case service.AccountSortByLastUsedAt:
+		primary = dbaccount.ByLastUsedAt(dir, entsql.OrderNullsLast())
+	case service.AccountSortByExpiresAt:
+		primary = dbaccount.ByExpiresAt(dir, entsql.OrderNullsLast())
+	default:
+		return []dbaccount.OrderOption{dbaccount.ByID(entsql.OrderDesc())}
+	}
+	return []dbaccount.OrderOption{primary, dbaccount.ByID(dir)}
 }
 
 func (r *accountRepository) ListByGroup(ctx context.Context, groupID int64) ([]service.Account, error) {

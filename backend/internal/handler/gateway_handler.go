@@ -2110,10 +2110,10 @@ func buildSubscriptionUsageDetails(group *service.Group, subscription *service.U
 		"expires_at":          effective.ExpiresAt,
 		"days_remaining":      effective.DaysRemaining(),
 	}
-	addSubscriptionResetTime(details, "five_hour_reset_at", effective.FiveHourWindowStart, service.RateLimitWindow5h)
-	addSubscriptionResetTime(details, "daily_reset_at", effective.DailyWindowStart, service.RateLimitWindow1d)
-	addSubscriptionResetTime(details, "weekly_reset_at", effective.WeeklyWindowStart, service.RateLimitWindow7d)
-	addSubscriptionResetTime(details, "monthly_reset_at", effective.MonthlyWindowStart, 30*24*time.Hour)
+	addSubscriptionResetTime(details, "five_hour_reset_at", effective, effective.FiveHourWindowStart, service.RateLimitWindow5h)
+	addSubscriptionResetTime(details, "daily_reset_at", effective, effective.DailyWindowStart, service.RateLimitWindow1d)
+	addSubscriptionResetTime(details, "weekly_reset_at", effective, effective.WeeklyWindowStart, service.RateLimitWindow7d)
+	addSubscriptionResetTime(details, "monthly_reset_at", effective, effective.MonthlyWindowStart, 30*24*time.Hour)
 	return details
 }
 
@@ -2138,11 +2138,13 @@ func effectiveSubscriptionUsageSnapshot(subscription *service.UserSubscription) 
 	return &effective
 }
 
-func addSubscriptionResetTime(details gin.H, field string, windowStart *time.Time, duration time.Duration) {
+// addSubscriptionResetTime reports when an active window resets, capped at
+// the subscription expiry (a window ending with the subscription never resets).
+func addSubscriptionResetTime(details gin.H, field string, sub *service.UserSubscription, windowStart *time.Time, duration time.Duration) {
 	if windowStart == nil || service.IsWindowExpired(windowStart, duration) {
 		return
 	}
-	details[field] = windowStart.Add(duration)
+	details[field] = sub.EffectiveResetTime(*windowStart, duration)
 }
 
 // calculateSubscriptionRemaining 计算订阅剩余可用额度

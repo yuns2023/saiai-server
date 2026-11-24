@@ -2768,6 +2768,7 @@ export default {
       resetInMinutes: '{minutes} 分钟后重置',
       resetInHoursMinutes: '{hours} 小时 {minutes} 分钟后重置',
       resetInDaysHours: '{days} 天 {hours} 小时后重置',
+      endsWithSubscription: '随订阅到期，不再重置',
       daysRemaining: '天剩余',
       remainingDays: '剩余天数',
       noExpiration: '无过期时间',
@@ -3230,11 +3231,14 @@ export default {
         fableWeekly: 'Fable 7天独立额度',
         passiveSampled: '被动采样',
         activeQuery: '查询',
+        deferredHint: '停用或错误状态的账号不自动查询用量，点击查询',
         standardCost: '标准 ${cost}',
         standardCostHint: '本窗口平台用量（标准价，所有用户；窗口按上游重置时间倒推，可能与左侧请求统计的起点不同）',
         statsHint: '请求数、Token 与 A/U 金额按请求统计口径计算，起点可能与标准价窗口不同',
         rollingHint: '*上游重置时间未知，按滚动窗口统计',
         estimatedCapacity: '估 ${cost}',
+        standardCostLabel: '标准',
+        estimatedCapacityLabel: '估容量',
         estimatedCapacityHint: '估算总额度（按标准价折算，平台外使用会使估算偏低）',
         restartedChip: '自 {time}',
         restartedHint: '统计自 {time} 起（{source}）：上游在窗口中途清零了用量，之前的用量不计入标准价、A/U 和估算',
@@ -3447,6 +3451,7 @@ export default {
       interceptWarmupRequests: '拦截预热请求',
       interceptWarmupRequestsDesc: '启用后，标题生成等预热请求将返回 mock 响应，不消耗上游 token',
       autoPauseOnExpired: '过期自动暂停调度',
+      expiresShort: '过期',
       autoPauseOnExpiredDesc: '启用后，账号过期将自动暂停调度',
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
@@ -6190,6 +6195,7 @@ export default {
     daysRemaining: '剩余 {days} 天',
     expiresOn: '{date} 到期',
     resetIn: '{time} 后重置',
+    endsWithSubscription: '随订阅到期，不再重置',
     windowNotActive: '等待首次使用',
     usageOf: '已用 {used} / {limit}'
   },

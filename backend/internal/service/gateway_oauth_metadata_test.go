@@ -2462,7 +2462,7 @@ func (s *accountRepoStubForOAuthMode) Delete(context.Context, int64) error    { 
 func (s *accountRepoStubForOAuthMode) List(context.Context, pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
-func (s *accountRepoStubForOAuthMode) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, string, int64) ([]Account, *pagination.PaginationResult, error) {
+func (s *accountRepoStubForOAuthMode) ListWithFilters(context.Context, pagination.PaginationParams, string, string, string, string, int64, AccountListSort) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
 func (s *accountRepoStubForOAuthMode) ListByGroup(ctx context.Context, groupID int64) ([]Account, error) {

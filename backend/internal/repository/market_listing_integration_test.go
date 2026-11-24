@@ -735,7 +735,7 @@ func TestMarketListedAccountSchedulingReads(t *testing.T) {
 	require.NotNil(t, loaded.MarketListing)
 	// Admin views of a group list and count every member (admin bindings
 	// and market listings); only scheduling reads filter.
-	page, _, err := f.accounts.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, "", "", "", "", tier)
+	page, _, err := f.accounts.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 50}, "", "", "", "", tier, service.AccountListSort{})
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{selfRun, listed}, ids(page))
 	total, _, err := f.groups.GetAccountCount(ctx, tier)

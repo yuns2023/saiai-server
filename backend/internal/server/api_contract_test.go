@@ -1075,7 +1075,7 @@ func (s *stubAccountRepo) List(ctx context.Context, params pagination.Pagination
 	return nil, nil, errors.New("not implemented")
 }
 
-func (s *stubAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]service.Account, *pagination.PaginationResult, error) {
+func (s *stubAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, _ service.AccountListSort) ([]service.Account, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }
 
@@ -1402,7 +1402,7 @@ func (stubUserSubscriptionRepo) UpdateStatus(ctx context.Context, subscriptionID
 func (stubUserSubscriptionRepo) UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error {
 	return errors.New("not implemented")
 }
-func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (stubUserSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start, _, _ time.Time) error {
 	return errors.New("not implemented")
 }
 func (stubUserSubscriptionRepo) EnsureFiveHourWindow(ctx context.Context, id int64, newWindowStart time.Time) error {

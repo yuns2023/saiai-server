@@ -109,7 +109,7 @@ func (s *HostedAccountService) ListAccounts(ctx context.Context, userID, groupID
 	if groupID <= 0 || !canViewHostedAccounts(user, group) {
 		return nil, nil, ErrGroupNotFound
 	}
-	accounts, page, err := s.accounts.ListWithFilters(ctx, params, "", "", "", "", groupID)
+	accounts, page, err := s.accounts.ListWithFilters(ctx, params, "", "", "", "", groupID, AccountListSort{})
 	if err != nil {
 		return nil, nil, err
 	}
