@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -46,14 +47,20 @@ func WithUserSessionPointer(ctx context.Context, userID int64, platform, metadat
 	if parsed == nil {
 		return ctx
 	}
-	sessionID := strings.TrimSpace(parsed.SessionID)
-	if sessionID == "" || len(sessionID) > maxUserSessionPointerSessionIDLen {
+	// Use the raw session id, exactly as the group sticky hash does, so two
+	// conversations the group key tells apart never share a pointer.
+	sessionID := parsed.SessionID
+	if strings.TrimSpace(sessionID) == "" || len(sessionID) > maxUserSessionPointerSessionIDLen {
 		return ctx
 	}
 	// The device is part of the identity so another device of the same user
 	// never inherits this conversation's account (shared/carpool semantics).
-	device := strings.TrimSpace(oauthSlotSource(metadataUserID))
-	sum := sha256.Sum256([]byte(platform + "\x00" + device + "\x00" + sessionID))
+	device := strings.TrimSpace(parsed.DeviceID)
+	if device == "" || len(device) > maxUserSessionPointerSessionIDLen {
+		return ctx
+	}
+	// Length-prefixed fields: unambiguous even if a field contains NUL.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s|%d:%s|%d:%s", len(platform), platform, len(device), device, len(sessionID), sessionID)))
 	return context.WithValue(ctx, userSessionPointerContextKey{}, userSessionPointer{userID: userID, digest: hex.EncodeToString(sum[:])})
 }
 
@@ -132,6 +139,15 @@ func (s *GatewayService) touchStickyHit(ctx context.Context, groupID *int64, ses
 		"group_id", derefGroupID(groupID),
 		"session", shortSessionHash(sessionHash),
 		"account_id", account.ID)
+	if stickyOwnershipSelection(ctx) {
+		return
+	}
+	// Decide success-only from the already selected account: re-reading it
+	// could fail and fall through to a confirmed write before any success.
+	if s.accountUsesSuccessOnlyStickyForAccount(ctx, account) {
+		s.setPendingStickySessionAccount(ctx, groupID, sessionHash, account.ID)
+		return
+	}
 	s.setStickySessionAccount(ctx, groupID, sessionHash, account.ID, 0)
 }
 

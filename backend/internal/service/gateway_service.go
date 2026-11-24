@@ -697,12 +697,17 @@ func (s *GatewayService) getStickySessionAccountIDWithSource(ctx context.Context
 	if s == nil || s.cache == nil || strings.TrimSpace(sessionHash) == "" {
 		return 0, "", nil
 	}
-	accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
-	if err == nil && accountID > 0 {
+	accountID, confirmedErr := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+	if confirmedErr == nil && accountID > 0 {
 		return accountID, StickySessionBindingSourceConfirmed, nil
 	}
-	accountID, err = s.getPendingStickySessionAccountID(ctx, groupID, sessionHash)
+	accountID, err := s.getPendingStickySessionAccountID(ctx, groupID, sessionHash)
 	if err != nil || accountID <= 0 {
+		// A confirmed-read failure must not be hidden by a pending miss: the
+		// confirmed binding may still exist.
+		if isStickyCacheMiss(err) && !isStickyCacheMiss(confirmedErr) {
+			return 0, "", confirmedErr
+		}
 		return 0, "", err
 	}
 	return accountID, StickySessionBindingSourcePending, nil
@@ -1288,18 +1293,30 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 }
 
 func (s *GatewayService) BindStickySessionForAccount(ctx context.Context, groupID *int64, sessionHash string, account *Account) error {
+	_, err := s.ConfirmStickySessionForAccount(ctx, groupID, sessionHash, account)
+	return err
+}
+
+// ConfirmStickySessionForAccount is BindStickySessionForAccount that also
+// reports whether this request still owns the session. It is false only when
+// ownership confirmation was rejected because another request migrated the
+// session to a newer owner; a cache error reports true with the error.
+func (s *GatewayService) ConfirmStickySessionForAccount(ctx context.Context, groupID *int64, sessionHash string, account *Account) (bool, error) {
 	if sessionHash == "" || account == nil || account.ID <= 0 || s.cache == nil {
-		return nil
+		return true, nil
 	}
 	if token := stickyOwnershipFromContext(ctx); token != "" {
 		cache, ok := s.cache.(stickyOwnershipCache)
 		if !ok {
-			return errors.New("sticky ownership cache unavailable")
+			return true, errors.New("sticky ownership cache unavailable")
 		}
-		_, err := cache.ConfirmStickyOwnership(ctx, derefGroupID(groupID), sessionHash, token, account.ID, s.stickySessionTTLForAccount(ctx, account))
-		return err
+		confirmed, err := cache.ConfirmStickyOwnership(ctx, derefGroupID(groupID), sessionHash, token, account.ID, s.stickySessionTTLForAccount(ctx, account))
+		if err != nil {
+			return true, err
+		}
+		return confirmed, nil
 	}
-	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, account.ID, s.stickySessionTTLForAccount(ctx, account))
+	return true, s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, account.ID, s.stickySessionTTLForAccount(ctx, account))
 }
 
 func (s *GatewayService) ClearStickySession(ctx context.Context, groupID *int64, sessionHash string) error {

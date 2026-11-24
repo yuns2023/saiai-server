@@ -15,10 +15,22 @@ import (
 
 type pointerGatewayCacheStub struct {
 	mockGatewayCacheForPlatform
-	pointers  map[string]int64
-	setTTLs   map[string]time.Duration
-	getErr    error
-	readCalls int
+	pointers     map[string]int64
+	setTTLs      map[string]time.Duration
+	getErr       error
+	confirmedErr error
+	readCalls    int
+}
+
+// Like the Redis repository, a confirmed miss is reported with the sentinel.
+func (m *pointerGatewayCacheStub) GetSessionAccountID(_ context.Context, _ int64, sessionHash string) (int64, error) {
+	if m.confirmedErr != nil {
+		return 0, m.confirmedErr
+	}
+	if id, ok := m.sessionBindings[sessionHash]; ok {
+		return id, nil
+	}
+	return 0, ErrGatewaySessionCacheMiss
 }
 
 func pointerStubKey(userID int64, digest string) string {
@@ -90,6 +102,15 @@ func TestWithUserSessionPointer_Identity(t *testing.T) {
 	_, otherSession := pointerTestCtx(t, 7, `{"device_id":"dev-a","account_uuid":"","session_id":"conv-2"}`)
 	require.NotEqual(t, base.digest, otherSession.digest)
 
+	// The group sticky hash uses the raw session id; so must the pointer.
+	_, paddedSession := pointerTestCtx(t, 7, `{"device_id":"dev-a","account_uuid":"","session_id":"conv-1 "}`)
+	require.NotEqual(t, base.digest, paddedSession.digest)
+
+	// Field boundaries are unambiguous even with NUL inside a field.
+	_, nulA := pointerTestCtx(t, 7, `{"device_id":"a\u0000b","account_uuid":"","session_id":"c"}`)
+	_, nulB := pointerTestCtx(t, 7, `{"device_id":"a","account_uuid":"","session_id":"b\u0000c"}`)
+	require.NotEqual(t, nulA.digest, nulB.digest)
+
 	for name, tc := range map[string]struct {
 		userID   int64
 		platform string
@@ -101,6 +122,7 @@ func TestWithUserSessionPointer_Identity(t *testing.T) {
 		"empty metadata":   {7, PlatformAnthropic, ""},
 		"malformed":        {7, PlatformAnthropic, "{not json"},
 		"blank session":    {7, PlatformAnthropic, `{"device_id":"dev-a","account_uuid":"","session_id":"   "}`},
+		"blank device":     {7, PlatformAnthropic, `{"device_id":"   ","account_uuid":"","session_id":"conv-1"}`},
 		"oversize session": {7, PlatformAnthropic, `{"device_id":"dev-a","account_uuid":"","session_id":"` + strings.Repeat("x", maxUserSessionPointerSessionIDLen+1) + `"}`},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -283,6 +305,14 @@ func (c *pointerOwnershipStub) GetUserSessionAccountID(_ context.Context, userID
 	}
 	return 0, ErrGatewaySessionCacheMiss
 }
+// Like the Redis repository, a confirmed miss is reported with the sentinel.
+func (c *pointerOwnershipStub) GetSessionAccountID(_ context.Context, _ int64, sessionHash string) (int64, error) {
+	if id, ok := c.sessionBindings[sessionHash]; ok {
+		return id, nil
+	}
+	return 0, ErrGatewaySessionCacheMiss
+}
+
 func (c *pointerOwnershipStub) SetUserSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
 	return nil
 }
@@ -315,4 +345,64 @@ func TestUserSessionPointer_ClaudeCodeOwnershipClaimsPointerAccount(t *testing.T
 	require.NotEmpty(t, result.StickyOwnership)
 	require.Equal(t, 1, cache.claims)
 	require.Equal(t, int64(2), cache.sessionBindings["h"])
+}
+
+// A failed confirmed read followed by a pending miss is not "no binding": the
+// confirmed binding may exist, so the pointer must not be read.
+func TestUserSessionPointer_ConfirmedReadFailureDoesNotUsePointer(t *testing.T) {
+	ctx, p := pointerTestCtx(t, 7, pointerTestMetadata)
+	cache := &pendingMissStub{pointerGatewayCacheStub: pointerGatewayCacheStub{
+		mockGatewayCacheForPlatform: mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}},
+		pointers:                    map[string]int64{pointerStubKey(p.userID, p.digest): 2},
+		confirmedErr:                errors.New("redis timeout"),
+	}}
+	svc := &GatewayService{cache: cache, cfg: testConfig()}
+	id, fromPointer, err := svc.getStickySessionAccountIDForSelection(ctx, nil, "h")
+	require.Error(t, err)
+	require.Zero(t, id)
+	require.False(t, fromPointer)
+	require.Zero(t, cache.readCalls)
+
+	// With both reads a definite miss the pointer is used.
+	cache.confirmedErr = nil
+	id, fromPointer, err = svc.getStickySessionAccountIDForSelection(ctx, nil, "h")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), id)
+	require.True(t, fromPointer)
+}
+
+type pendingMissStub struct {
+	pointerGatewayCacheStub
+	pendingSets map[string]int64
+}
+
+func (m *pendingMissStub) GetPendingSessionAccountID(context.Context, int64, string) (int64, error) {
+	return 0, ErrGatewaySessionCacheMiss
+}
+func (m *pendingMissStub) SetPendingSessionAccountIDNX(_ context.Context, _ int64, sessionHash string, accountID int64, _ time.Duration) (bool, error) {
+	if m.pendingSets == nil {
+		m.pendingSets = map[string]int64{}
+	}
+	m.pendingSets[sessionHash] = accountID
+	return true, nil
+}
+func (m *pendingMissStub) DeletePendingSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
+// A success-only pointer account is bound as pending before the forward, even
+// when the account cannot be re-read (no repository here).
+func TestUserSessionPointer_SuccessOnlyHitWritesPendingOnly(t *testing.T) {
+	ctx, _ := pointerTestCtx(t, 7, pointerTestMetadata)
+	cache := &pendingMissStub{pointerGatewayCacheStub: pointerGatewayCacheStub{
+		mockGatewayCacheForPlatform: mockGatewayCacheForPlatform{sessionBindings: map[string]int64{}},
+	}}
+	svc := &GatewayService{cache: cache, cfg: testConfig()}
+	svc.touchStickyHit(ctx, nil, "h", &Account{ID: 9, Platform: PlatformAnthropic, Type: AccountTypeOAuth}, true)
+	require.Equal(t, int64(9), cache.pendingSets["h"])
+	_, confirmed := cache.sessionBindings["h"]
+	require.False(t, confirmed, "no confirmed binding before the upstream succeeded")
+
+	svc.touchStickyHit(ctx, nil, "k", &Account{ID: 10, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}, true)
+	require.Equal(t, int64(10), cache.sessionBindings["k"])
 }
