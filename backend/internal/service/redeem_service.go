@@ -432,6 +432,11 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 		if s.authCacheInvalidator != nil {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(authCtx, userID)
 		}
+		// The subscription change commits with the redeem transaction, so
+		// drop the in-process subscription cache only now.
+		if s.subscriptionService != nil && redeemCode.GroupID != nil {
+			s.subscriptionService.InvalidateSubCache(userID, *redeemCode.GroupID)
+		}
 		if s.billingCacheService == nil {
 			return
 		}

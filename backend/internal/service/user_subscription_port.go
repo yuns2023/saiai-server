@@ -25,7 +25,7 @@ type UserSubscriptionRepository interface {
 	UpdateStatus(ctx context.Context, subscriptionID int64, status string) error
 	UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error
 
-	ActivateWindows(ctx context.Context, id int64, start time.Time) error
+	ActivateWindows(ctx context.Context, id int64, dailyStart, weeklyStart, monthlyStart time.Time) error
 	EnsureFiveHourWindow(ctx context.Context, id int64, newWindowStart time.Time) error
 	ResetFiveHourUsage(ctx context.Context, id int64, newWindowStart time.Time) error
 	ResetDailyUsage(ctx context.Context, id int64, newWindowStart time.Time) error
