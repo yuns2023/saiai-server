@@ -1299,8 +1299,9 @@ func (s *GatewayService) BindStickySessionForAccount(ctx context.Context, groupI
 
 // ConfirmStickySessionForAccount is BindStickySessionForAccount that also
 // reports whether this request still owns the session. It is false only when
-// ownership confirmation was rejected because another request migrated the
-// session to a newer owner; a cache error reports true with the error.
+// ownership confirmation was rejected (the owner token changed or expired,
+// e.g. another request migrated the session); a cache error reports true with
+// the error.
 func (s *GatewayService) ConfirmStickySessionForAccount(ctx context.Context, groupID *int64, sessionHash string, account *Account) (bool, error) {
 	if sessionHash == "" || account == nil || account.ID <= 0 || s.cache == nil {
 		return true, nil
