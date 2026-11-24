@@ -718,6 +718,11 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 			if err := s.restartSubscriptionPeriod(txCtx, subscriptionID, now, newExpiresAt); err != nil {
 				return err
 			}
+			restartedAt := now
+			current.StartsAt = now
+			current.DailyWindowStart, current.WeeklyWindowStart, current.MonthlyWindowStart = &restartedAt, &restartedAt, &restartedAt
+			current.FiveHourWindowStart = nil
+			current.DailyUsageUSD, current.WeeklyUsageUSD, current.MonthlyUsageUSD, current.FiveHourUsageUSD = 0, 0, 0, 0
 		} else if err := s.userSubRepo.ExtendExpiry(txCtx, subscriptionID, newExpiresAt); err != nil {
 			return err
 		}

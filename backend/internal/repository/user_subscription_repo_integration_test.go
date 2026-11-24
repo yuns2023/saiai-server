@@ -373,6 +373,25 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
 	s.Require().WithinDuration(activateAt, *got.DailyWindowStart, time.Microsecond)
 }
 
+func (s *UserSubscriptionRepoSuite) TestActivateWindows_KeepsWindowsAlreadySet() {
+	user := s.mustCreateUser("activate-keep@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-activate-keep")
+	set := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetWeeklyWindowStart(set).SetMonthlyWindowStart(set)
+	})
+
+	// A late activation from an old snapshot only fills the unset column.
+	stale := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.Require().NoError(s.repo.ActivateWindows(s.ctx, sub.ID, stale, stale, stale))
+
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	s.Require().WithinDuration(stale, *got.DailyWindowStart, time.Microsecond)
+	s.Require().WithinDuration(set, *got.WeeklyWindowStart, time.Microsecond)
+	s.Require().WithinDuration(set, *got.MonthlyWindowStart, time.Microsecond)
+}
+
 func (s *UserSubscriptionRepoSuite) TestRestartPeriod() {
 	user := s.mustCreateUser("restart-period@test.com", service.RoleUser)
 	group := s.mustCreateGroup("g-restart-period")

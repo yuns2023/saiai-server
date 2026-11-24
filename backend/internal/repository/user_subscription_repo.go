@@ -337,14 +337,23 @@ func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscripti
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
+// ActivateWindows sets the daily/weekly/monthly window starts that are still
+// unset. A late activation computed from an old snapshot (e.g. queued before
+// a renewal restarted the period) must not overwrite windows set since.
 func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, dailyStart, weeklyStart, monthlyStart time.Time) error {
+	const updateSQL = `
+		UPDATE user_subscriptions
+		SET daily_window_start = COALESCE(daily_window_start, $1),
+			weekly_window_start = COALESCE(weekly_window_start, $2),
+			monthly_window_start = COALESCE(monthly_window_start, $3),
+			updated_at = NOW()
+		WHERE id = $4
+			AND deleted_at IS NULL
+			AND (daily_window_start IS NULL OR weekly_window_start IS NULL OR monthly_window_start IS NULL)
+	`
 	client := clientFromContext(ctx, r.client)
-	_, err := client.UserSubscription.UpdateOneID(id).
-		SetDailyWindowStart(dailyStart).
-		SetWeeklyWindowStart(weeklyStart).
-		SetMonthlyWindowStart(monthlyStart).
-		Save(ctx)
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	_, err := client.ExecContext(ctx, updateSQL, dailyStart, weeklyStart, monthlyStart, id)
+	return err
 }
 
 func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, newWindowStart time.Time) error {
