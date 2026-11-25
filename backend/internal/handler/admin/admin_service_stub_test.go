@@ -27,6 +27,7 @@ type stubAdminService struct {
 	lastUpdateAccount    *service.UpdateAccountInput
 	bulkUpdateAccountErr error
 	checkMixedErr        error
+	lastListAccountsSort *service.AccountListSort
 	lastMixedCheck       struct {
 		accountID int64
 		platform  string
@@ -188,7 +189,10 @@ func (s *stubAdminService) BatchSetGroupRateMultipliers(_ context.Context, _ int
 	return nil
 }
 
-func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64) ([]service.Account, int64, error) {
+func (s *stubAdminService) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, sort service.AccountListSort) ([]service.Account, int64, error) {
+	s.mu.Lock()
+	s.lastListAccountsSort = &sort
+	s.mu.Unlock()
 	return s.accounts, int64(len(s.accounts)), nil
 }
 

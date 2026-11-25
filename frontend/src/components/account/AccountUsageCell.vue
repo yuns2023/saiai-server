@@ -1,8 +1,21 @@
 <template>
   <div v-if="showUsageWindows">
+    <!-- Disabled / error accounts: don't query automatically, offer a manual query -->
+    <div v-if="usageDeferred" class="flex items-center gap-1.5 text-xs text-gray-400 dark:text-dark-500" data-testid="usage-deferred">
+      <span>-</span>
+      <button
+        type="button"
+        class="rounded-sm px-1.5 py-0.5 text-[9px] font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        :title="t('admin.accounts.usageWindow.deferredHint')"
+        @click="queryDeferredUsage"
+      >
+        {{ t('admin.accounts.usageWindow.activeQuery') }}
+      </button>
+    </div>
+
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
-      v-if="
+      v-else-if="
         account.platform === 'anthropic' &&
         (account.type === 'oauth' || account.type === 'setup-token')
       "
@@ -328,6 +341,13 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import {
+  accountUsageEpoch,
+  fetchAccountUsageShared,
+  getCachedAccountUsage,
+  markAccountUsageQueried,
+  wasAccountUsageQueried
+} from '@/utils/accountUsageCache'
 import { formatCompactNumber } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
@@ -392,8 +412,32 @@ const hasOpenAIUsageFallback = computed(() => {
 
 const openAIUsageRefreshKey = computed(() => buildOpenAIUsageRefreshKey(props.account))
 
+// Cached results are only reused for the same account shape.
+const usageVersionKey = computed(
+  () => `${props.account.platform}:${props.account.type}:${openAIUsageRefreshKey.value}`
+)
+
+// The user explicitly queried this cell (deferred 查询 or the active query
+// button); a skipped account then follows page refreshes like the others.
+const manuallyQueried = ref(false)
+
+// Bumped whenever the cell's account state changes; a response to an older
+// request is dropped instead of overwriting the current state.
+let requestSeq = 0
+
+// Disabled and error accounts are not queried automatically (their windows are
+// not in use and an error account often cannot be queried anyway).
+const autoLoadAllowed = computed(() => {
+  return props.account.status !== 'inactive' && props.account.status !== 'error'
+})
+
 const shouldAutoLoadUsageOnMount = computed(() => {
-  return shouldFetchUsage.value
+  return shouldFetchUsage.value && autoLoadAllowed.value
+})
+
+// Shown instead of the windows until the user queries a skipped account.
+const usageDeferred = computed(() => {
+  return shouldFetchUsage.value && !autoLoadAllowed.value && !usageInfo.value && !loading.value && !error.value
 })
 
 // Gemini 账户类型（从 credentials 中提取）
@@ -622,28 +666,65 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-const loadUsage = async (source?: 'passive' | 'active') => {
+const requestUsage = (source?: 'passive' | 'active') => {
+  const accountId = props.account.id
+  return fetchAccountUsageShared(accountId, source, props.manualRefreshToken, usageVersionKey.value, () =>
+    source ? adminAPI.accounts.getUsage(accountId, source) : adminAPI.accounts.getUsage(accountId)
+  )
+}
+
+const loadUsage = async (source?: 'passive' | 'active', options: { force?: boolean } = {}) => {
   if (!shouldFetchUsage.value) return
 
-  loading.value = true
+  if (!options.force) {
+    const cached = getCachedAccountUsage(props.account.id, props.manualRefreshToken, usageVersionKey.value)
+    if (cached) {
+      usageInfo.value = cached
+      error.value = null
+      return
+    }
+  }
+
+  // Keep showing the previous result while refreshing; only the first load
+  // shows the skeleton.
+  const seq = ++requestSeq
+  const epoch = accountUsageEpoch(props.account.id)
+  loading.value = !usageInfo.value
   error.value = null
 
   try {
-    usageInfo.value = source
-      ? await adminAPI.accounts.getUsage(props.account.id, source)
-      : await adminAPI.accounts.getUsage(props.account.id)
+    const data = await requestUsage(source)
+    if (seq === requestSeq) {
+      usageInfo.value = data
+      // Remembered only after a successful query, so a failing skipped account
+      // is not re-requested on every remount.
+      if (manuallyQueried.value) markAccountUsageQueried(props.account.id, epoch)
+    }
   } catch (e: any) {
-    error.value = t('common.error')
+    // A failed refresh keeps the previous result on screen.
+    if (seq === requestSeq && !usageInfo.value) error.value = t('common.error')
     console.error('Failed to load usage:', e)
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
   }
 }
 
+const queryDeferredUsage = () => {
+  manuallyQueried.value = true
+  return loadUsage(autoSource.value, { force: true })
+}
+
 const loadActiveUsage = async () => {
+  manuallyQueried.value = true
   activeQueryLoading.value = true
+  const seq = ++requestSeq
+  const epoch = accountUsageEpoch(props.account.id)
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active')
+    const data = await requestUsage('active')
+    if (seq === requestSeq) {
+      usageInfo.value = data
+      markAccountUsageQueried(props.account.id, epoch)
+    }
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
   } finally {
@@ -734,17 +815,29 @@ const formatKeyCost = computed(() => {
 })
 
 
+const autoSource = computed<'passive' | undefined>(() => {
+  return isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
+})
+
 onMounted(() => {
+  if (shouldFetchUsage.value && !autoLoadAllowed.value) {
+    // A skipped account the user already queried on this visit is loaded like
+    // any other when its row is remounted (scroll, list reload, page refresh).
+    if (!wasAccountUsageQueried(props.account.id)) return
+    manuallyQueried.value = true
+    loadUsage(autoSource.value)
+    return
+  }
   if (!shouldAutoLoadUsageOnMount.value) return
-  const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
-  loadUsage(source)
+  loadUsage(autoSource.value)
 })
 
 watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
   if (!prevKey || nextKey === prevKey) return
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
 
-  loadUsage().catch((e) => {
+  if (!autoLoadAllowed.value) return
+  loadUsage(undefined, { force: true }).catch((e) => {
     console.error('Failed to refresh OpenAI usage:', e)
   })
 })
@@ -754,10 +847,43 @@ watch(
   (nextToken, prevToken) => {
     if (nextToken === prevToken) return
     if (!shouldFetchUsage.value) return
+    // A skipped account stays skipped on page refresh unless it was queried.
+    if (!autoLoadAllowed.value && !manuallyQueried.value) return
 
-    const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
-    loadUsage(source).catch((e) => {
+    loadUsage(autoSource.value, { force: true }).catch((e) => {
       console.error('Failed to refresh usage after manual refresh:', e)
+    })
+  }
+)
+
+// Status changed by an edit or auto refresh: an account that became active is
+// queried; one that became disabled/error goes back to the deferred state.
+watch(autoLoadAllowed, (allowed) => {
+  if (!shouldFetchUsage.value) return
+  if (allowed) {
+    loadUsage(autoSource.value).catch((e) => {
+      console.error('Failed to load usage after status change:', e)
+    })
+  } else if (!manuallyQueried.value) {
+    requestSeq += 1
+    usageInfo.value = null
+    error.value = null
+    loading.value = false
+  }
+})
+
+// Platform/type changed: the old result describes another account shape.
+watch(
+  () => `${props.account.platform}:${props.account.type}`,
+  () => {
+    requestSeq += 1
+    usageInfo.value = null
+    error.value = null
+    loading.value = false
+    manuallyQueried.value = false
+    if (!shouldAutoLoadUsageOnMount.value) return
+    loadUsage(autoSource.value).catch((e) => {
+      console.error('Failed to load usage after account type change:', e)
     })
   }
 )

@@ -2697,6 +2697,7 @@ export default {
       resetInMinutes: 'Resets in {minutes}m',
       resetInHoursMinutes: 'Resets in {hours}h {minutes}m',
       resetInDaysHours: 'Resets in {days}d {hours}h',
+      endsWithSubscription: 'Ends with the subscription',
       daysRemaining: 'days remaining',
       remainingDays: 'Remaining days',
       noExpiration: 'No expiration',
@@ -3304,6 +3305,7 @@ export default {
       interceptWarmupRequestsDesc:
         'When enabled, warmup requests like title generation will return mock responses without consuming upstream tokens',
       autoPauseOnExpired: 'Auto Pause On Expired',
+      expiresShort: 'Exp.',
       autoPauseOnExpiredDesc: 'When enabled, the account will auto pause scheduling after it expires',
       // Quota control (Anthropic OAuth/SetupToken only)
       quotaControl: {
@@ -3786,11 +3788,14 @@ export default {
         fableWeekly: 'Fable 7-Day Dedicated Limit',
         passiveSampled: 'Passive',
         activeQuery: 'Query',
+        deferredHint: 'Usage is not queried automatically for disabled or error accounts; click to query',
         standardCost: 'Std ${cost}',
         standardCostHint: 'Platform usage this window (standard price, all users; window derived from the upstream reset time, so its start may differ from the request stats)',
         statsHint: 'Requests, tokens and A/U use the request-stats window; its start may differ from the standard-cost window',
         rollingHint: '*Upstream reset time unknown; counted over a rolling window',
         estimatedCapacity: 'Est ${cost}',
+        standardCostLabel: 'Standard',
+        estimatedCapacityLabel: 'Est. capacity',
         estimatedCapacityHint: 'Estimated total quota (at standard price; usage outside the platform makes this an underestimate)',
         restartedChip: 'since {time}',
         restartedHint: 'Statistics start at {time} ({source}): the upstream reset the usage mid-window; earlier usage is excluded from standard price, A/U and the estimate',
@@ -6039,6 +6044,7 @@ export default {
     daysRemaining: '{days} days remaining',
     expiresOn: 'Expires on {date}',
     resetIn: 'Resets in {time}',
+    endsWithSubscription: 'Ends with the subscription',
     windowNotActive: 'Awaiting first use',
     usageOf: '{used} of {limit}'
   },

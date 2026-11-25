@@ -156,7 +156,7 @@ func (f fakeGoogleSubscriptionRepo) UpdateStatus(ctx context.Context, subscripti
 func (f fakeGoogleSubscriptionRepo) UpdateNotes(ctx context.Context, subscriptionID int64, notes string) error {
 	return errors.New("not implemented")
 }
-func (f fakeGoogleSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (f fakeGoogleSubscriptionRepo) ActivateWindows(ctx context.Context, id int64, start, _, _ time.Time) error {
 	if f.activateWindow != nil {
 		return f.activateWindow(ctx, id, start)
 	}

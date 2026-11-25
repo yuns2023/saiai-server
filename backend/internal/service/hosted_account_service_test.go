@@ -38,7 +38,7 @@ type hostedAccountsStub struct {
 	params  pagination.PaginationParams
 }
 
-func (r *hostedAccountsStub) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, kind, status, search string, groupID int64) ([]Account, *pagination.PaginationResult, error) {
+func (r *hostedAccountsStub) ListWithFilters(_ context.Context, params pagination.PaginationParams, platform, kind, status, search string, groupID int64, _ AccountListSort) ([]Account, *pagination.PaginationResult, error) {
 	r.groupID = groupID
 	r.params = params
 	return r.rows, &pagination.PaginationResult{Total: int64(len(r.rows)), Page: params.Page, PageSize: params.PageSize, Pages: 1}, nil

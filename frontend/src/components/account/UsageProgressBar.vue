@@ -1,62 +1,14 @@
 <template>
-  <div :title="tooltip">
-    <!-- Window stats row (above progress bar) -->
-    <div
-      v-if="(windowStats && hasActivity) || showStandardCost || showEstimate || showRestart"
-      class="mb-0.5 flex items-center"
-      data-testid="window-stats"
-    >
-      <div class="flex flex-wrap items-center gap-1.5 text-[9px] text-gray-500 dark:text-gray-400">
-        <template v-if="windowStats && hasActivity">
-          <span
-            class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-            :title="statsRolling ? t('admin.accounts.usageWindow.rollingHint') : t('admin.accounts.usageWindow.statsHint')"
-            data-testid="window-requests"
-          >
-            {{ formatRequests }} req{{ statsRolling ? '*' : '' }}
-          </span>
-          <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800">
-            {{ formatTokens }}
-          </span>
-          <span class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800" :title="t('usage.accountBilled')">
-            A ${{ formatAccountCost }}
-          </span>
-          <span
-            v-if="windowStats?.user_cost != null"
-            class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-            data-testid="window-revenue"
-          >
-            <RevenueAmount label="U " :parts="windowStats" :billed-cost="windowStats.user_cost" />
-          </span>
-        </template>
-        <span
-          v-if="showStandardCost"
-          class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-          :title="t('admin.accounts.usageWindow.standardCostHint')"
-          data-testid="window-standard-cost"
-        >
-          {{ t('admin.accounts.usageWindow.standardCost', { cost: (standardCost ?? 0).toFixed(2) }) }}
-        </span>
-        <span
-          v-if="showEstimate"
-          class="rounded-sm bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
-          :title="t('admin.accounts.usageWindow.estimatedCapacityHint')"
-          data-testid="window-estimated-capacity"
-        >
-          {{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: (estimatedCapacity ?? 0).toFixed(2) }) }}<template v-if="estimateAge"> · {{ estimateAge }}</template>
-        </span>
-        <span
-          v-if="showRestart"
-          class="rounded-sm bg-sky-50 px-1.5 py-0.5 text-sky-700 dark:bg-sky-900/20 dark:text-sky-300"
-          :title="restartHint"
-          data-testid="window-restart"
-        >
-          ↺ {{ t('admin.accounts.usageWindow.restartedChip', { time: restartShort }) }}
-        </span>
-      </div>
-    </div>
-
-    <!-- Progress bar row -->
+  <div
+    ref="rootRef"
+    :title="tooltip"
+    @pointerenter="onPointerEnter"
+    @pointerleave="onPointerLeave"
+    @pointerdown="onPointerDown"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerCancel"
+  >
+    <!-- One line per window: label, bar, percent, reset, A $ · 估 $ -->
     <div class="flex items-center gap-1">
       <!-- Label badge (fixed width for alignment) -->
       <span
@@ -79,16 +31,79 @@
       </span>
 
       <!-- Reset time -->
-      <span v-if="shouldShowResetTime" class="shrink-0 text-[10px] text-gray-400">
+      <span v-if="shouldShowResetTime" class="w-[42px] shrink-0 text-[10px] text-gray-400">
         {{ formatResetTime }}
       </span>
+
+      <!-- Key figures; the rest is in the hover details -->
+      <span
+        v-if="showAccountCostInline || showEstimate"
+        class="shrink-0 text-[10px] tabular-nums text-gray-500 dark:text-gray-400"
+        data-testid="window-summary"
+      >
+        <template v-if="showAccountCostInline">A ${{ formatShortCost(windowStats!.cost) }}</template>
+        <template v-if="showAccountCostInline && showEstimate"> · </template>
+        <template v-if="showEstimate">{{ t('admin.accounts.usageWindow.estimatedCapacity', { cost: formatShortCost(estimatedCapacity ?? 0) }) }}</template>
+      </span>
+
+      <span
+        v-if="showRestart"
+        class="shrink-0 rounded-sm bg-sky-50 px-1 text-[10px] text-sky-700 dark:bg-sky-900/20 dark:text-sky-300"
+        :title="restartHint"
+        data-testid="window-restart"
+      >
+        ↺ {{ t('admin.accounts.usageWindow.restartedChip', { time: restartShort }) }}
+      </span>
+    </div>
+
+    <!-- Hover/tap details: fixed-positioned so the scrolling table does not clip
+         it; closed on any scroll so it never floats over another row. -->
+    <div
+      v-if="hasDetails"
+      v-show="detailsOpen"
+      class="fixed z-[300] rounded-md border border-gray-200 bg-white px-2.5 py-2 text-[11px] text-gray-600 shadow-lg dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300"
+      :style="detailsStyle"
+      data-testid="window-stats"
+    >
+      <div class="mb-1 font-medium text-gray-800 dark:text-gray-100">{{ label }}</div>
+      <div class="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 tabular-nums">
+        <template v-if="windowStats && hasActivity">
+          <span class="text-gray-400">req</span>
+          <span
+            :title="statsRolling ? t('admin.accounts.usageWindow.rollingHint') : t('admin.accounts.usageWindow.statsHint')"
+            data-testid="window-requests"
+          >{{ formatRequests }} req{{ statsRolling ? '*' : '' }}</span>
+          <span class="text-gray-400">Token</span>
+          <span>{{ formatTokens }}</span>
+          <span class="text-gray-400" :title="t('usage.accountBilled')">A</span>
+          <span>${{ formatAccountCost }}</span>
+          <template v-if="windowStats?.user_cost != null">
+            <span class="text-gray-400">U</span>
+            <span data-testid="window-revenue">
+              <RevenueAmount :parts="windowStats" :billed-cost="windowStats.user_cost" />
+            </span>
+          </template>
+        </template>
+        <template v-if="showStandardCost">
+          <span class="text-gray-400" :title="t('admin.accounts.usageWindow.standardCostHint')">{{ t('admin.accounts.usageWindow.standardCostLabel') }}</span>
+          <span data-testid="window-standard-cost">
+            ${{ (standardCost ?? 0).toFixed(2) }}
+          </span>
+        </template>
+        <template v-if="showEstimate">
+          <span class="text-gray-400" :title="t('admin.accounts.usageWindow.estimatedCapacityHint')">{{ t('admin.accounts.usageWindow.estimatedCapacityLabel') }}</span>
+          <span data-testid="window-estimated-capacity">
+            ${{ (estimatedCapacity ?? 0).toFixed(2) }}<template v-if="estimateAge"> · {{ estimateAge }}</template>
+          </span>
+        </template>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { formatTokenCount } from '@/utils/usageTokens'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { UsageWindowRestart, WindowStats } from '@/types'
@@ -257,5 +272,64 @@ const restartHint = computed(() => {
 const hasActivity = computed(() =>
   Boolean(props.windowStats && (props.windowStats.requests > 0 || props.windowStats.tokens > 0))
 )
+
+const showAccountCostInline = computed(() => Boolean(props.windowStats && hasActivity.value))
+
+// Inline figures: whole dollars from $100 up, cents below.
+const formatShortCost = (value: number) => (Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(2))
+
+const hasDetails = computed(
+  () => Boolean(props.windowStats && hasActivity.value) || showStandardCost.value || showEstimate.value
+)
+
+const rootRef = ref<HTMLElement | null>(null)
+const detailsOpen = ref(false)
+const detailsStyle = ref<Record<string, string>>({})
+const closeOnScroll = () => closeDetails()
+const closeDetails = () => {
+  if (!detailsOpen.value) return
+  detailsOpen.value = false
+  window.removeEventListener('scroll', closeOnScroll, true)
+  window.removeEventListener('resize', closeOnScroll)
+}
+const openDetails = () => {
+  if (!hasDetails.value || detailsOpen.value) return
+  const rect = rootRef.value?.getBoundingClientRect()
+  if (rect) {
+    // Below the row; flip above when near the bottom of the viewport.
+    const flip = rect.bottom + 150 > window.innerHeight
+    detailsStyle.value = flip
+      ? { left: `${rect.left}px`, bottom: `${window.innerHeight - rect.top + 4}px` }
+      : { left: `${rect.left}px`, top: `${rect.bottom + 4}px` }
+  }
+  detailsOpen.value = true
+  // capture: the table scrolls inside its own container, not the window
+  window.addEventListener('scroll', closeOnScroll, true)
+  window.addEventListener('resize', closeOnScroll)
+}
+// Mouse: hover shows the details. Touch/pen has no hover: tap toggles them.
+const onPointerEnter = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') openDetails()
+}
+const onPointerLeave = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') closeDetails()
+}
+// A touch that moved (a scroll gesture ending on the bar) is not a tap.
+let touchStart: { x: number; y: number } | null = null
+const onPointerDown = (e: PointerEvent) => {
+  touchStart = e.pointerType === 'mouse' ? null : { x: e.clientX, y: e.clientY }
+}
+const onPointerCancel = () => {
+  touchStart = null
+}
+const onPointerUp = (e: PointerEvent) => {
+  if (e.pointerType === 'mouse') return
+  const start = touchStart
+  touchStart = null
+  if (!start || Math.abs(e.clientX - start.x) > 10 || Math.abs(e.clientY - start.y) > 10) return
+  if (detailsOpen.value) closeDetails()
+  else openDetails()
+}
+onBeforeUnmount(closeDetails)
 
 </script>

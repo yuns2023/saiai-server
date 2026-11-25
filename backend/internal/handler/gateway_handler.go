@@ -440,15 +440,17 @@ func useSuccessOnlySticky(isClaudeCodeClient bool, account *service.Account) boo
 	return isClaudeCodeClient && account.Platform == service.PlatformAnthropic
 }
 
-func (h *GatewayHandler) bindSuccessOnlyStickyOnSuccess(ctx context.Context, groupID *int64, sessionKey string, account *service.Account, isClaudeCodeClient bool, log *zap.Logger) {
+// bindSuccessOnlyStickyOnSuccess returns false only when a newer request has
+// already migrated the session away from this account.
+func (h *GatewayHandler) bindSuccessOnlyStickyOnSuccess(ctx context.Context, groupID *int64, sessionKey string, account *service.Account, isClaudeCodeClient bool, log *zap.Logger) bool {
 	if h == nil || h.gatewayService == nil || !useSuccessOnlySticky(isClaudeCodeClient, account) || sessionKey == "" {
-		return
+		return true
 	}
-	if err := h.gatewayService.BindStickySessionForAccount(ctx, groupID, sessionKey, account); err != nil {
-		if log != nil {
-			log.Warn("gateway.bind_success_only_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		}
+	owned, err := h.gatewayService.ConfirmStickySessionForAccount(ctx, groupID, sessionKey, account)
+	if err != nil && log != nil {
+		log.Warn("gateway.bind_success_only_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
+	return owned
 }
 
 func (h *GatewayHandler) clearSuccessOnlyStickyOnFailure(ctx context.Context, groupID *int64, sessionKey string, account *service.Account, isClaudeCodeClient bool, log *zap.Logger) {
@@ -725,6 +727,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
 	}
+
+	// A user-level pointer lets the conversation keep its account (and prompt
+	// cache) when the Key's group changes, e.g. smart switching.
+	c.Request = c.Request.WithContext(service.WithUserSessionPointer(c.Request.Context(), apiKey.UserID, platform, parsedReq.MetadataUserID))
 
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
@@ -1364,7 +1370,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				return
 			}
 
-			h.bindSuccessOnlyStickyOnSuccess(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account, isClaudeCodeClient, reqLog)
+			// A superseded owner must not point the conversation back at itself.
+			if h.bindSuccessOnlyStickyOnSuccess(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account, isClaudeCodeClient, reqLog) {
+				h.gatewayService.RecordUserSessionPointer(c.Request.Context(), account)
+			}
 
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
@@ -2110,10 +2119,10 @@ func buildSubscriptionUsageDetails(group *service.Group, subscription *service.U
 		"expires_at":          effective.ExpiresAt,
 		"days_remaining":      effective.DaysRemaining(),
 	}
-	addSubscriptionResetTime(details, "five_hour_reset_at", effective.FiveHourWindowStart, service.RateLimitWindow5h)
-	addSubscriptionResetTime(details, "daily_reset_at", effective.DailyWindowStart, service.RateLimitWindow1d)
-	addSubscriptionResetTime(details, "weekly_reset_at", effective.WeeklyWindowStart, service.RateLimitWindow7d)
-	addSubscriptionResetTime(details, "monthly_reset_at", effective.MonthlyWindowStart, 30*24*time.Hour)
+	addSubscriptionResetTime(details, "five_hour_reset_at", effective, effective.FiveHourWindowStart, service.RateLimitWindow5h)
+	addSubscriptionResetTime(details, "daily_reset_at", effective, effective.DailyWindowStart, service.RateLimitWindow1d)
+	addSubscriptionResetTime(details, "weekly_reset_at", effective, effective.WeeklyWindowStart, service.RateLimitWindow7d)
+	addSubscriptionResetTime(details, "monthly_reset_at", effective, effective.MonthlyWindowStart, 30*24*time.Hour)
 	return details
 }
 
@@ -2138,11 +2147,13 @@ func effectiveSubscriptionUsageSnapshot(subscription *service.UserSubscription) 
 	return &effective
 }
 
-func addSubscriptionResetTime(details gin.H, field string, windowStart *time.Time, duration time.Duration) {
+// addSubscriptionResetTime reports when an active window resets, capped at
+// the subscription expiry (a window ending with the subscription never resets).
+func addSubscriptionResetTime(details gin.H, field string, sub *service.UserSubscription, windowStart *time.Time, duration time.Duration) {
 	if windowStart == nil || service.IsWindowExpired(windowStart, duration) {
 		return
 	}
-	details[field] = windowStart.Add(duration)
+	details[field] = sub.EffectiveResetTime(*windowStart, duration)
 }
 
 // calculateSubscriptionRemaining 计算订阅剩余可用额度

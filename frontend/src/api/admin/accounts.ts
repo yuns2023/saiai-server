@@ -5,6 +5,7 @@
 
 import { apiClient } from '../client'
 import { i18n } from '@/i18n'
+import { createRequestThrottle, runThrottledWithRetry } from '@/utils/requestThrottle'
 import type {
   Account,
   CreateAccountRequest,
@@ -40,6 +41,9 @@ export async function list(
     search?: string
     owner_user_id?: number
     lite?: string
+    /** Server-side sort key (see utils/accountListSort); omitted = id DESC. */
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
   },
   options?: {
     signal?: AbortSignal
@@ -73,6 +77,9 @@ export async function listWithEtag(
     search?: string
     owner_user_id?: number
     lite?: string
+    /** Server-side sort key (see utils/accountListSort); omitted = id DESC. */
+    sort_by?: string
+    sort_order?: 'asc' | 'desc'
   },
   options?: {
     signal?: AbortSignal
@@ -376,11 +383,20 @@ export async function clearError(id: number): Promise<Account> {
  * @param id - Account ID
  * @returns Account usage info
  */
+// Shared by every usage cell on the accounts page so a full-page refresh no longer
+// bursts ~100 requests into the edge per-IP limit (20 r/s, burst 80). Per tab and
+// usage-only: other tabs/requests share the same edge quota, hence the 503 retry.
+// Page loads pass 'passive' or no source; an explicit 'active' is a user-initiated
+// single lookup (row 查询 button, quota-window modal) and jumps the queue.
+const usageRequestThrottle = createRequestThrottle({ capacity: 40, refillPerSecond: 10 })
+
 export async function getUsage(id: number, source?: 'passive' | 'active'): Promise<AccountUsageInfo> {
-  const { data } = await apiClient.get<AccountUsageInfo>(`/admin/accounts/${id}/usage`, {
-    params: source ? { source } : undefined
-  })
-  return data
+  return runThrottledWithRetry(usageRequestThrottle, async () => {
+    const { data } = await apiClient.get<AccountUsageInfo>(`/admin/accounts/${id}/usage`, {
+      params: source ? { source } : undefined
+    })
+    return data
+  }, 2, 1500, { priority: source === 'active' })
 }
 
 /**
