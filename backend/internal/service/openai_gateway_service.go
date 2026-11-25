@@ -2861,6 +2861,18 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		defer func() { _ = resp.Body.Close() }()
 		s.observeOpenAICodexQuotaHeaders(ctx, account, resp.Header)
+		// A provider-issued turn state can reach the client with these 2xx headers
+		// before the body completes. Bind its OAuth owner now: when the SSE stream
+		// later ends with an error event, Codex retries the turn with this token,
+		// and binding only after success rejected those retries (409
+		// turn_state_account_mismatch) even on the issuing account. Only OAuth
+		// accounts can be turn-state owners (SelectAccountForNativeCodexRequest);
+		// a native relay forwards the token for its upstream gateway to verify.
+		if account.IsOpenAIOAuth() && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if state := strings.TrimSpace(resp.Header.Get(openAIWSTurnStateHeader)); state != "" {
+				s.bindOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), s.openAISessionHashForTurnState(c, promptCacheKey), state)
+			}
+		}
 
 		// Handle normal response
 		var usage *OpenAIUsage
@@ -2906,13 +2918,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if usage == nil {
 			usage = &OpenAIUsage{}
 		}
-		if state := strings.TrimSpace(resp.Header.Get(openAIWSTurnStateHeader)); state != "" {
-			sessionHash := s.openAISessionHashForTurnState(c, promptCacheKey)
-			if sessionHash != "" {
-				s.bindOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), sessionHash, state)
-			}
-		}
-
 		serviceTier := resolveOpenAIServiceTier(
 			usage.ReportedServiceTier,
 			extractOpenAIServiceTier(reqBody),
