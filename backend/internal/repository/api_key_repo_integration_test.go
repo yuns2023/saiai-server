@@ -502,6 +502,7 @@ func (s *APIKeyRepoSuite) TestTrustedUserAuthProjection() {
 		s.Require().NoError(s.client.User.UpdateOneID(user.ID).SetIsTrusted(trusted).Exec(s.ctx))
 		got, err := s.repo.GetByKeyForAuth(s.ctx, key.Key)
 		s.Require().NoError(err)
+		s.Require().Equal("Trust projection", got.Name, "device ownership snapshots show the key name")
 		s.Require().NotNil(got.User)
 		s.Require().Equal(trusted, got.User.IsTrusted)
 	}
