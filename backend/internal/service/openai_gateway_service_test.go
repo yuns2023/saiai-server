@@ -943,6 +943,7 @@ func TestOpenAISelectAccountForModelWithExclusions_RandomizesWithinAccountPriori
 		}
 		if acc == nil {
 			t.Fatal("expected account")
+			return
 		}
 		seen[acc.ID] = true
 	}

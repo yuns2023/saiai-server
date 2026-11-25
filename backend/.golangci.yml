@@ -121,6 +121,16 @@ linters:
       # Default: true — must be true, ent generates 130K+ lines of code
       generated-is-used: true
 
+  exclusions:
+    rules:
+      # SA5011 (possible nil dereference) misreads t.Fatal/require guards in
+      # tests as non-terminating and only fires with a restored golangci cache,
+      # so CI results flip between runs. Production code is still checked.
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: "SA5011"
+
 formatters:
   enable:
     - gofmt
