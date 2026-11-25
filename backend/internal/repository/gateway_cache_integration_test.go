@@ -94,6 +94,32 @@ func (s *GatewayCacheSuite) TestDeleteSessionAccountID() {
 	require.True(s.T(), errors.Is(err, redis.Nil), "expected redis.Nil after delete")
 }
 
+func (s *GatewayCacheSuite) TestUserSessionPointer() {
+	pc := s.cache.(*gatewayCache)
+	_, err := pc.GetUserSessionAccountID(s.ctx, 7, "digest-a")
+	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
+
+	require.NoError(s.T(), pc.SetUserSessionAccountID(s.ctx, 7, "digest-a", 304, time.Minute))
+	got, err := pc.GetUserSessionAccountID(s.ctx, 7, "digest-a")
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), int64(304), got)
+
+	ttl, err := s.rdb.TTL(s.ctx, buildUserSessionPointerKey(7, "digest-a")).Result()
+	require.NoError(s.T(), err)
+	s.True(ttl > 0 && ttl <= time.Minute, "pointer must always expire")
+
+	// Another user and the group namespace never see the pointer.
+	_, err = pc.GetUserSessionAccountID(s.ctx, 8, "digest-a")
+	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
+	_, err = s.cache.GetSessionAccountID(s.ctx, 0, "digest-a")
+	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
+
+	// A pending miss carries the same miss identity and stays matchable as redis.Nil.
+	_, err = pc.GetPendingSessionAccountID(s.ctx, 1, "no-pending")
+	require.ErrorIs(s.T(), err, service.ErrGatewaySessionCacheMiss)
+	require.ErrorIs(s.T(), err, redis.Nil)
+}
+
 func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {
 	sessionID := "corrupted"
 	groupID := int64(1)
