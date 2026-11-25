@@ -2,13 +2,25 @@
   <section class="card p-4" :aria-label="t('admin.dashboard.keySpendingRankingTitle')">
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
-          {{ t('admin.dashboard.keySpendingRankingTitle') }} · Top {{ rankingLimit }}
-        </h3>
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+            {{ t('admin.dashboard.keySpendingRankingTitle') }} · Top {{ rankingLimit }}
+          </h3>
+          <button
+            v-if="selectedUser"
+            type="button"
+            class="inline-flex items-center gap-1 rounded-md bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-100 dark:bg-primary-500/10 dark:text-primary-300 dark:hover:bg-primary-500/20"
+            data-testid="key-ranking-back-global"
+            @click="selectUser(null)"
+          >
+            <Icon name="arrowLeft" size="xs" />
+            {{ t('admin.dashboard.keyRankingBackToGlobal') }}
+          </button>
+        </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
           <UserIdentityTooltip v-if="selectedUser" :user-id="selectedUser.id"><span>{{ selectedUser.email || `#${selectedUser.id}` }}</span></UserIdentityTooltip>
           <template v-else>{{ t('admin.dashboard.keyRankingGlobal') }}</template>
-          · {{ sort === 'cost' ? t('admin.dashboard.keyRankingBasis') : t('admin.dashboard.rankingSortBodySize') }}
+          · {{ sortBasis }}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -28,8 +40,14 @@
             {{ option.label }}
           </button>
         </div>
-        <button v-if="selectedUser" type="button" class="btn btn-secondary btn-sm" @click="selectUser(null)">
-          {{ t('admin.dashboard.keyRankingGlobal') }}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm whitespace-nowrap"
+          :title="t('admin.dashboard.rankingOrderToggle')"
+          data-testid="key-ranking-order"
+          @click="order = order === 'asc' ? 'desc' : 'asc'"
+        >
+          {{ order === 'asc' ? t('admin.dashboard.rankingOrderAsc') : t('admin.dashboard.rankingOrderDesc') }}
         </button>
         <div ref="searchContainer" class="relative w-full sm:w-auto">
           <form class="flex items-center gap-2" @submit.prevent="searchUsers">
@@ -190,12 +208,15 @@ import { getAPIKeySpendingRanking } from '@/api/admin/dashboard'
 import RevenueAmount from '@/components/common/RevenueAmount.vue'
 import { revenuePartsFromTotals } from '@/utils/revenue'
 import { searchUsers as findUsers, type SimpleUser } from '@/api/admin/usage'
-import type { APIKeySpendingRankingItem, APIKeySpendingRankingResponse, SpendingRankingSort } from '@/types'
+import type { APIKeyRankingSort, APIKeySpendingRankingItem, APIKeySpendingRankingResponse, RankingOrder } from '@/types'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { cacheReadRate, formatCacheReadRate, formatTokenCount } from '@/utils/usageTokens'
 import { formatRequestBodyBytes, requestBodySizeDetailParams } from '@/utils/requestBodyBytes'
 
 const props = defineProps<{
+  /** Bumped by the dashboard refresh button to reload with unchanged filters. */
+  refreshToken?: number
   startDate?: string
   endDate?: string
   startTime?: string
@@ -203,16 +224,26 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const router = useRouter()
-const rankingLimit = 12
+const rankingLimit = 20
 const ranking = ref<APIKeySpendingRankingResponse | null>(null)
 const loading = ref(false)
 const error = ref(false)
 const selectedUser = ref<SimpleUser | null>(null)
-const sort = ref<SpendingRankingSort>('cost')
-const sortOptions = computed<{ value: SpendingRankingSort; label: string }[]>(() => [
+const sort = ref<APIKeyRankingSort>('cost')
+// Descending by default; ascending shows e.g. the Keys used least but still
+// in use (only Keys with usage in the range are ranked). Kept across sorts.
+const order = ref<RankingOrder>('desc')
+const sortOptions = computed<{ value: APIKeyRankingSort; label: string }[]>(() => [
   { value: 'cost', label: t('admin.dashboard.rankingSortCost') },
-  { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') }
+  { value: 'request_body_bytes', label: t('admin.dashboard.rankingSortBodySize') },
+  { value: 'cache_read_rate', label: t('admin.dashboard.rankingSortCacheReadRate') }
 ])
+const sortBasis = computed(() => {
+  const basis = sort.value === 'cost'
+    ? t('admin.dashboard.keyRankingBasis')
+    : sort.value === 'cache_read_rate' ? t('admin.dashboard.rankingCacheReadRateBasis') : t('admin.dashboard.rankingSortBodySize')
+  return order.value === 'asc' ? `${basis} · ${t('admin.dashboard.rankingOrderAsc')}` : basis
+})
 const userQuery = ref('')
 const userResults = ref<SimpleUser[]>([])
 const searchLoading = ref(false)
@@ -239,7 +270,8 @@ const loadRanking = async () => {
   try {
     const result = await getAPIKeySpendingRanking({
       ...rangeParams(), user_id: selectedUser.value?.id, limit: rankingLimit,
-      sort: sort.value === 'cost' ? undefined : sort.value
+      sort: sort.value === 'cost' ? undefined : sort.value,
+      order: order.value === 'asc' ? 'asc' : undefined
     })
     if (seq === rankingSeq) ranking.value = result
   } catch {
@@ -299,7 +331,7 @@ const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
 const formatCost = (value: number) => value.toFixed(4)
 
 watch(
-  () => [props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value],
+  () => [props.refreshToken, props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value, order.value],
   loadRanking,
   { immediate: true }
 )

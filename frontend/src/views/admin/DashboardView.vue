@@ -285,6 +285,17 @@
                     @change="loadChartData"
                   />
                 </div>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm inline-flex items-center gap-1"
+                  :disabled="refreshing"
+                  :title="t('admin.dashboard.refreshHint')"
+                  data-testid="dashboard-refresh"
+                  @click="refreshAll"
+                >
+                  <Icon name="refresh" size="sm" :class="{ 'animate-spin': refreshing }" />
+                  {{ t('common.refresh') }}
+                </button>
               </div>
             </div>
           </div>
@@ -317,6 +328,7 @@
           </div>
 
           <APIKeySpendingRanking
+            :refresh-token="refreshToken"
             :start-date="startDate"
             :end-date="endDate"
             :start-time="activeRangePreset === 'last24Hours' ? rollingStartTime : undefined"
@@ -427,6 +439,10 @@ const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
 const rankingTotalRevenue = ref<RevenueParts>({})
 let chartLoadSeq = 0
+// Top stats do not depend on the chart range, so a stats snapshot is only
+// superseded by a newer stats snapshot, not by a later range/granularity
+// change (which reloads charts without stats).
+let statsLoadSeq = 0
 let usersTrendLoadSeq = 0
 let rankingLoadSeq = 0
 const rankingLimit = 12
@@ -692,6 +708,8 @@ const onDateRangeChange = (range: {
 // Load data
 const loadDashboardSnapshot = async (includeStats: boolean) => {
   const currentSeq = ++chartLoadSeq
+  const currentStatsSeq = includeStats ? ++statsLoadSeq : 0
+  const ownsStats = () => includeStats && currentStatsSeq === statsLoadSeq
   if (includeStats && !stats.value) {
     loading.value = true
   }
@@ -707,17 +725,18 @@ const loadDashboardSnapshot = async (includeStats: boolean) => {
       include_users_trend: false,
       exclude_hosted: true
     })
-    if (currentSeq !== chartLoadSeq) return
-    if (includeStats && response.stats) {
+    if (ownsStats() && response.stats) {
       stats.value = response.stats
     }
+    if (currentSeq !== chartLoadSeq) return
     trendData.value = response.trend || []
     modelStats.value = response.models || []
   } catch (error) {
-    if (currentSeq !== chartLoadSeq) return
+    if (currentSeq !== chartLoadSeq && !ownsStats()) return
     appStore.showError(t('admin.dashboard.failedToLoad'))
     console.error('Error loading dashboard snapshot:', error)
   } finally {
+    if (ownsStats()) loading.value = false
     if (currentSeq === chartLoadSeq) {
       loading.value = false
       chartsLoading.value = false
@@ -801,6 +820,22 @@ const loadChartData = async () => {
     loadUsersTrend(),
     loadUserSpendingRanking()
   ])
+}
+
+// Reloads every panel (stats, charts, both rankings); a rolling 24h range
+// moves to now. Server snapshot caches keep data for up to 30 seconds.
+const refreshing = ref(false)
+const refreshToken = ref(0)
+const refreshAll = async () => {
+  if (refreshing.value) return
+  refreshing.value = true
+  if (activeRangePreset.value === 'last24Hours') refreshRollingRange()
+  refreshToken.value++
+  try {
+    await loadDashboardStats()
+  } finally {
+    refreshing.value = false
+  }
 }
 
 onMounted(() => {

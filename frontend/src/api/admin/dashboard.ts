@@ -14,6 +14,8 @@ import type {
   UserSpendingRankingResponse,
   APIKeySpendingRankingResponse,
   SpendingRankingSort,
+  APIKeyRankingSort,
+  RankingOrder,
   UserBreakdownItem,
   UsageRequestType,
   AccountPlatform
@@ -269,8 +271,12 @@ export interface UserSpendingRankingParams
   sort?: SpendingRankingSort
 }
 
-export interface APIKeySpendingRankingParams extends UserSpendingRankingParams {
+export interface APIKeySpendingRankingParams extends Omit<UserSpendingRankingParams, 'sort'> {
   user_id?: number
+  /** Omitted or 'cost' keeps the default cost order. */
+  sort?: APIKeyRankingSort
+  /** Omitted or 'desc' keeps descending order. */
+  order?: RankingOrder
 }
 
 export async function getAPIKeySpendingRanking(

@@ -67,14 +67,14 @@ func (s *UsageLogRepoSuite) TestSpendingRankingsRequestBodyBytes() {
 	s.Require().Len(top.Ranking, 1)
 	s.Require().Equal(huge.user.ID, top.Ranking[0].UserID, "size order applies before LIMIT")
 
-	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 1, usagestats.SpendingRankingSortRequestBodyBytes)
+	keys, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, 0, 1, usagestats.SpendingRankingSortRequestBodyBytes, "")
 	s.Require().NoError(err)
 	s.Require().Len(keys.Ranking, 1)
 	s.Require().Equal(huge.key.ID, keys.Ranking[0].APIKeyID)
 	s.Require().Equal(int64(40<<20), *keys.Ranking[0].RequestBodyBytesMax)
 	s.Require().Equal(int64(1), keys.Ranking[0].RequestBodyBytesKnownCount)
 
-	keysByCost, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, unknown.user.ID, 12, usagestats.SpendingRankingSortCost)
+	keysByCost, err := s.repo.GetAPIKeySpendingRanking(s.ctx, dayStart, dayEnd, unknown.user.ID, 12, usagestats.SpendingRankingSortCost, "")
 	s.Require().NoError(err)
 	s.Require().Len(keysByCost.Ranking, 1)
 	s.Require().Nil(keysByCost.Ranking[0].RequestBodyBytesAvg)

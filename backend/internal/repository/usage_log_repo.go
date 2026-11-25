@@ -2481,7 +2481,10 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	if limit <= 0 {
 		limit = 12
 	}
-	order, err := spendingRankingOrderBy(sort, "", "user_id ASC")
+	if sort == usagestats.SpendingRankingSortCacheReadRate {
+		return nil, fmt.Errorf("user ranking does not support sort %q", sort)
+	}
+	order, err := spendingRankingOrderBy(sort, usagestats.SpendingRankingOrderDesc, "", "user_id ASC")
 	if err != nil {
 		return nil, err
 	}

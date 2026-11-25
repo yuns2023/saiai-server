@@ -34,19 +34,51 @@ const subscriptionRevenueAggregates = `COALESCE(SUM(u.actual_cost * g.subscripti
 				COALESCE(SUM(u.actual_cost) FILTER (WHERE u.billing_type = 1 AND u.metered_cost IS NULL), 0) AS subscription_cost,
 				COALESCE(SUM(u.actual_cost) FILTER (WHERE (u.billing_type IS NULL OR u.billing_type NOT IN (0, 1)) AND u.metered_cost IS NULL), 0) AS unclassified_cost`
 
-// spendingRankingOrderBy returns a fixed ORDER BY list for a whitelisted sort.
-// It is applied before LIMIT and again on the final SELECT; idOrder is the
-// stable tie-break. prefix qualifies columns (e.g. "r.").
-func spendingRankingOrderBy(sort usagestats.SpendingRankingSort, prefix, idOrder string) (string, error) {
+// spendingRankingOrderBy returns a fixed ORDER BY list for a whitelisted sort
+// and direction. It is applied before LIMIT and again on the final SELECT;
+// idOrder is the stable tie-break. prefix qualifies columns (e.g. "r.").
+// Descending cost / request size orders are unchanged. Ascending request size
+// puts rows without any known size last; the cache read rate sort needs the
+// input/cache token columns (API Key ranking only), puts an undefined rate
+// last and breaks ties by cost descending.
+func spendingRankingOrderBy(sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder, prefix, idOrder string) (string, error) {
 	costOrder := prefix + "cost DESC, " + prefix + "actual_cost DESC, " + prefix + "tokens DESC, " + idOrder
+	var asc bool
+	switch order {
+	case "", usagestats.SpendingRankingOrderDesc:
+	case usagestats.SpendingRankingOrderAsc:
+		asc = true
+	default:
+		return "", fmt.Errorf("unsupported ranking order %q", order)
+	}
 	switch sort {
 	case "", usagestats.SpendingRankingSortCost:
+		if asc {
+			return prefix + "cost ASC, " + prefix + "actual_cost ASC, " + prefix + "tokens ASC, " + idOrder, nil
+		}
 		return costOrder, nil
 	case usagestats.SpendingRankingSortRequestBodyBytes:
+		if asc {
+			return "(" + prefix + "request_body_bytes_known_count = 0) ASC, " + prefix + "request_body_bytes_total ASC, " +
+				prefix + "request_body_bytes_max ASC NULLS LAST, " + prefix + "cost ASC, " + prefix + "actual_cost ASC, " + prefix + "tokens ASC, " + idOrder, nil
+		}
 		return prefix + "request_body_bytes_total DESC, " + prefix + "request_body_bytes_max DESC NULLS LAST, " + costOrder, nil
+	case usagestats.SpendingRankingSortCacheReadRate:
+		direction := "DESC"
+		if asc {
+			direction = "ASC"
+		}
+		return cacheReadRateExpr(prefix) + " " + direction + " NULLS LAST, " + costOrder, nil
 	default:
 		return "", fmt.Errorf("unsupported ranking sort %q", sort)
 	}
+}
+
+// cacheReadRateExpr mirrors the frontend cacheReadRate(): cache read divided by
+// uncached input + cache read + cache write, output excluded; NULL when there
+// is no input of any kind.
+func cacheReadRateExpr(prefix string) string {
+	return "(" + prefix + "cache_read_tokens::numeric / NULLIF(" + prefix + "input_tokens + " + prefix + "cache_read_tokens + " + prefix + "cache_creation_tokens, 0))"
 }
 
 func nullInt64Ptr(value sql.NullInt64) *int64 {
@@ -62,15 +94,15 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 // Keys are ranked by standard total_cost so hosted Keys (actual_cost is only the
 // hosting service fee, 0 for free hosted groups; total_cost holds the standard
 // price) rank alongside billed Keys.
-func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort) (result *usagestats.APIKeySpendingRankingResponse, err error) {
+func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")
 	}
-	rankedOrder, err := spendingRankingOrderBy(sort, "", "api_key_id ASC, user_id ASC")
+	rankedOrder, err := spendingRankingOrderBy(sort, order, "", "api_key_id ASC, user_id ASC")
 	if err != nil {
 		return nil, err
 	}
-	finalOrder, err := spendingRankingOrderBy(sort, "r.", "r.api_key_id ASC, r.user_id ASC")
+	finalOrder, err := spendingRankingOrderBy(sort, order, "r.", "r.api_key_id ASC, r.user_id ASC")
 	if err != nil {
 		return nil, err
 	}

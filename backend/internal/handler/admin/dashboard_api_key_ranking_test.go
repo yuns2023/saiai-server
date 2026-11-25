@@ -20,14 +20,15 @@ type apiKeyRankingRepoCapture struct {
 	userID    int64
 	limit     int
 	sort      usagestats.SpendingRankingSort
+	order     usagestats.SpendingRankingOrder
 	startTime time.Time
 	endTime   time.Time
 	calls     int
 	err       error
 }
 
-func (r *apiKeyRankingRepoCapture) GetAPIKeySpendingRanking(_ context.Context, start, end time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort) (*usagestats.APIKeySpendingRankingResponse, error) {
-	r.startTime, r.endTime, r.userID, r.limit, r.sort = start, end, userID, limit, sort
+func (r *apiKeyRankingRepoCapture) GetAPIKeySpendingRanking(_ context.Context, start, end time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder) (*usagestats.APIKeySpendingRankingResponse, error) {
+	r.startTime, r.endTime, r.userID, r.limit, r.sort, r.order = start, end, userID, limit, sort, order
 	r.calls++
 	return &usagestats.APIKeySpendingRankingResponse{
 		Ranking: []usagestats.APIKeySpendingRankingItem{{
@@ -111,6 +112,7 @@ func TestAPIKeySpendingRankingRejectsInvalidFilters(t *testing.T) {
 		"start_time=bad&end_time=bad", "start_time=2026-03-01T00:00:00Z",
 		"start_time=2026-03-02T00:00:00Z&end_time=2026-03-01T00:00:00Z",
 		"sort=tokens", "sort=request_body_bytes%3B",
+		"order=up", "sort=cache_read_rate&order=ASC", "order=asc%3B",
 	} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/admin/dashboard/api-keys-ranking?"+query, nil))
@@ -150,6 +152,11 @@ func TestAPIKeySpendingRankingSortIsPartOfCacheKey(t *testing.T) {
 		{"&sort=request_body_bytes", usagestats.SpendingRankingSortRequestBodyBytes, "miss", 2},
 		{"&sort=request_body_bytes", usagestats.SpendingRankingSortRequestBodyBytes, "hit", 2},
 		{"&sort=cost", usagestats.SpendingRankingSortCost, "hit", 2},
+		{"&sort=cost&order=desc", usagestats.SpendingRankingSortCost, "hit", 2},
+		{"&sort=cost&order=asc", usagestats.SpendingRankingSortCost, "miss", 3},
+		{"&sort=cache_read_rate", usagestats.SpendingRankingSortCacheReadRate, "miss", 4},
+		{"&sort=cache_read_rate&order=desc", usagestats.SpendingRankingSortCacheReadRate, "hit", 4},
+		{"&sort=cache_read_rate&order=asc", usagestats.SpendingRankingSortCacheReadRate, "miss", 5},
 	} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, base+tc.query, nil))
@@ -161,5 +168,49 @@ func TestAPIKeySpendingRankingSortIsPartOfCacheKey(t *testing.T) {
 		}
 		require.Contains(t, w.Body.String(), `"request_body_bytes_avg":null`)
 		require.Contains(t, w.Body.String(), `"request_body_bytes_known_count":0`)
+	}
+}
+
+func TestAPIKeySpendingRankingOrderAndPayload(t *testing.T) {
+	repo := &apiKeyRankingRepoCapture{}
+	router := newAPIKeyRankingRouter(t, repo)
+	base := "/admin/dashboard/api-keys-ranking?start_time=2026-03-01T00:00:00Z&end_time=2026-03-02T00:00:00Z&limit=20"
+	for _, tc := range []struct {
+		query string
+		order usagestats.SpendingRankingOrder
+	}{
+		{"&sort=cache_read_rate", usagestats.SpendingRankingOrderDesc},
+		{"&sort=cache_read_rate&order=asc", usagestats.SpendingRankingOrderAsc},
+		{"&order=asc", usagestats.SpendingRankingOrderAsc},
+		{"", usagestats.SpendingRankingOrderDesc},
+	} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, base+tc.query, nil))
+		require.Equal(t, http.StatusOK, w.Code, tc.query)
+		require.Equal(t, tc.order, repo.order, tc.query)
+		require.Equal(t, 20, repo.limit, tc.query)
+		var body struct {
+			Data struct {
+				Sort  string `json:"sort"`
+				Order string `json:"order"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), tc.query)
+		require.Equal(t, string(repo.sort), body.Data.Sort, tc.query)
+		require.Equal(t, string(tc.order), body.Data.Order, tc.query)
+	}
+}
+
+func TestUserSpendingRankingRejectsCacheReadRateSort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/x?sort=cache_read_rate", nil)
+	_, ok := parseRankingSort(c)
+	require.False(t, ok)
+	for query, want := range map[string]bool{"sort=cost&order=asc": false, "order=up": false, "sort=cost&order=desc": true, "": true} {
+		c, _ = gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/x?"+query, nil)
+		_, ok = parseRankingSort(c)
+		require.Equal(t, want, ok, query)
 	}
 }

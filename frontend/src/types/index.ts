@@ -1635,6 +1635,10 @@ export interface UserUsageTrendPoint {
 
 // Ranking order: default standard cost, or total inbound request body bytes.
 export type SpendingRankingSort = 'cost' | 'request_body_bytes'
+// The Key ranking can also rank by token-weighted cache read rate, and every
+// Key ranking sort accepts ascending order (default descending).
+export type APIKeyRankingSort = SpendingRankingSort | 'cache_read_rate'
+export type RankingOrder = 'asc' | 'desc'
 
 // Inbound request size aggregates of a ranking row. Rows without a recorded
 // size are excluded: total 0, avg/max null when nothing is known. avg is the
@@ -1700,6 +1704,8 @@ export interface APIKeySpendingRankingResponse {
   total_unclassified_cost?: number
   start_date: string
   end_date: string
+  sort?: APIKeyRankingSort
+  order?: RankingOrder
 }
 
 export interface ApiKeyUsageTrendPoint {

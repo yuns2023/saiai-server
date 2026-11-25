@@ -10,13 +10,14 @@ const { getRanking, searchUsers, push } = vi.hoisted(() => ({
 vi.mock('@/api/admin/dashboard', () => ({ getAPIKeySpendingRanking: getRanking }))
 vi.mock('@/api/admin/usage', () => ({ searchUsers }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => ({
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => ({
   'admin.dashboard.keyRankingGlobal': 'Global',
+  'admin.dashboard.keyRankingBackToGlobal': 'Back to all Keys',
   'admin.dashboard.keyRankingRetry': 'Retry',
   'admin.dashboard.keyRankingDetails': 'Usage records',
   'admin.dashboard.keyRankingFailed': 'Ranking failed',
   'admin.dashboard.keyRankingSearchFailed': 'Search failed',
-}[key] || key) }) }))
+}[key] || key) + (params ? JSON.stringify(params) : '') }) }))
 
 const range = { startTime: '2026-03-01T10:00:00Z', endTime: '2026-03-02T10:00:00Z' }
 const makeRow = (overrides: Partial<APIKeySpendingRankingItem> = {}): APIKeySpendingRankingItem => ({
@@ -53,7 +54,7 @@ describe('APIKeySpendingRanking', () => {
   })
   afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
-  it('loads global Top 12 and uses all-Key totals for shares and input-only reads for cache efficiency', async () => {
+  it('loads global Top 20 and uses all-Key totals for shares and input-only reads for cache efficiency', async () => {
     getRanking.mockResolvedValue(makeResponse({ ranking: [
       makeRow(),
       makeRow({ api_key_id: 12, key_name: '', input_tokens: 0, cache_creation_tokens: 100, cache_read_tokens: 0 }),
@@ -65,7 +66,7 @@ describe('APIKeySpendingRanking', () => {
 
     expect(getRanking).toHaveBeenCalledWith({
       start_time: range.startTime, end_time: range.endTime,
-      start_date: undefined, end_date: undefined, user_id: undefined, limit: 12
+      start_date: undefined, end_date: undefined, user_id: undefined, limit: 20
     })
     expect(wrapper.text()).toContain('$100.0000') // Standard-cost scope total.
     // Scope revenue = balance $60 + subscription $20 × 0.64.
@@ -93,8 +94,9 @@ describe('APIKeySpendingRanking', () => {
     await wrapper.findAll('tbody td')[1].find('button').trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 7 }))
-    const globalButton = wrapper.findAll('button').find(button => button.text() === 'Global')!
-    await globalButton.trigger('click')
+    const back = wrapper.get('[data-testid="key-ranking-back-global"]')
+    expect(back.text()).toBe('Back to all Keys')
+    await back.trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: undefined }))
   })
@@ -183,11 +185,52 @@ describe('APIKeySpendingRanking', () => {
     await wrapper.find('[data-testid="key-ranking-sort-request_body_bytes"]').trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenCalledTimes(2)
-    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'request_body_bytes', limit: 12 }))
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'request_body_bytes', limit: 20 }))
 
     await wrapper.find('[data-testid="key-ranking-sort-cost"]').trigger('click')
     await flushPromises()
     expect(getRanking).toHaveBeenCalledTimes(3)
     expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
+  })
+
+  it('sorts by cache read rate and toggles ascending order for every sort', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(getRanking.mock.lastCall![0].order).toBeUndefined()
+    const toggle = () => wrapper.get('[data-testid="key-ranking-order"]')
+    expect(toggle().text()).toBe('admin.dashboard.rankingOrderDesc')
+
+    // Ascending cost: Keys used least but still in use.
+    await toggle().trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(2)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ order: 'asc', limit: 20 }))
+    expect(getRanking.mock.lastCall![0].sort).toBeUndefined()
+    expect(toggle().text()).toBe('admin.dashboard.rankingOrderAsc')
+    expect(wrapper.text()).toContain('admin.dashboard.keyRankingBasis · admin.dashboard.rankingOrderAsc')
+
+    // The direction is kept when switching sorts.
+    await wrapper.find('[data-testid="key-ranking-sort-cache_read_rate"]').trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(3)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate', order: 'asc' }))
+    expect(wrapper.text()).toContain('admin.dashboard.rankingCacheReadRateBasis')
+
+    await toggle().trigger('click')
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(4)
+    expect(getRanking.mock.lastCall![0]).toEqual(expect.objectContaining({ sort: 'cache_read_rate' }))
+    expect(getRanking.mock.lastCall![0].order).toBeUndefined()
+    expect(toggle().text()).toBe('admin.dashboard.rankingOrderDesc')
+  })
+
+  it('reloads with unchanged filters when the dashboard refresh token changes', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="key-ranking-back-global"]').exists()).toBe(false)
+    await wrapper.setProps({ refreshToken: 1 })
+    await flushPromises()
+    expect(getRanking).toHaveBeenCalledTimes(2)
+    expect(getRanking.mock.calls[1][0]).toEqual(getRanking.mock.calls[0][0])
   })
 })

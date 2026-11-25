@@ -219,4 +219,67 @@ describe('admin DashboardView', () => {
     expect(wrapper.get('[data-testid="hosted-service-fee-total"]').text()).toBe('admin.dashboard.hostedServiceFee $0.0000')
     wrapper.unmount()
   })
+
+  it('refresh reloads every panel and the Key ranking with the same range', async () => {
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          APIKeySpendingRanking: true,
+          Line: true
+        }
+      }
+    })
+    await flushPromises()
+    const ranking = wrapper.findComponent({ name: 'APIKeySpendingRanking' })
+    const token = ranking.props('refreshToken') as number
+
+    await wrapper.get('[data-testid="dashboard-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(getSnapshotV2).toHaveBeenCalledTimes(2)
+    expect(getSnapshotV2.mock.calls[1][0]).toMatchObject({ include_stats: true })
+    expect(getSnapshotV2.mock.calls[1][0]).toMatchObject({ start_date: getSnapshotV2.mock.calls[0][0].start_date })
+    expect(getUserUsageTrend).toHaveBeenCalledTimes(2)
+    expect(getUserSpendingRanking).toHaveBeenCalledTimes(2)
+    expect(ranking.props('refreshToken')).toBe(token + 1)
+    expect(wrapper.get('[data-testid="dashboard-refresh"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps the refreshed top stats when the range changes before the refresh returns', async () => {
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          APIKeySpendingRanking: true,
+          Line: true
+        }
+      }
+    })
+    await flushPromises()
+
+    let resolveRefresh!: (value: unknown) => void
+    getSnapshotV2.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve }))
+    getSnapshotV2.mockResolvedValueOnce({ trend: [], models: [] }) // range change: charts only
+    await wrapper.get('[data-testid="dashboard-refresh"]').trigger('click')
+    wrapper.findComponent({ name: 'DateRangePicker' }).vm.$emit('change', { startDate: '2026-03-01', endDate: '2026-03-03', preset: null })
+    await flushPromises()
+    expect(getSnapshotV2.mock.calls[2][0]).toMatchObject({ include_stats: false, start_date: '2026-03-01' })
+
+    resolveRefresh({ stats: { ...createDashboardStats(), total_api_keys: 4242 }, trend: [], models: [] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('4242')
+  })
 })

@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -67,7 +68,7 @@ func TestGetAPIKeySpendingRankingScopeAndTotals(t *testing.T) {
 				AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 9, 200, 100, 50, 25, 25, int64(9000), int64(1500), int64(4000), int64(6), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5).
 				AddRow(12, "", 7, "user@example.com", 5.0, 4.25, 5, 0, 300, 0, 0, 100, 200, int64(0), nil, nil, int64(0), 6.4, 3.0, 0.0, 4.25, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
 
-			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, tc.limit, usagestats.SpendingRankingSortCost)
+			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, tc.limit, usagestats.SpendingRankingSortCost, "")
 			require.NoError(t, err)
 			require.Len(t, got.Ranking, 2)
 			require.Equal(t, int64(11), got.Ranking[0].APIKeyID)
@@ -112,7 +113,7 @@ func TestGetAPIKeySpendingRankingEmpty(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
 	mock.ExpectQuery("WITH key_spend AS").WillReturnRows(apiKeyRankingRows())
-	got, err := repo.GetAPIKeySpendingRanking(context.Background(), time.Now(), time.Now(), 0, 12, usagestats.SpendingRankingSortCost)
+	got, err := repo.GetAPIKeySpendingRanking(context.Background(), time.Now(), time.Now(), 0, 12, usagestats.SpendingRankingSortCost, "")
 	require.NoError(t, err)
 	require.NotNil(t, got.Ranking)
 	require.Empty(t, got.Ranking)
@@ -134,7 +135,7 @@ func TestGetAPIKeySpendingRankingFailures(t *testing.T) {
 			case "scan":
 				query.WillReturnRows(apiKeyRankingRows().AddRow("bad ID", "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0))
 			}
-			got, err := repo.GetAPIKeySpendingRanking(context.Background(), time.Now(), time.Now(), 0, 12, usagestats.SpendingRankingSortCost)
+			got, err := repo.GetAPIKeySpendingRanking(context.Background(), time.Now(), time.Now(), 0, 12, usagestats.SpendingRankingSortCost, "")
 			require.Error(t, err)
 			require.Nil(t, got)
 			require.NoError(t, mock.ExpectationsWereMet())
@@ -154,10 +155,56 @@ func TestGetAPIKeySpendingRankingSortByRequestBodyBytes(t *testing.T) {
 		`ORDER BY r.request_body_bytes_total DESC, r.request_body_bytes_max DESC NULLS LAST, r.cost DESC, r.actual_cost DESC, r.tokens DESC, r.api_key_id ASC, r.user_id ASC\s*$`).
 		WithArgs(start, end, 12).
 		WillReturnRows(apiKeyRankingRows())
-	_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 12, usagestats.SpendingRankingSortRequestBodyBytes)
+	_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 12, usagestats.SpendingRankingSortRequestBodyBytes, "")
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 
-	_, err = repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 12, usagestats.SpendingRankingSort("cost; DROP TABLE usage_logs"))
+	_, err = repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 12, usagestats.SpendingRankingSort("cost; DROP TABLE usage_logs"), "")
+	require.Error(t, err)
+}
+
+func TestGetAPIKeySpendingRankingOrders(t *testing.T) {
+	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+	q := regexp.QuoteMeta
+	rate := func(p string) string {
+		return "(" + p + "cache_read_tokens::numeric / NULLIF(" + p + "input_tokens + " + p + "cache_read_tokens + " + p + "cache_creation_tokens, 0))"
+	}
+	costDesc := func(p string) string {
+		return p + "cost DESC, " + p + "actual_cost DESC, " + p + "tokens DESC, " + p + "api_key_id ASC, " + p + "user_id ASC"
+	}
+	for _, tc := range []struct {
+		name  string
+		sort  usagestats.SpendingRankingSort
+		order usagestats.SpendingRankingOrder
+		want  func(p string) string
+	}{
+		{"cost asc", usagestats.SpendingRankingSortCost, usagestats.SpendingRankingOrderAsc, func(p string) string {
+			return p + "cost ASC, " + p + "actual_cost ASC, " + p + "tokens ASC, " + p + "api_key_id ASC, " + p + "user_id ASC"
+		}},
+		{"body asc", usagestats.SpendingRankingSortRequestBodyBytes, usagestats.SpendingRankingOrderAsc, func(p string) string {
+			return "(" + p + "request_body_bytes_known_count = 0) ASC, " + p + "request_body_bytes_total ASC, " + p + "request_body_bytes_max ASC NULLS LAST, " +
+				p + "cost ASC, " + p + "actual_cost ASC, " + p + "tokens ASC, " + p + "api_key_id ASC, " + p + "user_id ASC"
+		}},
+		{"cache desc (default)", usagestats.SpendingRankingSortCacheReadRate, "", func(p string) string { return rate(p) + " DESC NULLS LAST, " + costDesc(p) }},
+		{"cache asc", usagestats.SpendingRankingSortCacheReadRate, usagestats.SpendingRankingOrderAsc, func(p string) string { return rate(p) + " ASC NULLS LAST, " + costDesc(p) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+			mock.ExpectQuery(`(?s)FROM key_spend\s+ORDER BY `+q(tc.want(""))+`\s+LIMIT \$3.*ORDER BY `+q(tc.want("r."))+`\s*$`).
+				WithArgs(start, end, 20).
+				WillReturnRows(apiKeyRankingRows())
+			_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 20, tc.sort, tc.order)
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+
+	db, _ := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+	_, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, 0, 20, usagestats.SpendingRankingSortCost, usagestats.SpendingRankingOrder("asc; DROP TABLE usage_logs"))
+	require.Error(t, err)
+	_, err = repo.GetUserSpendingRanking(context.Background(), start, end, 12, usagestats.SpendingRankingSortCacheReadRate)
 	require.Error(t, err)
 }
