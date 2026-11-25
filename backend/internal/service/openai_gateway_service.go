@@ -2868,7 +2868,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// turn_state_account_mismatch) even on the issuing account. Only OAuth
 		// accounts can be turn-state owners (SelectAccountForNativeCodexRequest);
 		// a native relay forwards the token for its upstream gateway to verify.
-		if account.IsOpenAIOAuth() {
+		if account.IsOpenAIOAuth() && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			if state := strings.TrimSpace(resp.Header.Get(openAIWSTurnStateHeader)); state != "" {
 				s.bindOpenAINativeTurnState(account, getOpenAIUserIDFromContext(c), s.openAISessionHashForTurnState(c, promptCacheKey), state)
 			}
