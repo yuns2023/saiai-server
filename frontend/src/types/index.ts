@@ -1684,6 +1684,8 @@ export interface APIKeySpendingRankingItem extends RequestBodySizeStats, Revenue
   actual_cost: number
   requests: number
   hosted_requests: number
+  sessions: number // 不重复的客户端会话 ID 数
+  requests_without_session: number // 未带会话 ID 的请求数（不计入 sessions）
   tokens: number
   input_tokens: number
   output_tokens: number

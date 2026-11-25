@@ -93,7 +93,9 @@ func nullInt64Ptr(value sql.NullInt64) *int64 {
 // A zero userID selects global usage; a positive ID filters by the recorded user.
 // Keys are ranked by standard total_cost so hosted Keys (actual_cost is only the
 // hosting service fee, 0 for free hosted groups; total_cost holds the standard
-// price) rank alongside billed Keys.
+// price) rank alongside billed Keys. Sessions counts distinct client-reported
+// session IDs (usage_logs.session_id); requests without one are counted
+// separately instead of as a session.
 func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, startTime, endTime time.Time, userID int64, limit int, sort usagestats.SpendingRankingSort, order usagestats.SpendingRankingOrder) (result *usagestats.APIKeySpendingRankingResponse, err error) {
 	if userID < 0 {
 		return nil, fmt.Errorf("user ID must not be negative")
@@ -125,6 +127,8 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 				COALESCE(SUM(u.actual_cost), 0) AS actual_cost,
 				COUNT(*) AS requests,
 				COUNT(*) FILTER (WHERE u.metered_cost IS NOT NULL) AS hosted_requests,
+				COUNT(DISTINCT NULLIF(u.session_id, '')) AS sessions,
+				COUNT(*) - COUNT(NULLIF(u.session_id, '')) AS requests_without_session,
 				COALESCE(SUM(u.input_tokens), 0) AS input_tokens,
 				COALESCE(SUM(u.output_tokens), 0) AS output_tokens,
 				COALESCE(SUM(u.cache_creation_tokens), 0) AS cache_creation_tokens,
@@ -152,7 +156,7 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 			LIMIT $%d
 		)
 		SELECT r.api_key_id, COALESCE(k.name, ''), r.user_id, COALESCE(us.email, ''),
-			r.cost, r.actual_cost, r.requests, r.hosted_requests, r.tokens, r.input_tokens, r.output_tokens,
+			r.cost, r.actual_cost, r.requests, r.hosted_requests, r.sessions, r.requests_without_session, r.tokens, r.input_tokens, r.output_tokens,
 			r.cache_creation_tokens, r.cache_read_tokens,
 			r.request_body_bytes_total, r.request_body_bytes_avg, r.request_body_bytes_max, r.request_body_bytes_known_count,
 			r.subscription_revenue, r.subscription_revenue_unpriced_cost,
@@ -183,7 +187,7 @@ func (r *usageLogRepository) GetAPIKeySpendingRanking(ctx context.Context, start
 		var sizeAvg, sizeMax sql.NullInt64
 		if err = rows.Scan(
 			&item.APIKeyID, &item.KeyName, &item.UserID, &item.Email,
-			&item.Cost, &item.ActualCost, &item.Requests, &item.HostedRequests, &item.Tokens, &item.InputTokens, &item.OutputTokens,
+			&item.Cost, &item.ActualCost, &item.Requests, &item.HostedRequests, &item.Sessions, &item.RequestsWithoutSession, &item.Tokens, &item.InputTokens, &item.OutputTokens,
 			&item.CacheCreationTokens, &item.CacheReadTokens,
 			&item.RequestBodyBytesTotal, &sizeAvg, &sizeMax, &item.RequestBodyBytesKnownCount,
 			&item.SubscriptionRevenue, &item.SubscriptionRevenueUnpricedCost,
