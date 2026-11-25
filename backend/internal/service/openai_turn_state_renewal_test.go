@@ -239,3 +239,70 @@ func TestOpenAINativeTurnStateWSRenewsOnlySuccessfulTurn(t *testing.T) {
 		})
 	}
 }
+
+// The client gets the provider-issued turn state with the response headers.
+// A stream that then ends with an error event must still bind ownership, or
+// Codex's retry of the same turn is rejected even on the issuing account.
+func TestOpenAINativeTurnStateHTTPBindsIssuedStateBeforeStreamFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, promptCacheKey string
+		wantErr                    bool
+	}{
+		{"sse_error_event", "data: {\"type\":\"error\",\"error\":{\"code\":\"server_is_overloaded\",\"type\":\"service_unavailable_error\"}}\n\n", "mock_cache_key", true},
+		{"sse_failed", "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_mock\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\"}}}\n\n", "mock_cache_key", true},
+		{"sse_error_without_session", "data: {\"type\":\"error\",\"error\":{\"code\":\"server_is_overloaded\",\"type\":\"service_unavailable_error\"}}\n\n", "", true},
+		{"sse_success", "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_mock\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", "mock_cache_key", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := auditOAuthPolicyContext("/v1/responses")
+			header := http.Header{"Content-Type": {"text/event-stream"}}
+			header.Set(openAIWSTurnStateHeader, "MOCK_ISSUED_STATE")
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{auditOAuthPolicyResponse(200, header, tc.body)}}
+			svc := auditOAuthPolicyService(upstream)
+			account := auditOAuthPolicyAccount()
+			body := `{"model":"gpt-6.1-sol","stream":true}`
+			if tc.promptCacheKey != "" {
+				body = `{"model":"gpt-6.1-sol","stream":true,"prompt_cache_key":"` + tc.promptCacheKey + `"}`
+			}
+			_, err := svc.Forward(context.Background(), c, account, []byte(body))
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, 1, upstream.callCount)
+
+			// Retry with the token the client actually received.
+			received := rec.Result().Header.Get(openAIWSTurnStateHeader)
+			require.Equal(t, "MOCK_ISSUED_STATE", received)
+			owner, err := svc.getOpenAIWSStateStore().GetTurnStateAccountForUser(context.Background(), 0, received)
+			require.NoError(t, err)
+			require.Equal(t, account.ID, owner)
+			retry := http.Header{}
+			retry.Set(openAIWSTurnStateHeader, received)
+			require.NoError(t, svc.validateOpenAINativeTurnState(context.Background(), account, 0, "", retry))
+			other := *account
+			other.ID++
+			require.True(t, IsOpenAITurnStateAccountMismatch(svc.validateOpenAINativeTurnState(context.Background(), &other, 0, "", retry)))
+		})
+	}
+}
+
+// Only OAuth accounts can own a turn state. A native relay forwards the token
+// to its upstream gateway; registering the relay as owner would make the owner
+// router reject the retry with owner_unavailable.
+func TestOpenAINativeTurnStateHTTPRelayDoesNotBindOwner(t *testing.T) {
+	header := http.Header{"Content-Type": {"text/event-stream"}}
+	header.Set(openAIWSTurnStateHeader, "MOCK_RELAY_STATE")
+	upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{auditOAuthPolicyResponse(200, header,
+		"data: {\"type\":\"error\",\"error\":{\"code\":\"server_is_overloaded\",\"type\":\"service_unavailable_error\"}}\n\n")}}
+	svc := auditOAuthPolicyService(upstream)
+	c, rec := newOfficialCodexRelayContext("/v1/responses")
+	_, err := svc.Forward(context.Background(), c, newOpenAINativeRelayAccount("https://relay.invalid"), []byte(`{"model":"gpt-6.1-sol","stream":true,"prompt_cache_key":"mock_cache_key"}`))
+	require.Error(t, err)
+	require.Equal(t, 1, upstream.callCount)
+	require.Equal(t, "MOCK_RELAY_STATE", rec.Result().Header.Get(openAIWSTurnStateHeader))
+	owner, err := svc.getOpenAIWSStateStore().GetTurnStateAccountForUser(context.Background(), 0, "MOCK_RELAY_STATE")
+	require.NoError(t, err)
+	require.Zero(t, owner)
+}
