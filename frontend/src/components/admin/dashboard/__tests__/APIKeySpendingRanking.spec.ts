@@ -22,7 +22,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<
 const range = { startTime: '2026-03-01T10:00:00Z', endTime: '2026-03-02T10:00:00Z' }
 const makeRow = (overrides: Partial<APIKeySpendingRankingItem> = {}): APIKeySpendingRankingItem => ({
   api_key_id: 11, key_name: 'Work', user_id: 7, email: 'user@example.com',
-  cost: 25, actual_cost: 20, requests: 8, hosted_requests: 0, tokens: 1100,
+  cost: 25, actual_cost: 20, requests: 8, hosted_requests: 0, sessions: 4, requests_without_session: 0, tokens: 1100,
   balance_cost: 20, subscription_cost: 0, subscription_revenue: 0, subscription_revenue_unpriced_cost: 0,
   input_tokens: 10, output_tokens: 1000, cache_creation_tokens: 20, cache_read_tokens: 70,
   ...overrides
@@ -86,6 +86,26 @@ describe('APIKeySpendingRanking', () => {
     expect(rows[1].text()).toContain('0.00%')
     expect(rows[2].text()).toContain('—')
     expect(wrapper.text()).not.toContain('NaN')
+  })
+
+  it('shows distinct sessions with per-session cost and a dash when no session ID was reported', async () => {
+    getRanking.mockResolvedValue(makeResponse({ ranking: [
+      makeRow(),
+      makeRow({ api_key_id: 12, sessions: 0, requests_without_session: 8 }),
+      makeRow({ api_key_id: 13, sessions: 2, requests_without_session: 3 }),
+    ] }))
+    const wrapper = createWrapper()
+    await flushPromises()
+    const cells = wrapper.findAll('[data-testid="key-ranking-sessions"]')
+    expect(cells[0].text()).toContain('4')
+    expect(cells[0].text()).toContain('{"cost":"6.2500"}') // $25 / 4 sessions.
+    expect(cells[0].attributes('title')).toBeUndefined()
+    expect(cells[1].text()).toBe('-')
+    expect(cells[1].attributes('title')).toContain('{"count":"8"}')
+    expect(cells[2].text()).toContain('{"cost":"12.5000"}')
+    expect(cells[2].attributes('title')).toContain('{"count":"3"}')
+    expect(wrapper.text()).not.toContain('NaN')
+    expect(wrapper.text()).not.toContain('Infinity')
   })
 
   it('filters by a clicked user and can return to the global ranking', async () => {

@@ -115,7 +115,7 @@
         · {{ formatTokenCount(ranking.total_tokens) }} Token
       </p>
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[980px] text-sm">
+        <table class="w-full min-w-[1060px] text-sm">
           <thead class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
             <tr>
               <th scope="col" class="pb-2 pr-3 text-left">Key</th>
@@ -124,6 +124,9 @@
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.metricShare') }}</th>
               <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('usage.revenueHint')">{{ t('usage.revenue') }}</th>
               <th scope="col" class="pb-2 pr-3 text-right">{{ t('admin.dashboard.requests') }}</th>
+              <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('admin.dashboard.rankingSessionsHint')">
+                {{ t('admin.dashboard.rankingSessions') }}
+              </th>
               <th scope="col" class="pb-2 pr-3 text-right">Token</th>
               <th scope="col" class="whitespace-nowrap pb-2 pr-3 text-right" :title="t('tokens.cacheReadRateHelp')">
                 {{ t('tokens.cacheReadRate') }}
@@ -173,6 +176,13 @@
                 <RevenueAmount :parts="item" :billed-cost="item.actual_cost" />
               </td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ item.requests.toLocaleString() }}</td>
+              <td class="whitespace-nowrap py-3 pr-3 text-right tabular-nums" :title="sessionsTitle(item)" data-testid="key-ranking-sessions">
+                <template v-if="item.sessions > 0">
+                  {{ item.sessions.toLocaleString() }}
+                  <span class="block text-xs text-gray-400">{{ t('admin.dashboard.rankingSessionAvgCost', { cost: formatCost(item.cost / item.sessions) }) }}</span>
+                </template>
+                <span v-else class="text-gray-400">-</span>
+              </td>
               <td class="py-3 pr-3 text-right tabular-nums">{{ formatTokenCount(item.tokens) }}</td>
               <td class="py-3 pr-3 text-right tabular-nums" :title="tokenBreakdown(item)">
                 {{ formatCacheReadRate(cacheReadRate(item)) }}
@@ -329,6 +339,11 @@ const tokenBreakdown = (item: APIKeySpendingRankingItem) =>
   `${t('usage.in')}: ${item.input_tokens.toLocaleString()} / ${t('usage.cacheWrite')}: ${item.cache_creation_tokens.toLocaleString()} / ${t('usage.cacheRead')}: ${item.cache_read_tokens.toLocaleString()}`
 
 const formatCost = (value: number) => value.toFixed(4)
+
+const sessionsTitle = (item: APIKeySpendingRankingItem) =>
+  item.requests_without_session > 0
+    ? t('admin.dashboard.rankingSessionsWithout', { count: item.requests_without_session.toLocaleString() })
+    : undefined
 
 watch(
   () => [props.refreshToken, props.startDate, props.endDate, props.startTime, props.endTime, selectedUser.value?.id, sort.value, order.value],

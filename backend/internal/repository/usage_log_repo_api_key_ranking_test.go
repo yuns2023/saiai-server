@@ -16,7 +16,7 @@ import (
 
 func apiKeyRankingRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
-		"api_key_id", "key_name", "user_id", "email", "cost", "actual_cost", "requests", "hosted_requests", "tokens",
+		"api_key_id", "key_name", "user_id", "email", "cost", "actual_cost", "requests", "hosted_requests", "sessions", "requests_without_session", "tokens",
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens",
 		"request_body_bytes_total", "request_body_bytes_avg", "request_body_bytes_max", "request_body_bytes_known_count",
 		"subscription_revenue", "subscription_revenue_unpriced_cost",
@@ -65,8 +65,8 @@ func TestGetAPIKeySpendingRankingScopeAndTotals(t *testing.T) {
 				expectation.WithArgs(start, end, tc.want)
 			}
 			expectation.WillReturnRows(apiKeyRankingRows().
-				AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 9, 200, 100, 50, 25, 25, int64(9000), int64(1500), int64(4000), int64(6), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5).
-				AddRow(12, "", 7, "user@example.com", 5.0, 4.25, 5, 0, 300, 0, 0, 100, 200, int64(0), nil, nil, int64(0), 6.4, 3.0, 0.0, 4.25, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
+				AddRow(11, "Work", 7, "user@example.com", 15.0, 0.0, 9, 9, 3, 1, 200, 100, 50, 25, 25, int64(9000), int64(1500), int64(4000), int64(6), 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5).
+				AddRow(12, "", 7, "user@example.com", 5.0, 4.25, 5, 0, 0, 5, 300, 0, 0, 100, 200, int64(0), nil, nil, int64(0), 6.4, 3.0, 0.0, 4.25, 0.0, 60.0, 40.0, 30, 2600, 6.4, 3.0, 20.5, 16.0, 1.5))
 
 			got, err := repo.GetAPIKeySpendingRanking(context.Background(), start, end, tc.userID, tc.limit, usagestats.SpendingRankingSortCost, "")
 			require.NoError(t, err)
@@ -77,6 +77,10 @@ func TestGetAPIKeySpendingRankingScopeAndTotals(t *testing.T) {
 			require.Equal(t, 15.0, got.Ranking[0].Cost) // Hosted Key: zero actual_cost.
 			require.Zero(t, got.Ranking[0].ActualCost)
 			require.Equal(t, int64(9), got.Ranking[0].HostedRequests)
+			require.Equal(t, int64(3), got.Ranking[0].Sessions)
+			require.Equal(t, int64(1), got.Ranking[0].RequestsWithoutSession)
+			require.Zero(t, got.Ranking[1].Sessions) // No session IDs at all.
+			require.Equal(t, int64(5), got.Ranking[1].RequestsWithoutSession)
 			require.Equal(t, 4.25, got.Ranking[1].ActualCost)
 			require.Equal(t, int64(100), got.Ranking[0].InputTokens)
 			require.Equal(t, int64(50), got.Ranking[0].OutputTokens)
@@ -131,9 +135,9 @@ func TestGetAPIKeySpendingRankingFailures(t *testing.T) {
 			case "query":
 				query.WillReturnError(errors.New("unavailable"))
 			case "row":
-				query.WillReturnRows(apiKeyRankingRows().AddRow(1, "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0).RowError(0, errors.New("read failed")))
+				query.WillReturnRows(apiKeyRankingRows().AddRow(1, "", 1, "", 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0).RowError(0, errors.New("read failed")))
 			case "scan":
-				query.WillReturnRows(apiKeyRankingRows().AddRow("bad ID", "", 1, "", 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0))
+				query.WillReturnRows(apiKeyRankingRows().AddRow("bad ID", "", 1, "", 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, nil, nil, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0))
 			}
 			got, err := repo.GetAPIKeySpendingRanking(context.Background(), time.Now(), time.Now(), 0, 12, usagestats.SpendingRankingSortCost, "")
 			require.Error(t, err)
