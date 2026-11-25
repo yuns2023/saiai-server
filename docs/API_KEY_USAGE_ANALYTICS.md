@@ -271,8 +271,17 @@ Each row also carries request size aggregates over records with a known
 total, then the maximum (`NULLS LAST`), then the cost order; the order is
 applied before `limit`. Any other value is rejected with 400.
 
+Key ranking rows (only, not `users-ranking`) also carry `sessions`, the number
+of distinct non-empty `usage_logs.session_id` values of that Key and user, and
+`requests_without_session`, the requests whose session ID is missing or empty
+(not counted as a session). The session ID is the identifier recorded in the
+usage log: Claude Code's metadata/header session, or for OpenAI the session
+header, then the conversation header, then `prompt_cache_key` as an estimate.
+The dashboard shows the count and all-request standard cost divided by
+`sessions`; neither field is sortable.
+
 The dashboard user spending ranking (`users-ranking`) uses the same basis,
-fields, size aggregates and `sort` parameter (its 5-minute cache is also
+fields (except the session fields), size aggregates and `sort` parameter (its 5-minute cache is also
 separated by sort). The dashboard Key/user usage trends pick their Top N by tokens across
 hosted and billed usage. Dashboard platform totals, trends and model
 distribution still exclude hosted rows and report them in the separate hosted

@@ -1526,7 +1526,7 @@ export default {
       rankingOrderDesc: '从高到低 ↓',
       rankingOrderToggle: '切换排序方向',
       rankingSessions: '会话',
-      rankingSessionsHint: '所选时间范围内不重复的客户端会话数（按客户端上报的会话 ID 统计，近似值）。下方为平均每会话标准费用。',
+      rankingSessionsHint: '所选时间范围内的会话数：按使用记录中的会话标识去重（近似值；部分 OpenAI 请求以提示缓存键估算）。下方为全部请求的标准费用 ÷ 会话数。',
       rankingSessionAvgCost: '≈ ${cost}/会话',
       rankingSessionsWithout: '另有 {count} 次请求未带会话 ID，不计入会话数（平均每会话费用含这些请求）',
       rankingBodySize: '请求体',

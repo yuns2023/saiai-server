@@ -1517,7 +1517,7 @@ export default {
       rankingOrderDesc: 'High to low ↓',
       rankingOrderToggle: 'Toggle sort direction',
       rankingSessions: 'Sessions',
-      rankingSessionsHint: 'Distinct client sessions in the selected range (by client-reported session ID, approximate). Below: average standard cost per session.',
+      rankingSessionsHint: 'Sessions in the selected range, deduplicated by the session identifier in usage records (approximate; some OpenAI requests are estimated from the prompt cache key). Below: standard cost of all requests ÷ sessions.',
       rankingSessionAvgCost: '≈ ${cost}/session',
       rankingSessionsWithout: '{count} more requests carried no session ID and are not counted as sessions (the per-session average includes them)',
       rankingBodySize: 'Request body',
