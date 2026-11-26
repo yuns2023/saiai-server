@@ -138,38 +138,33 @@ func TestCodexModelsManifestStaleFallbackClassification(t *testing.T) {
 	}
 }
 
-func TestCodexModelsManifestFallbackInvalidation(t *testing.T) {
+// A 304 only refreshes the age (same account, same ETag, newer fetch); it
+// never deletes the entry.
+func TestCodexModelsManifestFallback304OnlyRefreshes(t *testing.T) {
 	var cache codexModelsManifestFallbackCache
 	key := CodexModelsManifestFallbackKey{GroupID: 45}
 	start := time.Unix(1_800_000_000, 0)
-	later := start.Add(time.Minute)
-	store := func() {
-		cache.remember(key, 19, codexModelsFallbackTestManifest(`{"models":[]}`, `"e1"`, start), start)
-	}
-
-	// The same account naming another validator invalidates the entry; a
-	// different account or an empty ETag does not.
-	store()
-	cache.remember(key, 20, &CodexModelsManifest{ETag: `"e2"`, NotModified: true, fetchedAt: later}, later)
-	cache.remember(key, 19, &CodexModelsManifest{NotModified: true, fetchedAt: later}, later)
-	_, ok := cache.lookup(key, later)
-	require.True(t, ok)
+	later := start.Add(time.Hour)
+	cache.remember(key, 19, codexModelsFallbackTestManifest(`{"models":[]}`, `"e1"`, start), start)
 	cache.remember(key, 19, &CodexModelsManifest{ETag: `"e2"`, NotModified: true, fetchedAt: later}, later)
-	_, ok = cache.lookup(key, later)
-	require.False(t, ok)
-	require.Zero(t, cache.bytes)
+	cache.remember(key, 20, &CodexModelsManifest{ETag: `"e1"`, NotModified: true, fetchedAt: later}, later)
+	cache.remember(key, 19, &CodexModelsManifest{NotModified: true, fetchedAt: later}, later)
+	got, ok := cache.lookup(key, later)
+	require.True(t, ok)
+	require.Equal(t, start, got.StoredAt)
 
-	// "Vary: *" on a 200 or a 304 drops the entry and is never stored.
-	for _, manifest := range []*CodexModelsManifest{
-		{Body: []byte(`{"models":[]}`), Headers: http.Header{"Vary": {"*"}}, fetchedAt: later},
-		{ETag: `"e1"`, NotModified: true, Headers: http.Header{"Vary": {"Accept, *"}}, fetchedAt: later},
-	} {
-		store()
-		cache.remember(key, 19, manifest, later)
-		_, ok = cache.lookup(key, later)
-		require.False(t, ok)
-		require.Zero(t, cache.bytes)
-	}
+	cache.remember(key, 19, &CodexModelsManifest{ETag: `"e1"`, NotModified: true, fetchedAt: later}, later)
+	// An older, out-of-order 304 does not move the age back.
+	cache.remember(key, 19, &CodexModelsManifest{ETag: `"e1"`, NotModified: true, fetchedAt: start.Add(time.Minute)}, later)
+	got, ok = cache.lookup(key, later)
+	require.True(t, ok)
+	require.Equal(t, later, got.StoredAt)
+
+	// An older, out-of-order 200 does not replace a newer entry.
+	cache.remember(key, 20, codexModelsFallbackTestManifest(`{"models":[{"slug":"old"}]}`, `"e0"`, start.Add(time.Minute)), later)
+	got, ok = cache.lookup(key, later)
+	require.True(t, ok)
+	require.Equal(t, `{"models":[]}`, string(got.Body))
 }
 
 func TestCodexModelsManifestFallbackStoresCompactCopy(t *testing.T) {

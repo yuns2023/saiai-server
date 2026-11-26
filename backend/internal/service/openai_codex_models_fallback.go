@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -84,22 +83,13 @@ func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallb
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if codexModelsManifestVariesOnAnything(manifest.Headers) {
-		// "Vary: *" says no later request can be proven equivalent.
-		c.deleteLocked(key)
-		return
-	}
 	if manifest.NotModified {
-		// A 304 confirms the stored body only when the same account validated
-		// the same representation; the same account naming another validator
-		// means the stored body is no longer current.
+		// A 304 only refreshes the age, and only when the same account
+		// validated the same representation. It never deletes: results can
+		// arrive out of order, and a newer 200 replaces the entry anyway.
 		entry, ok := c.entries[key]
 		etag := strings.TrimSpace(manifest.ETag)
-		if !ok || entry.fallback.AccountID != accountID || etag == "" {
-			return
-		}
-		if etag != entry.fallback.ETag {
-			c.deleteLocked(key)
+		if !ok || entry.fallback.AccountID != accountID || etag == "" || etag != entry.fallback.ETag {
 			return
 		}
 		if fetchedAt.After(entry.fallback.StoredAt) {
@@ -212,15 +202,4 @@ func CodexModelsManifestUpstreamStatus(err error) int {
 // value validates etag (weak comparison, "*" matches).
 func CodexModelsManifestETagMatches(ifNoneMatch, etag string) bool {
 	return codexModelsManifestETagMatches(ifNoneMatch, etag)
-}
-
-func codexModelsManifestVariesOnAnything(headers http.Header) bool {
-	for _, value := range headers.Values("Vary") {
-		for _, field := range strings.Split(value, ",") {
-			if strings.TrimSpace(field) == "*" {
-				return true
-			}
-		}
-	}
-	return false
 }

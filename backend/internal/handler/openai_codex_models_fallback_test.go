@@ -364,22 +364,6 @@ func TestCodexModelsStaleFallbackKeysOnVersionForNonOfficialClients(t *testing.T
 	require.Equal(t, "1", rec.Header().Get("X-Saiai-Manifest-Stale"))
 }
 
-// "Vary: *" from upstream drops the stored entry and is not stored.
-func TestCodexModelsStaleFallbackVaryStarInvalidates(t *testing.T) {
-	h, upstream := newCodexModelsFallbackHandler(t)
-	_, _ = serveCodexModelsFallback(h, codexModelsFallbackRequest{})
-	upstream.respond = func(r *http.Request) (*http.Response, error) {
-		resp, err := codexModelsFallbackOK(r)
-		resp.Header.Set("Vary", "Accept-Encoding, *")
-		return resp, err
-	}
-	rec, _ := serveCodexModelsFallback(h, codexModelsFallbackRequest{})
-	require.Equal(t, http.StatusOK, rec.Code)
-	upstream.respond = codexModelsFallbackBodyTimeout
-	rec, _ = serveCodexModelsFallback(h, codexModelsFallbackRequest{})
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-}
-
 // A selection failure other than an exhausted candidate list keeps the
 // original error answer.
 func TestCodexModelsStaleFallbackOnlyAfterCandidatesExhausted(t *testing.T) {
