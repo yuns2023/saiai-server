@@ -33,12 +33,13 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	// unbilled, and model turns keep their own client policy. Non-official
 	// clients are fetched with the gateway's Codex identity instead of theirs.
 	headers := c.Request.Header
-	ifNoneMatch := c.GetHeader("If-None-Match")
+	ifNoneMatch := strings.Join(c.Request.Header.Values("If-None-Match"), ",")
 	filterBlocked := len(apiKey.Group.BlockedModelPatterns) > 0
 	official := pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
 	fallbackKey := service.CodexModelsManifestFallbackKey{GroupID: apiKey.Group.ID, RawQuery: c.Request.URL.RawQuery, Official: official}
 	if official {
 		fallbackKey.Originator = strings.ToLower(strings.TrimSpace(c.GetHeader("originator")))
+		fallbackKey.Version = strings.TrimSpace(c.GetHeader("version"))
 	}
 	if !official || filterBlocked {
 		headers = headers.Clone()
@@ -117,9 +118,10 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 				return
 			}
 		}
-		nativeHeaders := account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay()
-		h.gatewayService.RememberCodexModelsManifestFallback(fallbackKey, account.ID, manifest, nativeHeaders)
-		if nativeHeaders {
+		if !account.IsOpenAICodexNativeRelay() {
+			h.gatewayService.RememberCodexModelsManifestFallback(fallbackKey, account.ID, manifest)
+		}
+		if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
 			h.gatewayService.WriteNativeCodexResponseHeaders(c.Writer.Header(), manifest.Headers)
 		}
 		if filterBlocked {
@@ -147,9 +149,9 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 const codexModelsManifestStaleHeader = "X-Saiai-Manifest-Stale"
 
 // serveCodexModelsManifestFallback answers with the group's last good
-// manifest after upstream unavailability. It reproduces what the success path
-// would write for that answer (native headers, ETag/304, blocked filter with
-// no-store) and records the failed attempt as a recovered upstream error.
+// manifest after upstream unavailability. It keeps the success path's
+// validator semantics (ETag/304; blocked filter with no-store and no ETag) and
+// records the failed attempt as a recovered upstream error.
 func (h *OpenAIGatewayHandler) serveCodexModelsManifestFallback(c *gin.Context, key service.CodexModelsManifestFallbackKey, group *service.Group, filterBlocked bool, ifNoneMatch string, cause error) bool {
 	if !service.IsCodexModelsManifestStaleFallbackError(cause) {
 		return false
@@ -177,22 +179,16 @@ func (h *OpenAIGatewayHandler) serveCodexModelsManifestFallback(c *gin.Context, 
 	service.SetOpsUpstreamError(c, service.CodexModelsManifestUpstreamStatus(cause),
 		"Codex models manifest served from stale fallback: "+infraerrors.Message(cause), "")
 
-	header := c.Writer.Header()
-	if fallback.NativeHeaders {
-		h.gatewayService.WriteNativeCodexResponseHeaders(header, fallback.Headers)
-		// The stored Date belongs to the original answer; let net/http stamp
-		// this response.
-		header.Del("Date")
-	}
-	header.Set(codexModelsManifestStaleHeader, "1")
+	// Only the validator is replayed; request IDs and other upstream headers
+	// of the original answer are not.
+	c.Header(codexModelsManifestStaleHeader, "1")
 	if filterBlocked {
-		header.Del("ETag")
-		header.Del("Last-Modified")
 		c.Header("Cache-Control", "private, no-store")
 		c.Data(http.StatusOK, "application/json", body)
 		return true
 	}
-	if fallback.ETag != "" && !fallback.NativeHeaders {
+	c.Header("Cache-Control", "private, no-cache")
+	if fallback.ETag != "" {
 		c.Header("ETag", fallback.ETag)
 	}
 	if service.CodexModelsManifestETagMatches(ifNoneMatch, fallback.ETag) {

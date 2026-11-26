@@ -89,6 +89,7 @@ type codexModelsFallbackRequest struct {
 	userAgent   string
 	originator  string
 	ifNoneMatch string
+	version     string
 	ctx         context.Context
 }
 
@@ -109,6 +110,9 @@ func serveCodexModelsFallback(h *OpenAIGatewayHandler, req codexModelsFallbackRe
 	}
 	c.Request.Header.Set("User-Agent", ua)
 	c.Request.Header.Set("Originator", originator)
+	if req.version != "" {
+		c.Request.Header.Set("Version", req.version)
+	}
 	if req.ifNoneMatch != "" {
 		c.Request.Header.Set("If-None-Match", req.ifNoneMatch)
 	}
@@ -147,8 +151,9 @@ func TestCodexModelsStaleFallbackAfterSingleAccountTimeout(t *testing.T) {
 	require.Equal(t, codexModelsFallbackManifest, rec.Body.String())
 	require.Equal(t, "1", rec.Header().Get("X-Saiai-Manifest-Stale"))
 	require.Equal(t, `"TEST_ONLY_ETAG"`, rec.Header().Get("ETag"))
-	require.Equal(t, "native", rec.Header().Get("X-Test-Only-Hint"))
-	require.Empty(t, rec.Header().Get("Date"), "the stored Date must not be replayed")
+	require.Empty(t, rec.Header().Get("X-Test-Only-Hint"), "upstream headers of the original answer are not replayed")
+	require.Empty(t, rec.Header().Get("Date"))
+	require.Equal(t, "private, no-cache", rec.Header().Get("Cache-Control"))
 	require.Equal(t, 1, upstream.calls, "the single account is still tried first")
 	requireCodexModelsRecovered(t, c, 0)
 
@@ -236,6 +241,19 @@ func TestCodexModelsStaleFallbackIfNoneMatch(t *testing.T) {
 	rec, _ = serveCodexModelsFallback(h, codexModelsFallbackRequest{ifNoneMatch: `"TEST_ONLY_OTHER"`})
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, codexModelsFallbackManifest, rec.Body.String())
+
+	// A matching tag on a second If-None-Match line still validates.
+	rec = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/backend-api/codex/models?client_version=0.164.0", nil)
+	c.Request.Header.Set("User-Agent", "codex-tui/0.164.0")
+	c.Request.Header.Set("Originator", "codex-tui")
+	c.Request.Header.Add("If-None-Match", `"TEST_ONLY_OTHER"`)
+	c.Request.Header.Add("If-None-Match", `"TEST_ONLY_ETAG"`)
+	group := &service.Group{ID: 45, Platform: service.PlatformOpenAI}
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &group.ID, Group: group})
+	h.CodexModels(c)
+	require.Equal(t, http.StatusNotModified, c.Writer.Status())
 }
 
 func TestCodexModelsStaleFallbackAppliesCurrentBlockedFilter(t *testing.T) {
@@ -264,6 +282,7 @@ func TestCodexModelsStaleFallbackIsolation(t *testing.T) {
 		"other query params":   {query: "client_version=0.164.0&future=1"},
 		"non-official client":  {userAgent: "saiai_daemon_check/0.164.0", originator: "saiai_daemon_check"},
 		"other originator":     {userAgent: "codex_cli_rs/0.164.0", originator: "codex_cli_rs"},
+		"other version header": {version: "0.165.0"},
 	}
 	for name, req := range cases {
 		rec, _ := serveCodexModelsFallback(h, req)

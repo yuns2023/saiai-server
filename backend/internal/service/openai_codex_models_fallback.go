@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -27,30 +26,33 @@ const (
 // CodexModelsManifestFallbackKey identifies requests that the success path
 // would answer with the same manifest. The group's blocked-model filter is
 // not part of the key: the unfiltered body is stored and the current filter
-// is applied when it is served.
+// is applied when it is served. Native relay accounts never use the fallback.
 type CodexModelsManifestFallbackKey struct {
 	GroupID int64
 	// RawQuery is the client's query verbatim (client_version and future
 	// parameters are forwarded upstream as-is).
 	RawQuery string
 	// Official is false when the gateway's discovery identity replaced the
-	// client's; Originator is the (lower-cased) official client originator.
+	// client's. Originator and Version are the official client's forwarded
+	// identity (lower-cased / trimmed).
 	Official   bool
 	Originator string
+	Version    string
 }
 
-// CodexModelsManifestFallback is a stored manifest plus what the success path
-// wrote with it.
+func (k CodexModelsManifestFallbackKey) size() int {
+	return len(k.RawQuery) + len(k.Originator) + len(k.Version) + 64
+}
+
+// CodexModelsManifestFallback is a stored manifest. Only the representation
+// validator is kept: other upstream response headers (request IDs, cache
+// policy, client controls) belong to the original answer and are not replayed.
 type CodexModelsManifestFallback struct {
 	// Body is the manifest before the group's blocked-model filter.
-	Body []byte
-	ETag string
-	// NativeHeaders reports whether Headers are the upstream response headers
-	// written through WriteNativeCodexResponseHeaders (OAuth / native relay).
-	NativeHeaders bool
-	Headers       http.Header
-	AccountID     int64
-	StoredAt      time.Time
+	Body      []byte
+	ETag      string
+	AccountID int64
+	StoredAt  time.Time
 }
 
 type codexModelsManifestFallbackEntry struct {
@@ -65,46 +67,60 @@ type codexModelsManifestFallbackCache struct {
 	nextOrder uint64
 }
 
-func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest, nativeHeaders bool, now time.Time) {
+func codexModelsManifestFallbackEntrySize(key CodexModelsManifestFallbackKey, fallback CodexModelsManifestFallback) int {
+	return key.size() + len(fallback.Body) + len(fallback.ETag)
+}
+
+func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest, now time.Time) {
 	if manifest == nil {
+		return
+	}
+	// Only a real upstream answer counts; a manifest without fetchedAt did
+	// not come from fetchCodexModelsManifestUpstream.
+	fetchedAt := manifest.fetchedAt
+	if fetchedAt.IsZero() || fetchedAt.After(now) {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if manifest.NotModified {
-		// A 304 confirms the stored body only when it validates the same
-		// representation.
-		if entry, ok := c.entries[key]; ok && entry.fallback.ETag != "" && entry.fallback.ETag == strings.TrimSpace(manifest.ETag) {
+		// A 304 confirms the stored body only when the same account validated
+		// the same representation.
+		if entry, ok := c.entries[key]; ok && entry.fallback.AccountID == accountID && entry.fallback.ETag != "" &&
+			entry.fallback.ETag == strings.TrimSpace(manifest.ETag) && fetchedAt.After(entry.fallback.StoredAt) {
 			c.nextOrder++
 			entry.order = c.nextOrder
-			entry.fallback.StoredAt = now
+			entry.fallback.StoredAt = fetchedAt
 		}
 		return
 	}
+	if entry, ok := c.entries[key]; ok && !fetchedAt.After(entry.fallback.StoredAt) {
+		// The API-key cache hands back the same older answer; keep its age.
+		return
+	}
+	c.deleteLocked(key)
 	if len(manifest.Body) == 0 || len(manifest.Body) > codexModelsManifestCacheBodyLimit {
-		c.deleteLocked(key)
 		return
 	}
 	if c.entries == nil {
 		c.entries = make(map[CodexModelsManifestFallbackKey]*codexModelsManifestFallbackEntry)
 	}
-	c.deleteLocked(key)
-	for len(c.entries) > 0 && (len(c.entries) >= codexModelsManifestFallbackMaxEntries || c.bytes+len(manifest.Body) > codexModelsManifestFallbackMaxBytes) {
-		c.evictOldestLocked(now)
-	}
 	fallback := CodexModelsManifestFallback{
-		Body:          manifest.Body,
-		ETag:          strings.TrimSpace(manifest.ETag),
-		NativeHeaders: nativeHeaders,
-		AccountID:     accountID,
-		StoredAt:      now,
+		Body:      manifest.Body,
+		ETag:      strings.TrimSpace(manifest.ETag),
+		AccountID: accountID,
+		StoredAt:  fetchedAt,
 	}
-	if nativeHeaders {
-		fallback.Headers = manifest.Headers.Clone()
+	size := codexModelsManifestFallbackEntrySize(key, fallback)
+	if size > codexModelsManifestFallbackMaxBytes {
+		return
+	}
+	for len(c.entries) > 0 && (len(c.entries) >= codexModelsManifestFallbackMaxEntries || c.bytes+size > codexModelsManifestFallbackMaxBytes) {
+		c.evictOldestLocked(now)
 	}
 	c.nextOrder++
 	c.entries[key] = &codexModelsManifestFallbackEntry{fallback: fallback, order: c.nextOrder}
-	c.bytes += len(manifest.Body)
+	c.bytes += size
 }
 
 func (c *codexModelsManifestFallbackCache) lookup(key CodexModelsManifestFallbackKey, now time.Time) (CodexModelsManifestFallback, bool) {
@@ -118,14 +134,12 @@ func (c *codexModelsManifestFallbackCache) lookup(key CodexModelsManifestFallbac
 		c.deleteLocked(key)
 		return CodexModelsManifestFallback{}, false
 	}
-	fallback := entry.fallback
-	fallback.Headers = fallback.Headers.Clone()
-	return fallback, true
+	return entry.fallback, true
 }
 
 func (c *codexModelsManifestFallbackCache) deleteLocked(key CodexModelsManifestFallbackKey) {
 	if entry, ok := c.entries[key]; ok {
-		c.bytes -= len(entry.fallback.Body)
+		c.bytes -= codexModelsManifestFallbackEntrySize(key, entry.fallback)
 		delete(c.entries, key)
 	}
 }
@@ -148,10 +162,9 @@ func (c *codexModelsManifestFallbackCache) evictOldestLocked(now time.Time) {
 }
 
 // RememberCodexModelsManifestFallback records a manifest the handler is about
-// to serve from a successful upstream answer. nativeHeaders must match whether
-// the success path writes manifest.Headers to the client.
-func (s *OpenAIGatewayService) RememberCodexModelsManifestFallback(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest, nativeHeaders bool) {
-	s.codexModelsManifestFallback.remember(key, accountID, manifest, nativeHeaders, time.Now())
+// to serve from a successful upstream answer (callers skip native relays).
+func (s *OpenAIGatewayService) RememberCodexModelsManifestFallback(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest) {
+	s.codexModelsManifestFallback.remember(key, accountID, manifest, time.Now())
 }
 
 // LookupCodexModelsManifestFallback returns the last good manifest for key if
