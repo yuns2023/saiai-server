@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -33,13 +34,16 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	// unbilled, and model turns keep their own client policy. Non-official
 	// clients are fetched with the gateway's Codex identity instead of theirs.
 	headers := c.Request.Header
-	ifNoneMatch := strings.Join(c.Request.Header.Values("If-None-Match"), ",")
+	ifNoneMatch := c.GetHeader("If-None-Match")
 	filterBlocked := len(apiKey.Group.BlockedModelPatterns) > 0
 	official := pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
-	fallbackKey := service.CodexModelsManifestFallbackKey{GroupID: apiKey.Group.ID, RawQuery: c.Request.URL.RawQuery, Official: official}
+	// Version is forwarded for every client (the discovery identity rewrite
+	// replaces only User-Agent and Originator). The full User-Agent is not
+	// part of the key: it carries per-machine OS/terminal strings.
+	fallbackKey := service.CodexModelsManifestFallbackKey{GroupID: apiKey.Group.ID, RawQuery: c.Request.URL.RawQuery,
+		Official: official, Version: strings.TrimSpace(c.GetHeader("version"))}
 	if official {
 		fallbackKey.Originator = strings.ToLower(strings.TrimSpace(c.GetHeader("originator")))
-		fallbackKey.Version = strings.TrimSpace(c.GetHeader("version"))
 	}
 	if !official || filterBlocked {
 		headers = headers.Clone()
@@ -66,7 +70,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	// example a 401) makes the request surface its error as before.
 	staleEligible := true
 	fail := func(err error) {
-		if staleEligible && h.serveCodexModelsManifestFallback(c, fallbackKey, apiKey.Group, filterBlocked, ifNoneMatch, err) {
+		if staleEligible && h.serveCodexModelsManifestFallback(c, fallbackKey, apiKey.Group, filterBlocked, err) {
 			return
 		}
 		h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
@@ -78,7 +82,13 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 				return
 			}
 			if lastErr != nil {
-				fail(lastErr)
+				// Only an exhausted candidate list ends the retries as an
+				// upstream outage; a selection failure keeps its old answer.
+				if errors.Is(err, service.ErrNoAvailableAccounts) {
+					fail(lastErr)
+				} else {
+					h.errorResponse(c, infraerrors.Code(lastErr), "upstream_error", infraerrors.Message(lastErr))
+				}
 				return
 			}
 			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "No available OpenAI accounts")
@@ -152,7 +162,7 @@ const codexModelsManifestStaleHeader = "X-Saiai-Manifest-Stale"
 // manifest after upstream unavailability. It keeps the success path's
 // validator semantics (ETag/304; blocked filter with no-store and no ETag) and
 // records the failed attempt as a recovered upstream error.
-func (h *OpenAIGatewayHandler) serveCodexModelsManifestFallback(c *gin.Context, key service.CodexModelsManifestFallbackKey, group *service.Group, filterBlocked bool, ifNoneMatch string, cause error) bool {
+func (h *OpenAIGatewayHandler) serveCodexModelsManifestFallback(c *gin.Context, key service.CodexModelsManifestFallbackKey, group *service.Group, filterBlocked bool, cause error) bool {
 	if !service.IsCodexModelsManifestStaleFallbackError(cause) {
 		return false
 	}
@@ -180,18 +190,20 @@ func (h *OpenAIGatewayHandler) serveCodexModelsManifestFallback(c *gin.Context, 
 		"Codex models manifest served from stale fallback: "+infraerrors.Message(cause), "")
 
 	// Only the validator is replayed; request IDs and other upstream headers
-	// of the original answer are not.
+	// of the original answer are not. The stale copy must not be persisted by
+	// clients or intermediaries (upstream itself answers private, no-store).
 	c.Header(codexModelsManifestStaleHeader, "1")
+	c.Header("Cache-Control", "private, no-store")
 	if filterBlocked {
-		c.Header("Cache-Control", "private, no-store")
 		c.Data(http.StatusOK, "application/json", body)
 		return true
 	}
-	c.Header("Cache-Control", "private, no-cache")
 	if fallback.ETag != "" {
 		c.Header("ETag", fallback.ETag)
 	}
-	if service.CodexModelsManifestETagMatches(ifNoneMatch, fallback.ETag) {
+	// The stale answer has no upstream to forward conditions to, so every
+	// If-None-Match line is considered here.
+	if service.CodexModelsManifestETagMatches(strings.Join(c.Request.Header.Values("If-None-Match"), ","), fallback.ETag) {
 		c.Status(http.StatusNotModified)
 		return true
 	}

@@ -137,3 +137,51 @@ func TestCodexModelsManifestStaleFallbackClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexModelsManifestFallbackInvalidation(t *testing.T) {
+	var cache codexModelsManifestFallbackCache
+	key := CodexModelsManifestFallbackKey{GroupID: 45}
+	start := time.Unix(1_800_000_000, 0)
+	later := start.Add(time.Minute)
+	store := func() {
+		cache.remember(key, 19, codexModelsFallbackTestManifest(`{"models":[]}`, `"e1"`, start), start)
+	}
+
+	// The same account naming another validator invalidates the entry; a
+	// different account or an empty ETag does not.
+	store()
+	cache.remember(key, 20, &CodexModelsManifest{ETag: `"e2"`, NotModified: true, fetchedAt: later}, later)
+	cache.remember(key, 19, &CodexModelsManifest{NotModified: true, fetchedAt: later}, later)
+	_, ok := cache.lookup(key, later)
+	require.True(t, ok)
+	cache.remember(key, 19, &CodexModelsManifest{ETag: `"e2"`, NotModified: true, fetchedAt: later}, later)
+	_, ok = cache.lookup(key, later)
+	require.False(t, ok)
+	require.Zero(t, cache.bytes)
+
+	// "Vary: *" on a 200 or a 304 drops the entry and is never stored.
+	for _, manifest := range []*CodexModelsManifest{
+		{Body: []byte(`{"models":[]}`), Headers: http.Header{"Vary": {"*"}}, fetchedAt: later},
+		{ETag: `"e1"`, NotModified: true, Headers: http.Header{"Vary": {"Accept, *"}}, fetchedAt: later},
+	} {
+		store()
+		cache.remember(key, 19, manifest, later)
+		_, ok = cache.lookup(key, later)
+		require.False(t, ok)
+		require.Zero(t, cache.bytes)
+	}
+}
+
+func TestCodexModelsManifestFallbackStoresCompactCopy(t *testing.T) {
+	var cache codexModelsManifestFallbackCache
+	key := CodexModelsManifestFallbackKey{GroupID: 45}
+	now := time.Unix(1_800_000_000, 0)
+	backing := make([]byte, 0, 4096)
+	backing = append(backing, `{"models":[]}`...)
+	cache.remember(key, 19, &CodexModelsManifest{Body: backing, fetchedAt: now}, now)
+	backing[2] = 'X'
+	got, ok := cache.lookup(key, now)
+	require.True(t, ok)
+	require.Equal(t, `{"models":[]}`, string(got.Body))
+	require.Equal(t, len(got.Body), cap(got.Body))
+}

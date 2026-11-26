@@ -23,7 +23,22 @@ const codexModelsFallbackManifest = `{"models":[{"slug":"test-only-new"},{"slug"
 type codexModelsFallbackUpstream struct {
 	respond func(r *http.Request) (*http.Response, error)
 	calls   int
-	repo    *chatGPTAccountRepo
+	repo    *codexModelsFallbackRepo
+}
+
+// codexModelsFallbackRepo can fail account listing after a number of calls.
+type codexModelsFallbackRepo struct {
+	*chatGPTAccountRepo
+	listCalls int
+	failFrom  int
+}
+
+func (r *codexModelsFallbackRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]service.Account, error) {
+	r.listCalls++
+	if r.failFrom > 0 && r.listCalls >= r.failFrom {
+		return nil, errors.New("TEST_ONLY_REPO_FAILURE")
+	}
+	return r.chatGPTAccountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, platform)
 }
 
 type codexModelsFallbackErrReader struct{ err error }
@@ -37,6 +52,7 @@ func codexModelsFallbackOK(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{
 		"Content-Type":     {"application/json"},
 		"Etag":             {`"TEST_ONLY_ETAG"`},
+		"Cache-Control":    {"private, no-store"},
 		"X-Test-Only-Hint": {"native"},
 		"Date":             {"Mon, 01 Jan 2024 00:00:00 GMT"},
 	}, Body: io.NopCloser(strings.NewReader(codexModelsFallbackManifest))}, nil
@@ -77,7 +93,7 @@ func newCodexModelsFallbackHandler(t *testing.T, accounts ...service.Account) (*
 		accounts = []service.Account{codexModelsFallbackAccount(19)}
 	}
 	cfg := &config.Config{}
-	upstream.repo = &chatGPTAccountRepo{account: accounts[0], accounts: accounts}
+	upstream.repo = &codexModelsFallbackRepo{chatGPTAccountRepo: &chatGPTAccountRepo{account: accounts[0], accounts: accounts}}
 	svc := service.NewOpenAIGatewayService(upstream.repo, nil, nil, nil, nil, nil, nil,
 		cfg, nil, nil, nil, nil, nil, nil, nil, nil)
 	return NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil), upstream
@@ -153,7 +169,7 @@ func TestCodexModelsStaleFallbackAfterSingleAccountTimeout(t *testing.T) {
 	require.Equal(t, `"TEST_ONLY_ETAG"`, rec.Header().Get("ETag"))
 	require.Empty(t, rec.Header().Get("X-Test-Only-Hint"), "upstream headers of the original answer are not replayed")
 	require.Empty(t, rec.Header().Get("Date"))
-	require.Equal(t, "private, no-cache", rec.Header().Get("Cache-Control"))
+	require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
 	require.Equal(t, 1, upstream.calls, "the single account is still tried first")
 	requireCodexModelsRecovered(t, c, 0)
 
@@ -317,4 +333,108 @@ func TestCodexModelsStaleFallbackNoAccountsNotMasked(t *testing.T) {
 	require.Zero(t, upstream.calls)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Contains(t, rec.Body.String(), "No available OpenAI accounts")
+}
+
+// Non-official clients keep their Version header upstream, so it is part of
+// the key: a timeout for version B must not serve version A's list.
+func TestCodexModelsStaleFallbackKeysOnVersionForNonOfficialClients(t *testing.T) {
+	h, upstream := newCodexModelsFallbackHandler(t)
+	const bodyA = `{"models":[{"slug":"test-only-version-a"}]}`
+	upstream.respond = func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Version") == "0.164.0-a" {
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(bodyA))}, nil
+		}
+		return codexModelsFallbackBodyTimeout(r)
+	}
+	nonOfficial := codexModelsFallbackRequest{userAgent: "saiai_daemon_check/0.164.0", originator: "saiai_daemon_check"}
+	reqA, reqB := nonOfficial, nonOfficial
+	reqA.version, reqB.version = "0.164.0-a", "0.164.0-b"
+	rec, _ := serveCodexModelsFallback(h, reqA)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, bodyA, rec.Body.String())
+
+	rec, _ = serveCodexModelsFallback(h, reqB)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Stale"))
+
+	upstream.respond = codexModelsFallbackBodyTimeout
+	rec, _ = serveCodexModelsFallback(h, reqA)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, bodyA, rec.Body.String())
+	require.Equal(t, "1", rec.Header().Get("X-Saiai-Manifest-Stale"))
+}
+
+// "Vary: *" from upstream drops the stored entry and is not stored.
+func TestCodexModelsStaleFallbackVaryStarInvalidates(t *testing.T) {
+	h, upstream := newCodexModelsFallbackHandler(t)
+	_, _ = serveCodexModelsFallback(h, codexModelsFallbackRequest{})
+	upstream.respond = func(r *http.Request) (*http.Response, error) {
+		resp, err := codexModelsFallbackOK(r)
+		resp.Header.Set("Vary", "Accept-Encoding, *")
+		return resp, err
+	}
+	rec, _ := serveCodexModelsFallback(h, codexModelsFallbackRequest{})
+	require.Equal(t, http.StatusOK, rec.Code)
+	upstream.respond = codexModelsFallbackBodyTimeout
+	rec, _ = serveCodexModelsFallback(h, codexModelsFallbackRequest{})
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+// A selection failure other than an exhausted candidate list keeps the
+// original error answer.
+func TestCodexModelsStaleFallbackOnlyAfterCandidatesExhausted(t *testing.T) {
+	h, upstream := newCodexModelsFallbackHandler(t)
+	_, _ = serveCodexModelsFallback(h, codexModelsFallbackRequest{})
+	upstream.respond = codexModelsFallbackBodyTimeout
+	upstream.repo.failFrom = upstream.repo.listCalls + 2
+	rec, _ := serveCodexModelsFallback(h, codexModelsFallbackRequest{})
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "read Codex models manifest response")
+	require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Stale"))
+}
+
+type codexModelsFallbackHTTPUpstream struct {
+	requests []*http.Request
+	respond  func(*http.Request) (*http.Response, error)
+}
+
+func (u *codexModelsFallbackHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.requests = append(u.requests, req)
+	return u.respond(req)
+}
+
+func (u *codexModelsFallbackHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ bool) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
+}
+
+// The success path keeps origin/main's If-None-Match semantics: only the
+// first header line is the client's validator.
+func TestCodexModelsSuccessPathUsesFirstIfNoneMatchLine(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &codexModelsFallbackHTTPUpstream{respond: func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Etag": {`"TEST_ONLY_SECOND"`}},
+			Body: io.NopCloser(strings.NewReader(`{"models":[{"slug":"test-only-api-key"}]}`))}, nil
+	}}
+	account := service.Account{ID: 30, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "TEST_ONLY_API_KEY", "base_url": "https://models.example.test/v1"}}
+	cfg := &config.Config{}
+	svc := service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: account}, nil, nil, nil, nil, nil, nil,
+		cfg, nil, nil, nil, nil, nil, upstream, nil, nil)
+	h := NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/backend-api/codex/models?client_version=0.164.0", nil)
+	c.Request.Header.Set("User-Agent", "codex-tui/0.164.0")
+	c.Request.Header.Set("Originator", "codex-tui")
+	c.Request.Header.Add("If-None-Match", `"TEST_ONLY_FIRST"`)
+	c.Request.Header.Add("If-None-Match", `"TEST_ONLY_SECOND"`)
+	group := &service.Group{ID: 45, Platform: service.PlatformOpenAI}
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 3, GroupID: &group.ID, Group: group})
+	h.CodexModels(c)
+	require.Equal(t, http.StatusOK, c.Writer.Status(), rec.Body.String())
+	require.JSONEq(t, `{"models":[{"slug":"test-only-api-key"}]}`, rec.Body.String())
+	require.Equal(t, `"TEST_ONLY_SECOND"`, rec.Header().Get("ETag"))
+	require.Len(t, upstream.requests, 1)
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -83,11 +84,25 @@ func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallb
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if codexModelsManifestVariesOnAnything(manifest.Headers) {
+		// "Vary: *" says no later request can be proven equivalent.
+		c.deleteLocked(key)
+		return
+	}
 	if manifest.NotModified {
 		// A 304 confirms the stored body only when the same account validated
-		// the same representation.
-		if entry, ok := c.entries[key]; ok && entry.fallback.AccountID == accountID && entry.fallback.ETag != "" &&
-			entry.fallback.ETag == strings.TrimSpace(manifest.ETag) && fetchedAt.After(entry.fallback.StoredAt) {
+		// the same representation; the same account naming another validator
+		// means the stored body is no longer current.
+		entry, ok := c.entries[key]
+		etag := strings.TrimSpace(manifest.ETag)
+		if !ok || entry.fallback.AccountID != accountID || etag == "" {
+			return
+		}
+		if etag != entry.fallback.ETag {
+			c.deleteLocked(key)
+			return
+		}
+		if fetchedAt.After(entry.fallback.StoredAt) {
 			c.nextOrder++
 			entry.order = c.nextOrder
 			entry.fallback.StoredAt = fetchedAt
@@ -106,7 +121,9 @@ func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallb
 		c.entries = make(map[CodexModelsManifestFallbackKey]*codexModelsManifestFallbackEntry)
 	}
 	fallback := CodexModelsManifestFallback{
-		Body:      manifest.Body,
+		// An exact-length copy, so the byte budget counts what is retained
+		// (not a larger read buffer behind manifest.Body).
+		Body:      append(make([]byte, 0, len(manifest.Body)), manifest.Body...),
 		ETag:      strings.TrimSpace(manifest.ETag),
 		AccountID: accountID,
 		StoredAt:  fetchedAt,
@@ -195,4 +212,15 @@ func CodexModelsManifestUpstreamStatus(err error) int {
 // value validates etag (weak comparison, "*" matches).
 func CodexModelsManifestETagMatches(ifNoneMatch, etag string) bool {
 	return codexModelsManifestETagMatches(ifNoneMatch, etag)
+}
+
+func codexModelsManifestVariesOnAnything(headers http.Header) bool {
+	for _, value := range headers.Values("Vary") {
+		for _, field := range strings.Split(value, ",") {
+			if strings.TrimSpace(field) == "*" {
+				return true
+			}
+		}
+	}
+	return false
 }
