@@ -512,15 +512,33 @@ func TestCodexModelsGroupCacheBypassedByOtherConditions(t *testing.T) {
 	env := newCodexModelsGroupCacheEnv(t, nil)
 	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
 	for _, name := range []string{"If-Match", "If-Unmodified-Since", "If-Range", "Range"} {
+		// A later fetch time: if the answer were stored it would replace
+		// the entry.
+		env.advance(time.Minute)
+		env.setRespond(codexModelsGroupCacheBody(codexModelsGroupCacheNewManifest, `"TEST_ONLY_NEW"`))
 		before := env.calls.Load()
 		rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{extra: http.Header{name: {"TEST_ONLY"}}})
 		require.Equal(t, http.StatusOK, rec.Code, name)
+		require.Equal(t, codexModelsGroupCacheNewManifest, rec.Body.String(), name)
 		require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Cache"), name)
 		require.Equal(t, before+1, env.calls.Load(), name)
 		require.Equal(t, "TEST_ONLY", env.lastRequest().Header.Get(name), name)
+
+		// The conditional answer did not touch the shared entry.
+		rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		require.Equal(t, "hit", rec.Header().Get("X-Saiai-Manifest-Cache"), name)
+		require.Equal(t, codexModelsFallbackManifest, rec.Body.String(), name)
+		require.Equal(t, before+1, env.calls.Load(), name)
+
+		// A conditional request that times out keeps its original error and
+		// is not answered from the stored entry.
+		env.setRespond(codexModelsFallbackBodyTimeout)
+		rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{extra: http.Header{name: {"TEST_ONLY"}}})
+		require.Equal(t, http.StatusBadGateway, rec.Code, name)
+		require.Contains(t, rec.Body.String(), "read Codex models manifest response", name)
+		require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Stale"), name)
+		require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Cache"), name)
 	}
-	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
-	require.Equal(t, "hit", rec.Header().Get("X-Saiai-Manifest-Cache"))
 }
 
 // When every refresh slot is busy the entry is served without a refresh and

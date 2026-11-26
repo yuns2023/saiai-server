@@ -83,13 +83,14 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		originator:    c.GetHeader("originator"),
 		version:       c.GetHeader("version"),
 		clientVersion: c.Query("client_version"),
+		isolated:      codexModelsManifestHasOtherConditions(c.Request.Header),
 	}
 	ctx := c.Request.Context()
 	// Eligibility is checked on every request (hits included), so a group
 	// that gains a relay or API-key account leaves the cache at once; when it
 	// cannot be decided the request takes the uncached path. Requests with
 	// other preconditions or ranges keep their original semantics.
-	if !codexModelsManifestHasOtherConditions(c.Request.Header) &&
+	if !fetch.isolated &&
 		h.gatewayService.CodexModelsManifestGroupCacheEligibility(ctx, apiKey.GroupID) == service.CodexModelsManifestGroupCacheEligible {
 		if h.serveCodexModelsManifestGroupCache(c, fetch, apiKey.Group, filterBlocked) {
 			return

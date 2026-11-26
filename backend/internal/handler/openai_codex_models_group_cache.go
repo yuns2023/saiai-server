@@ -62,6 +62,9 @@ type codexModelsManifestFetch struct {
 	// accounts of a group-cache eligible group.
 	sharedHeaders http.Header
 	maxSwitches   int
+	// isolated: the request carries preconditions or a range the shared
+	// entry does not represent; it neither stores nor is answered from it.
+	isolated bool
 	// Client identity for ObserveCodexClientVersion.
 	userAgent, originator, version, clientVersion string
 }
@@ -109,7 +112,7 @@ func (h *OpenAIGatewayHandler) fetchCodexModelsManifestWithFailover(ctx context.
 				// Only an exhausted candidate list ends the retries as an
 				// upstream outage; a selection failure keeps its old answer.
 				result.err = lastErr
-				result.fallback = staleEligible && errors.Is(err, service.ErrNoAvailableAccounts)
+				result.fallback = staleEligible && !f.isolated && errors.Is(err, service.ErrNoAvailableAccounts)
 				return result
 			}
 			result.noAccounts = true
@@ -154,7 +157,7 @@ func (h *OpenAIGatewayHandler) fetchCodexModelsManifestWithFailover(ctx context.
 				continue
 			}
 			result.err = err
-			result.fallback = staleEligible
+			result.fallback = staleEligible && !f.isolated
 			return result
 		}
 
@@ -175,6 +178,8 @@ func (h *OpenAIGatewayHandler) fetchCodexModelsManifestWithFailover(ctx context.
 		// entry (it is still answered to this request as before).
 		storable := manifest.NotModified || codexModelsManifestFilterable(manifest.Body)
 		switch {
+		case f.isolated:
+			result.legacy = true
 		case !storable:
 			result.legacy = true
 		case groupCacheable && manifest.GroupCacheable():
