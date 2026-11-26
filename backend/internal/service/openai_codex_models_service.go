@@ -42,11 +42,20 @@ type CodexModelsManifest struct {
 	upstreamETag string
 	NotModified  bool
 	Headers      http.Header
+	// fetchedAt is when an upstream answer produced or revalidated this
+	// manifest; the API-key cache keeps it on cached copies so serving from
+	// that cache does not look like a new upstream success.
+	fetchedAt time.Time
 }
 
 type codexModelsManifestUpstreamError struct {
 	err       error
 	retryable bool
+	// staleFallback marks upstream unavailability (transport failure, 429,
+	// 5xx) for which the handler may serve the last good manifest. Account
+	// decisions (401/403/404) and malformed manifests never qualify.
+	staleFallback  bool
+	upstreamStatus int
 }
 
 func (e *codexModelsManifestUpstreamError) Error() string { return e.err.Error() }
@@ -299,8 +308,10 @@ func (s *OpenAIGatewayService) fetchCachedAPIKeyCodexModelsManifest(ctx context.
 			if cached == nil {
 				return nil, infraerrors.New(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST", "Codex models upstream returned 304 without a cached manifest")
 			}
-			s.codexModelsManifestCache.set(cacheKey, cached, time.Now())
-			return cached, nil
+			revalidated := *cached
+			revalidated.fetchedAt = time.Now()
+			s.codexModelsManifestCache.set(cacheKey, &revalidated, time.Now())
+			return &revalidated, nil
 		}
 		s.codexModelsManifestCache.set(cacheKey, fresh, time.Now())
 		return fresh, nil
@@ -369,14 +380,15 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	}
 	if err != nil {
 		return nil, &codexModelsManifestUpstreamError{
-			err:       infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "Codex models manifest request failed: %v", err),
-			retryable: !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			err:           infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "Codex models manifest request failed: %v", err),
+			retryable:     !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			staleFallback: !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true, Headers: resp.Header.Clone()}, nil
+		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true, Headers: resp.Header.Clone(), fetchedAt: time.Now()}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &codexModelsManifestUpstreamError{
@@ -388,14 +400,21 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			),
 			retryable: !request.nativeRelay && ((!request.useAPIKeyUpstream && resp.StatusCode == http.StatusUnauthorized) ||
 				resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError),
+			// A native relay is another gateway: its 502/508 can carry a
+			// downstream auth failure or relay loop, and it has its own
+			// fallback, so relay errors never qualify.
+			staleFallback: !request.nativeRelay && (resp.StatusCode == http.StatusTooManyRequests ||
+				resp.StatusCode >= http.StatusInternalServerError),
+			upstreamStatus: resp.StatusCode,
 		}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, codexModelsManifestBodyLimit+1))
 	if err != nil {
 		return nil, &codexModelsManifestUpstreamError{
-			err:       infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read Codex models manifest response: %v", err),
-			retryable: !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			err:           infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read Codex models manifest response: %v", err),
+			retryable:     !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			staleFallback: !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
 		}
 	}
 	if int64(len(body)) > codexModelsManifestBodyLimit {
@@ -417,7 +436,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST", "adjust Codex models manifest: %v", err)
 		}
 	}
-	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag"), Headers: resp.Header.Clone()}
+	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag"), Headers: resp.Header.Clone(), fetchedAt: time.Now()}
 	if request.useAPIKeyUpstream && !request.nativeRelay {
 		manifest.upstreamETag = manifest.ETag
 		if !bytes.Equal(body, upstreamBody) {
@@ -605,7 +624,7 @@ func codexModelsManifestForClient(manifest *CodexModelsManifest, ifNoneMatch str
 		return nil
 	}
 	if codexModelsManifestETagMatches(ifNoneMatch, manifest.ETag) {
-		return &CodexModelsManifest{ETag: manifest.ETag, NotModified: true}
+		return &CodexModelsManifest{ETag: manifest.ETag, NotModified: true, fetchedAt: manifest.fetchedAt}
 	}
 	return manifest
 }

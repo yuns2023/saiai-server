@@ -584,11 +584,13 @@ type OpenAIGatewayService struct {
 	responseHeaderFilter     *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle    *accountWriteThrottle
 	codexModelsManifestCache codexModelsManifestCache
-	openAIModelsCatalog      modelsCatalogCache
-	unpricedModelGuard       *openAIUnpricedModelGuard
-	nativeRelayInstanceID    string
-	chatGPTTurnCacheOnce     sync.Once
-	chatGPTTurnMemoryCache   ChatGPTTurnCache
+	// codexModelsManifestFallback is the per-group stale-on-error copy.
+	codexModelsManifestFallback codexModelsManifestFallbackCache
+	openAIModelsCatalog         modelsCatalogCache
+	unpricedModelGuard          *openAIUnpricedModelGuard
+	nativeRelayInstanceID       string
+	chatGPTTurnCacheOnce        sync.Once
+	chatGPTTurnMemoryCache      ChatGPTTurnCache
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
