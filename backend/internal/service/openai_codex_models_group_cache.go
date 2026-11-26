@@ -104,6 +104,14 @@ func (c *codexModelsManifestFallbackCache) forgetGroupCache(key CodexModelsManif
 	}
 }
 
+func (c *codexModelsManifestFallbackCache) deleteRepresentation(key CodexModelsManifestFallbackKey, storedAt time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok := c.entries[key]; ok && entry.fallback.StoredAt.Equal(storedAt) {
+		c.deleteLocked(key)
+	}
+}
+
 func (s *OpenAIGatewayService) codexModelsManifestNow() time.Time {
 	if s != nil && s.codexModelsManifestClock != nil {
 		return s.codexModelsManifestClock()
@@ -133,6 +141,12 @@ func (s *OpenAIGatewayService) MarkCodexModelsManifestRefreshFailed(key CodexMod
 // or API-key account). It stays available to the stale fallback.
 func (s *OpenAIGatewayService) ForgetCodexModelsManifestGroupCache(key CodexModelsManifestFallbackKey, storedAt time.Time) {
 	s.codexModelsManifestFallback.forgetGroupCache(key, storedAt)
+}
+
+// DeleteCodexModelsManifestGroupCache removes the entry stored at storedAt
+// (also from the stale fallback), e.g. after upstream rejected the account.
+func (s *OpenAIGatewayService) DeleteCodexModelsManifestGroupCache(key CodexModelsManifestFallbackKey, storedAt time.Time) {
+	s.codexModelsManifestFallback.deleteRepresentation(key, storedAt)
 }
 
 // CodexModelsManifestGroupCacheEligibility classifies a group for the group

@@ -59,6 +59,9 @@ type OpenAIGatewayHandler struct {
 	// codexModelsManifestFlight coalesces Codex manifest fetches per group
 	// cache key (misses and background refreshes).
 	codexModelsManifestFlight singleflight.Group
+	// codexModelsManifestRefreshSlots bounds concurrent background
+	// manifest refreshes (see codexModelsManifestMaxRefreshes).
+	codexModelsManifestRefreshSlots chan struct{}
 	// codexModelsManifestRefreshDone is called when a background manifest
 	// refresh finishes (tests only).
 	codexModelsManifestRefreshDone func()
@@ -95,6 +98,7 @@ func NewOpenAIGatewayHandler(
 		maxAccountSwitches:      maxAccountSwitches,
 		cfg:                     cfg,
 	}
+	h.codexModelsManifestRefreshSlots = make(chan struct{}, codexModelsManifestMaxRefreshes)
 	if settingService != nil {
 		h.chatGPTBillingSettings = settingService
 		h.codexVersionGate = settingService

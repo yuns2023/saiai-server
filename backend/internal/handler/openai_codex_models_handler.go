@@ -86,15 +86,14 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	// Eligibility is checked on every request (hits included), so a group
-	// that gains a relay or API-key account leaves the cache at once. When it
-	// cannot be decided (listing failed, or no account is schedulable right
-	// now, e.g. the only one is cooling down) existing entries still answer.
-	eligibility := h.gatewayService.CodexModelsManifestGroupCacheEligibility(ctx, apiKey.GroupID)
-	if eligibility != service.CodexModelsManifestGroupCacheIneligible &&
-		h.serveCodexModelsManifestGroupCache(c, fetch, apiKey.Group, filterBlocked) {
-		return
-	}
-	if eligibility == service.CodexModelsManifestGroupCacheEligible {
+	// that gains a relay or API-key account leaves the cache at once; when it
+	// cannot be decided the request takes the uncached path. Requests with
+	// other preconditions or ranges keep their original semantics.
+	if !codexModelsManifestHasOtherConditions(c.Request.Header) &&
+		h.gatewayService.CodexModelsManifestGroupCacheEligibility(ctx, apiKey.GroupID) == service.CodexModelsManifestGroupCacheEligible {
+		if h.serveCodexModelsManifestGroupCache(c, fetch, apiKey.Group, filterBlocked) {
+			return
+		}
 		result, own, ok := h.awaitCodexModelsManifestFlight(ctx, fetch)
 		if !ok {
 			return

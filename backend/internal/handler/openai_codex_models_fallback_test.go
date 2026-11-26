@@ -111,6 +111,7 @@ type codexModelsFallbackRequest struct {
 	ifNoneMatch string
 	version     string
 	ctx         context.Context
+	extra       http.Header
 }
 
 func serveCodexModelsFallback(h *OpenAIGatewayHandler, req codexModelsFallbackRequest) (*httptest.ResponseRecorder, *gin.Context) {
@@ -135,6 +136,9 @@ func serveCodexModelsFallback(h *OpenAIGatewayHandler, req codexModelsFallbackRe
 	}
 	if req.ifNoneMatch != "" {
 		c.Request.Header.Set("If-None-Match", req.ifNoneMatch)
+	}
+	for name, values := range req.extra {
+		c.Request.Header[name] = values
 	}
 	group := req.group
 	if group == nil {

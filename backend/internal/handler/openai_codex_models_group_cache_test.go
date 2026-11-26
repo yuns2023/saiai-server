@@ -494,24 +494,86 @@ func TestCodexModelsGroupCacheLeavesWhenGroupGainsRelay(t *testing.T) {
 	require.Len(t, upstream.requests, 1)
 }
 
-// With no schedulable account right now (e.g. the only one cooling down),
-// a stored entry still answers.
-func TestCodexModelsGroupCacheServesWhenNoAccountSchedulable(t *testing.T) {
+// Without a schedulable account right now (e.g. the only one cooling down)
+// eligibility is unknown and the request takes the uncached path.
+func TestCodexModelsGroupCacheUnknownEligibilityTakesUncachedPath(t *testing.T) {
 	env := newCodexModelsGroupCacheEnv(t, nil)
 	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
 	env.repo.accounts = []service.Account{}
 	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "hit", rec.Header().Get("X-Saiai-Manifest-Cache"))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "No available OpenAI accounts")
+	require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Cache"))
+	require.EqualValues(t, 1, env.calls.Load())
+}
 
-	// After the fresh window the refresh cannot decide; the entry is kept.
+// Preconditions and ranges the cache does not emulate bypass it.
+func TestCodexModelsGroupCacheBypassedByOtherConditions(t *testing.T) {
+	env := newCodexModelsGroupCacheEnv(t, nil)
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	for _, name := range []string{"If-Match", "If-Unmodified-Since", "If-Range", "Range"} {
+		before := env.calls.Load()
+		rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{extra: http.Header{name: {"TEST_ONLY"}}})
+		require.Equal(t, http.StatusOK, rec.Code, name)
+		require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Cache"), name)
+		require.Equal(t, before+1, env.calls.Load(), name)
+		require.Equal(t, "TEST_ONLY", env.lastRequest().Header.Get(name), name)
+	}
+	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	require.Equal(t, "hit", rec.Header().Get("X-Saiai-Manifest-Cache"))
+}
+
+// When every refresh slot is busy the entry is served without a refresh and
+// without throttling it; the next request refreshes.
+func TestCodexModelsGroupCacheRefreshSlotsBounded(t *testing.T) {
+	env := newCodexModelsGroupCacheEnv(t, nil)
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
 	env.advance(21 * time.Minute)
-	rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	for i := 0; i < codexModelsManifestMaxRefreshes; i++ {
+		env.h.codexModelsManifestRefreshSlots <- struct{}{}
+	}
+	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
 	require.Equal(t, "refresh", rec.Header().Get("X-Saiai-Manifest-Cache"))
 	env.waitRefresh(t)
+	require.EqualValues(t, 1, env.calls.Load(), "no refresh while all slots are busy")
+	for i := 0; i < codexModelsManifestMaxRefreshes; i++ {
+		<-env.h.codexModelsManifestRefreshSlots
+	}
+	env.setRespond(codexModelsGroupCacheBody(codexModelsGroupCacheNewManifest, `"TEST_ONLY_NEW"`))
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	env.waitRefresh(t)
+	require.EqualValues(t, 2, env.calls.Load())
 	rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
-	require.Equal(t, codexModelsFallbackManifest, rec.Body.String())
-	require.EqualValues(t, 1, env.calls.Load())
+	require.Equal(t, codexModelsGroupCacheNewManifest, rec.Body.String())
+}
+
+// A refresh that ends with an account rejection (401/403/404) deletes the
+// entry; upstream unavailability keeps it.
+func TestCodexModelsGroupCacheRefreshRejectionDeletesEntry(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound} {
+		env := newCodexModelsGroupCacheEnv(t, nil)
+		_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		env.advance(21 * time.Minute)
+		env.setRespond(codexModelsFallbackStatus(status))
+		rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		require.Equal(t, "refresh", rec.Header().Get("X-Saiai-Manifest-Cache"), status)
+		env.waitRefresh(t)
+		before := env.calls.Load()
+		rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		require.Equal(t, http.StatusBadGateway, rec.Code, status)
+		require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Stale"), "deleted from the fallback too")
+		require.Equal(t, before+1, env.calls.Load(), "the next request is a miss")
+	}
+
+	env := newCodexModelsGroupCacheEnv(t, nil)
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	env.advance(21 * time.Minute)
+	env.setRespond(codexModelsFallbackStatus(http.StatusServiceUnavailable))
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	env.waitRefresh(t)
+	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	require.Equal(t, codexModelsFallbackManifest, rec.Body.String(), "5xx keeps the entry")
+	require.Equal(t, "refresh", rec.Header().Get("X-Saiai-Manifest-Cache"))
 }
 
 // Neither a 304 to the unconditional shared request nor a body the blocked

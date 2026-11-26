@@ -27,6 +27,22 @@ const (
 	codexModelsManifestCacheStale   = "stale"   // stale-on-error fallback
 )
 
+// codexModelsManifestMaxRefreshes caps concurrent background refreshes per
+// process; when all slots are busy the entry is served without starting one
+// (a later request retries).
+const codexModelsManifestMaxRefreshes = 4
+
+// codexModelsManifestHasOtherConditions reports request preconditions or
+// ranges the group cache does not emulate; such requests bypass it.
+func codexModelsManifestHasOtherConditions(header http.Header) bool {
+	for _, name := range []string{"If-Match", "If-Unmodified-Since", "If-Range", "Range"} {
+		if len(header.Values(name)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // codexModelsManifestFlightRetries bounds how often a waiter joins a new
 // shared fetch after the previous leader's client went away.
 const codexModelsManifestFlightRetries = 3
@@ -291,6 +307,13 @@ func (h *OpenAIGatewayHandler) startCodexModelsManifestRefresh(f codexModelsMani
 }
 
 func (h *OpenAIGatewayHandler) refreshCodexModelsManifest(f codexModelsManifestFetch, storedAt time.Time) codexModelsManifestFetchResult {
+	select {
+	case h.codexModelsManifestRefreshSlots <- struct{}{}:
+		defer func() { <-h.codexModelsManifestRefreshSlots }()
+	default:
+		// All refresh slots are busy: skip without throttling the entry.
+		return codexModelsManifestFetchResult{legacy: true}
+	}
 	// Re-check after winning the flight: another refresh may have replaced
 	// the entry or failed (throttle) while this request was being answered.
 	entry, state, due := h.gatewayService.LookupCodexModelsManifestGroupCache(f.key)
@@ -315,8 +338,15 @@ func (h *OpenAIGatewayHandler) refreshCodexModelsManifest(f codexModelsManifestF
 	}
 	result := h.runCodexModelsManifestFlight(ctx, f, "refresh")
 	if !result.shared {
-		// The old entry is kept with its age; retries are throttled.
-		h.gatewayService.MarkCodexModelsManifestRefreshFailed(f.key, storedAt)
+		switch service.CodexModelsManifestUpstreamStatus(result.err) {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			// Upstream rejects the request after the switch loop: stop
+			// serving a list it now refuses.
+			h.gatewayService.DeleteCodexModelsManifestGroupCache(f.key, storedAt)
+		default:
+			// The old entry is kept with its age; retries are throttled.
+			h.gatewayService.MarkCodexModelsManifestRefreshFailed(f.key, storedAt)
+		}
 		if result.err != nil {
 			logger.FromContext(ctx).Warn("openai.codex_models_manifest_refresh_failed",
 				zap.Int64("group_id", f.key.GroupID),
