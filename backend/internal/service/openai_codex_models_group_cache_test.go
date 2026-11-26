@@ -85,7 +85,7 @@ func TestCodexModelsManifestGroupCacheOnlyServesOAuthEntries(t *testing.T) {
 	require.True(t, ok)
 
 	svc.codexModelsManifestGroupCacheOff = true
-	require.False(t, svc.CodexModelsManifestGroupCacheEligible(context.Background(), nil))
+	require.Equal(t, CodexModelsManifestGroupCacheIneligible, svc.CodexModelsManifestGroupCacheEligibility(context.Background(), nil))
 }
 
 func TestCodexModelsManifestGroupCacheHeadersCountInBudget(t *testing.T) {
@@ -103,15 +103,15 @@ func TestCodexModelsManifestGroupCacheEligibility(t *testing.T) {
 	groupID := int64(45)
 	for name, tc := range map[string]struct {
 		accounts []Account
-		want     bool
+		want     CodexModelsManifestGroupCacheEligibility
 	}{
-		"oauth only": {[]Account{oauth}, true},
-		"with key":   {[]Account{oauth, apiKey}, false},
-		"with relay": {[]Account{oauth, relay}, false},
-		"empty":      {[]Account{}, false},
+		"oauth only": {[]Account{oauth}, CodexModelsManifestGroupCacheEligible},
+		"with key":   {[]Account{oauth, apiKey}, CodexModelsManifestGroupCacheIneligible},
+		"with relay": {[]Account{oauth, relay}, CodexModelsManifestGroupCacheIneligible},
+		"empty":      {[]Account{}, CodexModelsManifestGroupCacheUnknown},
 	} {
 		svc := &OpenAIGatewayService{accountRepo: codexModelsGroupCacheTestRepo{accounts: tc.accounts}}
-		require.Equal(t, tc.want, svc.CodexModelsManifestGroupCacheEligible(context.Background(), &groupID), name)
+		require.Equal(t, tc.want, svc.CodexModelsManifestGroupCacheEligibility(context.Background(), &groupID), name)
 	}
 }
 

@@ -135,24 +135,39 @@ func (s *OpenAIGatewayService) ForgetCodexModelsManifestGroupCache(key CodexMode
 	s.codexModelsManifestFallback.forgetGroupCache(key, storedAt)
 }
 
-// CodexModelsManifestGroupCacheEligible reports whether every schedulable
-// account of the group is an OpenAI OAuth account that is not a native relay.
-// Groups with relay or API-key accounts keep the uncached path (relays have
-// their own fallback, API-key upstreams their own cache).
-func (s *OpenAIGatewayService) CodexModelsManifestGroupCacheEligible(ctx context.Context, groupID *int64) bool {
+// CodexModelsManifestGroupCacheEligibility classifies a group for the group
+// cache.
+type CodexModelsManifestGroupCacheEligibility uint8
+
+const (
+	// CodexModelsManifestGroupCacheUnknown: the accounts could not be listed,
+	// or the group has no schedulable account. Nothing is concluded.
+	CodexModelsManifestGroupCacheUnknown CodexModelsManifestGroupCacheEligibility = iota
+	// CodexModelsManifestGroupCacheEligible: every schedulable account is an
+	// OpenAI OAuth account that is not a native relay.
+	CodexModelsManifestGroupCacheEligible
+	// CodexModelsManifestGroupCacheIneligible: the group has a relay or
+	// API-key account and keeps the uncached path.
+	CodexModelsManifestGroupCacheIneligible
+)
+
+// CodexModelsManifestGroupCacheEligibility reports whether the group may use
+// the group cache. Groups with relay or API-key accounts keep the uncached
+// path (relays have their own fallback, API-key upstreams their own cache).
+func (s *OpenAIGatewayService) CodexModelsManifestGroupCacheEligibility(ctx context.Context, groupID *int64) CodexModelsManifestGroupCacheEligibility {
 	if s.codexModelsManifestGroupCacheOff {
-		return false
+		return CodexModelsManifestGroupCacheIneligible
 	}
 	accounts, err := s.listSchedulableAccounts(ctx, groupID)
 	if err != nil || len(accounts) == 0 {
-		return false
+		return CodexModelsManifestGroupCacheUnknown
 	}
 	for i := range accounts {
 		if !accounts[i].IsOpenAIOAuth() || accounts[i].IsOpenAICodexNativeRelay() {
-			return false
+			return CodexModelsManifestGroupCacheIneligible
 		}
 	}
-	return true
+	return CodexModelsManifestGroupCacheEligible
 }
 
 // CodexModelsManifestRefreshBudget bounds a detached refresh: one upstream

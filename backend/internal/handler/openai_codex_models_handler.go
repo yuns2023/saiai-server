@@ -84,11 +84,17 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 		version:       c.GetHeader("version"),
 		clientVersion: c.Query("client_version"),
 	}
-	if h.serveCodexModelsManifestGroupCache(c, fetch, apiKey.Group, filterBlocked) {
+	ctx := c.Request.Context()
+	// Eligibility is checked on every request (hits included), so a group
+	// that gains a relay or API-key account leaves the cache at once. When it
+	// cannot be decided (listing failed, or no account is schedulable right
+	// now, e.g. the only one is cooling down) existing entries still answer.
+	eligibility := h.gatewayService.CodexModelsManifestGroupCacheEligibility(ctx, apiKey.GroupID)
+	if eligibility != service.CodexModelsManifestGroupCacheIneligible &&
+		h.serveCodexModelsManifestGroupCache(c, fetch, apiKey.Group, filterBlocked) {
 		return
 	}
-	ctx := c.Request.Context()
-	if h.gatewayService.CodexModelsManifestGroupCacheEligible(ctx, apiKey.GroupID) {
+	if eligibility == service.CodexModelsManifestGroupCacheEligible {
 		result, own, ok := h.awaitCodexModelsManifestFlight(ctx, fetch)
 		if !ok {
 			return
@@ -125,7 +131,7 @@ func (h *OpenAIGatewayHandler) writeCodexModelsManifestResult(c *gin.Context, ke
 		if own {
 			replay = manifest.Headers
 		}
-		if !h.serveCodexModelsManifestBody(c, manifest.Body, replay, manifest.ETag, group, filterBlocked, codexModelsManifestCacheMiss, false) {
+		if !h.serveCodexModelsManifestBody(c, manifest.Body, replay, group, filterBlocked, codexModelsManifestCacheMiss, false) {
 			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest has an invalid models array")
 		}
 		return

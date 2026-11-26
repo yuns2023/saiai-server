@@ -142,12 +142,25 @@ func (h *OpenAIGatewayHandler) fetchCodexModelsManifestWithFailover(ctx context.
 			return result
 		}
 
+		if groupCacheable && manifest.NotModified {
+			// The shared request carried no validator; a 304 is not an
+			// answer that can be served or stored.
+			result.err = infraerrors.New(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST",
+				"Codex models manifest returned 304 to an unconditional request")
+			return result
+		}
+
 		// Only a version the official upstream just answered for (query and
 		// headers agree) may raise the gateway's own catalog version.
 		if account.IsOpenAIOAuth() && !manifest.NotModified && f.clientVersion == f.version {
 			service.ObserveCodexClientVersion(f.userAgent, f.originator, f.version)
 		}
+		// A body the blocked-model filter rejects must not replace a usable
+		// entry (it is still answered to this request as before).
+		storable := manifest.NotModified || codexModelsManifestFilterable(manifest.Body)
 		switch {
+		case !storable:
+			result.legacy = true
 		case groupCacheable && manifest.GroupCacheable():
 			h.gatewayService.RememberCodexModelsManifestGroupCache(f.key, account.ID, manifest)
 			result.shared = true
@@ -157,6 +170,23 @@ func (h *OpenAIGatewayHandler) fetchCodexModelsManifestWithFailover(ctx context.
 		result.account, result.manifest = account, manifest
 		return result
 	}
+}
+
+func codexModelsManifestFilterable(body []byte) bool {
+	_, err := service.FilterCodexModelsManifest(body, func(string) bool { return false })
+	return err == nil
+}
+
+// codexModelsManifestFreshResult returns the fresh group-cache entry as a
+// shared result, so a fetch that won the flight after another one stored the
+// answer does not ask upstream again.
+func (h *OpenAIGatewayHandler) codexModelsManifestFreshResult(f codexModelsManifestFetch) (codexModelsManifestFetchResult, bool) {
+	entry, state, _ := h.gatewayService.LookupCodexModelsManifestGroupCache(f.key)
+	if state != service.CodexModelsManifestGroupCacheFresh {
+		return codexModelsManifestFetchResult{}, false
+	}
+	return codexModelsManifestFetchResult{shared: true,
+		manifest: &service.CodexModelsManifest{Body: entry.Body, ETag: entry.ETag, Headers: entry.Headers}}, true
 }
 
 // runCodexModelsManifestFlight is the body of a shared fetch. A panic in a
@@ -182,6 +212,9 @@ func (h *OpenAIGatewayHandler) awaitCodexModelsManifestFlight(ctx context.Contex
 		leader := false
 		ch := h.codexModelsManifestFlight.DoChan(f.flightKey(), func() (any, error) {
 			leader = true
+			if fresh, ok := h.codexModelsManifestFreshResult(f); ok {
+				return fresh, nil
+			}
 			return h.runCodexModelsManifestFlight(ctx, f, "miss"), nil
 		})
 		var shared codexModelsManifestFetchResult
@@ -207,7 +240,6 @@ func (h *OpenAIGatewayHandler) awaitCodexModelsManifestFlight(ctx context.Contex
 		}
 		return shared, false, true
 	}
-	own = true
 	result = h.runCodexModelsManifestFlight(ctx, f, "miss")
 	return result, true, !result.canceled
 }
@@ -225,7 +257,7 @@ func (h *OpenAIGatewayHandler) serveCodexModelsManifestGroupCache(c *gin.Context
 	if revalidating {
 		label = codexModelsManifestCacheRefresh
 	}
-	if !h.serveCodexModelsManifestBody(c, entry.Body, entry.Headers, entry.ETag, group, filterBlocked, label, revalidating) {
+	if !h.serveCodexModelsManifestBody(c, entry.Body, entry.Headers, group, filterBlocked, label, revalidating) {
 		return false
 	}
 	if revalidating && refresh {
@@ -242,38 +274,64 @@ func (h *OpenAIGatewayHandler) startCodexModelsManifestRefresh(f codexModelsMani
 	// (validator-free) headers too.
 	f.headers, f.ifNoneMatch = f.sharedHeaders, ""
 	// The result channel is buffered; not reading it does not leak.
-	_ = h.codexModelsManifestFlight.DoChan(f.flightKey(), func() (any, error) {
+	_ = h.codexModelsManifestFlight.DoChan(f.flightKey(), func() (result any, err error) {
 		if done := h.codexModelsManifestRefreshDone; done != nil {
 			defer done()
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), service.CodexModelsManifestRefreshBudget(f.maxSwitches))
-		defer cancel()
-		if !h.gatewayService.CodexModelsManifestGroupCacheEligible(ctx, f.groupID) {
-			// The group gained a relay/API-key account (or has none left):
-			// stop serving the entry as a hit; it stays a stale fallback.
-			h.gatewayService.ForgetCodexModelsManifestGroupCache(f.key, storedAt)
-			return codexModelsManifestFetchResult{legacy: true}, nil
-		}
-		result := h.runCodexModelsManifestFlight(ctx, f, "refresh")
-		if !result.shared {
-			// The old entry is kept with its age; retries are throttled.
-			h.gatewayService.MarkCodexModelsManifestRefreshFailed(f.key, storedAt)
-			if result.err != nil {
-				logger.FromContext(ctx).Warn("openai.codex_models_manifest_refresh_failed",
-					zap.Int64("group_id", f.key.GroupID),
-					zap.Int("upstream_status", service.CodexModelsManifestUpstreamStatus(result.err)),
-					zap.String("cause", infraerrors.Message(result.err)))
+		// A panic escaping a DoChan function would end the process.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				logger.L().Error("openai.codex_models_manifest_refresh_panic",
+					zap.Int64("group_id", f.key.GroupID), zap.Any("panic", recovered))
+				result, err = codexModelsManifestFetchResult{legacy: true}, nil
 			}
-		}
-		return result, nil
+		}()
+		return h.refreshCodexModelsManifest(f, storedAt), nil
 	})
+}
+
+func (h *OpenAIGatewayHandler) refreshCodexModelsManifest(f codexModelsManifestFetch, storedAt time.Time) codexModelsManifestFetchResult {
+	// Re-check after winning the flight: another refresh may have replaced
+	// the entry or failed (throttle) while this request was being answered.
+	entry, state, due := h.gatewayService.LookupCodexModelsManifestGroupCache(f.key)
+	if state != service.CodexModelsManifestGroupCacheRevalidate || !due || !entry.StoredAt.Equal(storedAt) {
+		if fresh, ok := h.codexModelsManifestFreshResult(f); ok {
+			return fresh
+		}
+		return codexModelsManifestFetchResult{legacy: true}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), service.CodexModelsManifestRefreshBudget(f.maxSwitches))
+	defer cancel()
+	switch h.gatewayService.CodexModelsManifestGroupCacheEligibility(ctx, f.groupID) {
+	case service.CodexModelsManifestGroupCacheIneligible:
+		// The group gained a relay/API-key account: stop serving the entry
+		// as a hit; it stays a stale fallback.
+		h.gatewayService.ForgetCodexModelsManifestGroupCache(f.key, storedAt)
+		return codexModelsManifestFetchResult{legacy: true}
+	case service.CodexModelsManifestGroupCacheUnknown:
+		// Listing failed or no account is schedulable: keep the entry.
+		h.gatewayService.MarkCodexModelsManifestRefreshFailed(f.key, storedAt)
+		return codexModelsManifestFetchResult{legacy: true}
+	}
+	result := h.runCodexModelsManifestFlight(ctx, f, "refresh")
+	if !result.shared {
+		// The old entry is kept with its age; retries are throttled.
+		h.gatewayService.MarkCodexModelsManifestRefreshFailed(f.key, storedAt)
+		if result.err != nil {
+			logger.FromContext(ctx).Warn("openai.codex_models_manifest_refresh_failed",
+				zap.Int64("group_id", f.key.GroupID),
+				zap.Int("upstream_status", service.CodexModelsManifestUpstreamStatus(result.err)),
+				zap.String("cause", infraerrors.Message(result.err)))
+		}
+	}
+	return result
 }
 
 // serveCodexModelsManifestBody writes a stored or shared manifest. replay are
 // upstream response headers (passed through the native response policy);
 // the client's If-None-Match (every line, weak compare) is answered locally.
 // It returns false, writing nothing, when the blocked-model filter fails.
-func (h *OpenAIGatewayHandler) serveCodexModelsManifestBody(c *gin.Context, body []byte, replay http.Header, etag string, group *service.Group, filterBlocked bool, label string, revalidating bool) bool {
+func (h *OpenAIGatewayHandler) serveCodexModelsManifestBody(c *gin.Context, body []byte, replay http.Header, group *service.Group, filterBlocked bool, label string, revalidating bool) bool {
 	if filterBlocked {
 		filtered, err := service.FilterCodexModelsManifest(body, group.IsModelBlocked)
 		if err != nil {
@@ -296,9 +354,9 @@ func (h *OpenAIGatewayHandler) serveCodexModelsManifestBody(c *gin.Context, body
 		// itself answers private, no-store).
 		dst.Set("Cache-Control", "private, no-store")
 	}
-	if etag = strings.TrimSpace(etag); etag != "" && dst.Get("ETag") == "" {
-		dst.Set("ETag", etag)
-	}
+	// Validate against the ETag actually sent: the response header policy
+	// may have removed it.
+	etag := strings.TrimSpace(dst.Get("ETag"))
 	if service.CodexModelsManifestETagMatches(strings.Join(c.Request.Header.Values("If-None-Match"), ","), etag) {
 		c.Status(http.StatusNotModified)
 		return true

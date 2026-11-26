@@ -25,6 +25,7 @@ const codexModelsGroupCacheNewManifest = `{"models":[{"slug":"test-only-newer"}]
 type codexModelsGroupCacheEnv struct {
 	h        *OpenAIGatewayHandler
 	svc      *service.OpenAIGatewayService
+	repo     *chatGPTAccountRepo
 	calls    atomic.Int32
 	mu       sync.Mutex
 	respond  func(*http.Request) (*http.Response, error)
@@ -54,7 +55,8 @@ func newCodexModelsGroupCacheEnv(t *testing.T, httpUpstream service.HTTPUpstream
 		accounts = []service.Account{codexModelsFallbackAccount(19)}
 	}
 	cfg := &config.Config{}
-	env.svc = service.NewOpenAIGatewayService(&chatGPTAccountRepo{account: accounts[0], accounts: accounts}, nil, nil, nil, nil, nil, nil,
+	env.repo = &chatGPTAccountRepo{account: accounts[0], accounts: accounts}
+	env.svc = service.NewOpenAIGatewayService(env.repo, nil, nil, nil, nil, nil, nil,
 		cfg, nil, nil, nil, nil, nil, httpUpstream, nil, nil)
 	env.svc.SetCodexModelsManifestClockForTest(func() time.Time { return time.Unix(0, env.now.Load()) })
 	env.h = NewOpenAIGatewayHandler(env.svc, nil, nil, nil, nil, nil, nil, cfg, nil)
@@ -466,4 +468,70 @@ func TestCodexModelsGroupCacheServesDuringOutage(t *testing.T) {
 		}
 	}
 	require.EqualValues(t, 2, env.calls.Load())
+}
+
+func codexModelsGroupCacheRelayAccount() service.Account {
+	return service.Account{ID: 31, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "TEST_ONLY_API_KEY", "base_url": "https://models.example.test/v1"},
+		Extra:       map[string]any{"openai_upstream_protocol": service.OpenAIUpstreamProtocolCodexNativeRelayV1}}
+}
+
+// A warm group that gains a relay account leaves the cache on the next
+// request, even inside the fresh window.
+func TestCodexModelsGroupCacheLeavesWhenGroupGainsRelay(t *testing.T) {
+	upstream := &codexModelsFallbackHTTPUpstream{respond: func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{},
+			Body: io.NopCloser(strings.NewReader(`{"models":[{"slug":"test-only-relay"}]}`))}, nil
+	}}
+	env := newCodexModelsGroupCacheEnv(t, upstream)
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	env.repo.accounts = []service.Account{codexModelsGroupCacheRelayAccount()}
+	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Empty(t, rec.Header().Get("X-Saiai-Manifest-Cache"))
+	require.JSONEq(t, `{"models":[{"slug":"test-only-relay"}]}`, rec.Body.String())
+	require.Len(t, upstream.requests, 1)
+}
+
+// With no schedulable account right now (e.g. the only one cooling down),
+// a stored entry still answers.
+func TestCodexModelsGroupCacheServesWhenNoAccountSchedulable(t *testing.T) {
+	env := newCodexModelsGroupCacheEnv(t, nil)
+	_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	env.repo.accounts = []service.Account{}
+	rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "hit", rec.Header().Get("X-Saiai-Manifest-Cache"))
+
+	// After the fresh window the refresh cannot decide; the entry is kept.
+	env.advance(21 * time.Minute)
+	rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	require.Equal(t, "refresh", rec.Header().Get("X-Saiai-Manifest-Cache"))
+	env.waitRefresh(t)
+	rec, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+	require.Equal(t, codexModelsFallbackManifest, rec.Body.String())
+	require.EqualValues(t, 1, env.calls.Load())
+}
+
+// Neither a 304 to the unconditional shared request nor a body the blocked
+// filter rejects replaces a usable entry.
+func TestCodexModelsGroupCacheKeepsEntryOnUnusableRefresh(t *testing.T) {
+	for name, respond := range map[string]func(*http.Request) (*http.Response, error){
+		"304": func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusNotModified, Header: http.Header{"Etag": {`"TEST_ONLY_ETAG"`}}, Body: http.NoBody}, nil
+		},
+		"unfilterable": codexModelsGroupCacheBody(`{"models":[1]}`, `"TEST_ONLY_BAD"`),
+	} {
+		env := newCodexModelsGroupCacheEnv(t, nil)
+		_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		env.advance(21 * time.Minute)
+		env.setRespond(respond)
+		_, _ = serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		env.waitRefresh(t)
+		rec, _ := serveCodexModelsFallback(env.h, codexModelsFallbackRequest{})
+		require.Equal(t, codexModelsFallbackManifest, rec.Body.String(), name)
+		require.Equal(t, "refresh", rec.Header().Get("X-Saiai-Manifest-Cache"), name)
+		env.requireNoRefresh(t)
+	}
 }
