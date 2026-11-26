@@ -47,6 +47,11 @@ type CodexModelsManifest struct {
 type codexModelsManifestUpstreamError struct {
 	err       error
 	retryable bool
+	// staleFallback marks upstream unavailability (transport failure, 429,
+	// 5xx) for which the handler may serve the last good manifest. Account
+	// decisions (401/403/404) and malformed manifests never qualify.
+	staleFallback  bool
+	upstreamStatus int
 }
 
 func (e *codexModelsManifestUpstreamError) Error() string { return e.err.Error() }
@@ -369,8 +374,9 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	}
 	if err != nil {
 		return nil, &codexModelsManifestUpstreamError{
-			err:       infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "Codex models manifest request failed: %v", err),
-			retryable: !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			err:           infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "Codex models manifest request failed: %v", err),
+			retryable:     !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			staleFallback: isRetryableCodexModelsManifestTransportError(err),
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -388,14 +394,17 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			),
 			retryable: !request.nativeRelay && ((!request.useAPIKeyUpstream && resp.StatusCode == http.StatusUnauthorized) ||
 				resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError),
+			staleFallback:  resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError,
+			upstreamStatus: resp.StatusCode,
 		}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, codexModelsManifestBodyLimit+1))
 	if err != nil {
 		return nil, &codexModelsManifestUpstreamError{
-			err:       infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read Codex models manifest response: %v", err),
-			retryable: !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			err:           infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_FAILED", "read Codex models manifest response: %v", err),
+			retryable:     !request.nativeRelay && isRetryableCodexModelsManifestTransportError(err),
+			staleFallback: isRetryableCodexModelsManifestTransportError(err),
 		}
 	}
 	if int64(len(body)) > codexModelsManifestBodyLimit {
