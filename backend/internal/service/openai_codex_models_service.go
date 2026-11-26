@@ -46,6 +46,9 @@ type CodexModelsManifest struct {
 	// manifest; the API-key cache keeps it on cached copies so serving from
 	// that cache does not look like a new upstream success.
 	fetchedAt time.Time
+	// groupCacheable marks a direct answer of an OpenAI OAuth account (not a
+	// native relay, not an API-key upstream or its cache).
+	groupCacheable bool
 }
 
 type codexModelsManifestUpstreamError struct {
@@ -388,7 +391,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true, Headers: resp.Header.Clone(), fetchedAt: time.Now()}, nil
+		return &CodexModelsManifest{ETag: resp.Header.Get("ETag"), NotModified: true, Headers: resp.Header.Clone(), fetchedAt: s.codexModelsManifestNow()}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &codexModelsManifestUpstreamError{
@@ -436,7 +439,8 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST", "adjust Codex models manifest: %v", err)
 		}
 	}
-	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag"), Headers: resp.Header.Clone(), fetchedAt: time.Now()}
+	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag"), Headers: resp.Header.Clone(), fetchedAt: s.codexModelsManifestNow(),
+		groupCacheable: !request.useAPIKeyUpstream && !request.nativeRelay}
 	if request.useAPIKeyUpstream && !request.nativeRelay {
 		manifest.upstreamETag = manifest.ETag
 		if !bytes.Equal(body, upstreamBody) {

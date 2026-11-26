@@ -586,11 +586,17 @@ type OpenAIGatewayService struct {
 	codexModelsManifestCache codexModelsManifestCache
 	// codexModelsManifestFallback is the per-group stale-on-error copy.
 	codexModelsManifestFallback codexModelsManifestFallbackCache
-	openAIModelsCatalog         modelsCatalogCache
-	unpricedModelGuard          *openAIUnpricedModelGuard
-	nativeRelayInstanceID       string
-	chatGPTTurnCacheOnce        sync.Once
-	chatGPTTurnMemoryCache      ChatGPTTurnCache
+	// codexModelsManifestClock overrides time.Now for the manifest caches
+	// (tests only; nil in production).
+	codexModelsManifestClock func() time.Time
+	// codexModelsManifestGroupCacheOff disables the group fresh cache
+	// (tests of the stale-on-error fallback only).
+	codexModelsManifestGroupCacheOff bool
+	openAIModelsCatalog              modelsCatalogCache
+	unpricedModelGuard               *openAIUnpricedModelGuard
+	nativeRelayInstanceID            string
+	chatGPTTurnCacheOnce             sync.Once
+	chatGPTTurnMemoryCache           ChatGPTTurnCache
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

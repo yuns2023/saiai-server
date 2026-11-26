@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -53,11 +54,21 @@ type CodexModelsManifestFallback struct {
 	ETag      string
 	AccountID int64
 	StoredAt  time.Time
+	// Headers are the entry-level response headers the group cache replays
+	// on hits (see codexModelsManifestEntryHeaderNames). The stale fallback
+	// replays only ETag. Callers must not modify the map.
+	Headers http.Header
+	// GroupCacheable marks an answer from an OpenAI OAuth (non-relay)
+	// account; only those entries are served as group-cache hits.
+	GroupCacheable bool
 }
 
 type codexModelsManifestFallbackEntry struct {
 	fallback CodexModelsManifestFallback
 	order    uint64
+	// refreshFailedAt is the last failed background refresh of this
+	// representation; it throttles refresh attempts and never extends age.
+	refreshFailedAt time.Time
 }
 
 type codexModelsManifestFallbackCache struct {
@@ -68,7 +79,14 @@ type codexModelsManifestFallbackCache struct {
 }
 
 func codexModelsManifestFallbackEntrySize(key CodexModelsManifestFallbackKey, fallback CodexModelsManifestFallback) int {
-	return key.size() + len(fallback.Body) + len(fallback.ETag)
+	size := key.size() + len(fallback.Body) + len(fallback.ETag)
+	for name, values := range fallback.Headers {
+		size += len(name)
+		for _, value := range values {
+			size += len(value)
+		}
+	}
+	return size
 }
 
 func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest, now time.Time) {
@@ -113,10 +131,12 @@ func (c *codexModelsManifestFallbackCache) remember(key CodexModelsManifestFallb
 	fallback := CodexModelsManifestFallback{
 		// An exact-length copy, so the byte budget counts what is retained
 		// (not a larger read buffer behind manifest.Body).
-		Body:      append(make([]byte, 0, len(manifest.Body)), manifest.Body...),
-		ETag:      strings.TrimSpace(manifest.ETag),
-		AccountID: accountID,
-		StoredAt:  fetchedAt,
+		Body:           append(make([]byte, 0, len(manifest.Body)), manifest.Body...),
+		ETag:           strings.TrimSpace(manifest.ETag),
+		AccountID:      accountID,
+		StoredAt:       fetchedAt,
+		Headers:        codexModelsManifestEntryHeaders(manifest.Headers),
+		GroupCacheable: manifest.groupCacheable,
 	}
 	size := codexModelsManifestFallbackEntrySize(key, fallback)
 	if size > codexModelsManifestFallbackMaxBytes {
@@ -170,14 +190,26 @@ func (c *codexModelsManifestFallbackCache) evictOldestLocked(now time.Time) {
 
 // RememberCodexModelsManifestFallback records a manifest the handler is about
 // to serve from a successful upstream answer (callers skip native relays).
+// The entry is stored for the stale fallback only, never as a group-cache hit.
 func (s *OpenAIGatewayService) RememberCodexModelsManifestFallback(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest) {
-	s.codexModelsManifestFallback.remember(key, accountID, manifest, time.Now())
+	if manifest != nil && manifest.groupCacheable {
+		copied := *manifest
+		copied.groupCacheable = false
+		manifest = &copied
+	}
+	s.codexModelsManifestFallback.remember(key, accountID, manifest, s.codexModelsManifestNow())
+}
+
+// RememberCodexModelsManifestGroupCache records an unconditional OAuth
+// answer fetched for a group-cache eligible group; it is served as a hit.
+func (s *OpenAIGatewayService) RememberCodexModelsManifestGroupCache(key CodexModelsManifestFallbackKey, accountID int64, manifest *CodexModelsManifest) {
+	s.codexModelsManifestFallback.remember(key, accountID, manifest, s.codexModelsManifestNow())
 }
 
 // LookupCodexModelsManifestFallback returns the last good manifest for key if
 // it is younger than the fallback age limit.
 func (s *OpenAIGatewayService) LookupCodexModelsManifestFallback(key CodexModelsManifestFallbackKey) (CodexModelsManifestFallback, bool) {
-	return s.codexModelsManifestFallback.lookup(key, time.Now())
+	return s.codexModelsManifestFallback.lookup(key, s.codexModelsManifestNow())
 }
 
 // IsCodexModelsManifestStaleFallbackError reports whether err is upstream
