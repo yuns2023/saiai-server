@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -20,6 +19,11 @@ import (
 // separate from request admission: the selected upstream account remains the
 // authority for what it advertises (minus the group's blocked models), while
 // unknown model IDs can still be sent to /v1/responses and decided there.
+//
+// Groups whose schedulable accounts are all OpenAI OAuth (no native relay, no
+// API-key upstream) share one cached answer per fallback key: fresh for
+// 20 minutes from the upstream fetch, then served while one background
+// refresh runs, up to the stale fallback's maximum age.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey.Group == nil {
@@ -33,7 +37,9 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	// Discovery is open to every valid key of the group: it is read-only and
 	// unbilled, and model turns keep their own client policy. Non-official
 	// clients are fetched with the gateway's Codex identity instead of theirs.
-	headers := c.Request.Header
+	// The headers are a copy: shared and background fetches may outlive the
+	// request.
+	headers := c.Request.Header.Clone()
 	ifNoneMatch := c.GetHeader("If-None-Match")
 	filterBlocked := len(apiKey.Group.BlockedModelPatterns) > 0
 	official := pkgopenai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator"))
@@ -45,112 +51,116 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	if official {
 		fallbackKey.Originator = strings.ToLower(strings.TrimSpace(c.GetHeader("originator")))
 	}
-	if !official || filterBlocked {
-		headers = headers.Clone()
-		if !official {
-			service.ApplyCodexModelsDiscoveryIdentity(headers, c.Query("client_version"))
-		}
-		if filterBlocked {
-			// A filtered catalog must not be revalidated against the upstream
-			// validator, otherwise a blacklist change would keep a stale list.
-			headers.Del("If-None-Match")
-			headers.Del("If-Modified-Since")
-			ifNoneMatch = ""
-		}
+	if !official {
+		service.ApplyCodexModelsDiscoveryIdentity(headers, c.Query("client_version"))
 	}
+	if filterBlocked {
+		// A filtered catalog must not be revalidated against the upstream
+		// validator, otherwise a blacklist change would keep a stale list.
+		headers.Del("If-None-Match")
+		headers.Del("If-Modified-Since")
+		ifNoneMatch = ""
+	}
+	// Shared answers are fetched unconditionally; the client's validator is
+	// compared locally.
+	sharedHeaders := headers.Clone()
+	sharedHeaders.Del("If-None-Match")
+	sharedHeaders.Del("If-Modified-Since")
 
 	maxSwitches := h.maxAccountSwitches
 	if maxSwitches <= 0 {
 		maxSwitches = 3
 	}
-	excluded := make(map[int64]struct{})
-	var lastErr error
-	// The stale fallback applies only when every attempt of this request
-	// failed with upstream unavailability; one account-level decision (for
-	// example a 401) makes the request surface its error as before.
-	staleEligible := true
-	fail := func(err error) {
-		if staleEligible && h.serveCodexModelsManifestFallback(c, fallbackKey, apiKey.Group, filterBlocked, err) {
-			return
-		}
-		h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
+	fetch := codexModelsManifestFetch{
+		key:           fallbackKey,
+		groupID:       apiKey.GroupID,
+		rawQuery:      c.Request.URL.RawQuery,
+		headers:       headers,
+		ifNoneMatch:   ifNoneMatch,
+		sharedHeaders: sharedHeaders,
+		maxSwitches:   maxSwitches,
+		userAgent:     c.GetHeader("User-Agent"),
+		originator:    c.GetHeader("originator"),
+		version:       c.GetHeader("version"),
+		clientVersion: c.Query("client_version"),
 	}
-	for switchCount := 0; ; switchCount++ {
-		account, err := h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, "", "", excluded)
-		if err != nil {
-			if c.Request.Context().Err() != nil {
-				return
-			}
-			if lastErr != nil {
-				// Only an exhausted candidate list ends the retries as an
-				// upstream outage; a selection failure keeps its old answer.
-				if errors.Is(err, service.ErrNoAvailableAccounts) {
-					fail(lastErr)
-				} else {
-					h.errorResponse(c, infraerrors.Code(lastErr), "upstream_error", infraerrors.Message(lastErr))
-				}
-				return
-			}
-			h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "No available OpenAI accounts")
+	if h.serveCodexModelsManifestGroupCache(c, fetch, apiKey.Group, filterBlocked) {
+		return
+	}
+	ctx := c.Request.Context()
+	if h.gatewayService.CodexModelsManifestGroupCacheEligible(ctx, apiKey.GroupID) {
+		result, own, ok := h.awaitCodexModelsManifestFlight(ctx, fetch)
+		if !ok {
 			return
 		}
+		h.writeCodexModelsManifestResult(c, fallbackKey, apiKey.Group, filterBlocked, result, own)
+		return
+	}
+	result := h.fetchCodexModelsManifestWithFailover(ctx, fetch, false, "")
+	h.writeCodexModelsManifestResult(c, fallbackKey, apiKey.Group, filterBlocked, result, true)
+}
 
-		manifest, err := h.gatewayService.FetchNativeCodexModelsManifest(c.Request.Context(), account, c.Request.URL.RawQuery, ifNoneMatch, headers)
-		if err != nil {
-			if c.Request.Context().Err() != nil {
-				return
-			}
-			if !service.IsCodexModelsManifestStaleFallbackError(err) {
-				staleEligible = false
-			}
-			if service.IsRetryableCodexModelsManifestError(err) && switchCount < maxSwitches {
-				excluded[account.ID] = struct{}{}
-				lastErr = err
-				continue
-			}
-			fail(err)
+// writeCodexModelsManifestResult answers with the outcome of an account loop.
+// own is false when the answer was fetched by another request (singleflight);
+// then only the entry-level headers of the upstream answer are replayed.
+func (h *OpenAIGatewayHandler) writeCodexModelsManifestResult(c *gin.Context, key service.CodexModelsManifestFallbackKey, group *service.Group, filterBlocked bool, result codexModelsManifestFetchResult, own bool) {
+	switch {
+	case result.canceled:
+		return
+	case result.noAccounts:
+		h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "No available OpenAI accounts")
+		return
+	case result.err != nil:
+		// The stale fallback applies only when every attempt failed with
+		// upstream unavailability and the candidates were exhausted.
+		if result.fallback && h.serveCodexModelsManifestFallback(c, key, group, filterBlocked, result.err) {
 			return
 		}
+		h.errorResponse(c, infraerrors.Code(result.err), "upstream_error", infraerrors.Message(result.err))
+		return
+	}
+	account, manifest := result.account, result.manifest
+	if result.shared {
+		replay := service.CodexModelsManifestEntryHeaders(manifest)
+		if own {
+			replay = manifest.Headers
+		}
+		if !h.serveCodexModelsManifestBody(c, manifest.Body, replay, manifest.ETag, group, filterBlocked, codexModelsManifestCacheMiss, false) {
+			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest has an invalid models array")
+		}
+		return
+	}
 
-		// Only a version the official upstream just answered for (query and
-		// headers agree) may raise the gateway's own catalog version.
-		if account.IsOpenAIOAuth() && !manifest.NotModified && c.Query("client_version") == c.GetHeader("version") {
-			service.ObserveCodexClientVersion(c.GetHeader("User-Agent"), c.GetHeader("originator"), c.GetHeader("version"))
-		}
-		body := manifest.Body
-		if filterBlocked {
-			if manifest.NotModified {
-				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest returned 304 to an unconditional request")
-				return
-			}
-			if body, err = service.FilterCodexModelsManifest(body, apiKey.Group.IsModelBlocked); err != nil {
-				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest has an invalid models array")
-				return
-			}
-		}
-		if !account.IsOpenAICodexNativeRelay() {
-			h.gatewayService.RememberCodexModelsManifestFallback(fallbackKey, account.ID, manifest)
-		}
-		if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
-			h.gatewayService.WriteNativeCodexResponseHeaders(c.Writer.Header(), manifest.Headers)
-		}
-		if filterBlocked {
-			c.Writer.Header().Del("ETag")
-			c.Writer.Header().Del("Last-Modified")
-			c.Header("Cache-Control", "private, no-store")
-			c.Data(http.StatusOK, "application/json", body)
-			return
-		}
-		if manifest.ETag != "" && !account.IsOpenAIOAuth() && !account.IsOpenAICodexNativeRelay() {
-			c.Header("ETag", manifest.ETag)
-		}
+	body := manifest.Body
+	if filterBlocked {
 		if manifest.NotModified {
-			c.Status(http.StatusNotModified)
+			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest returned 304 to an unconditional request")
 			return
 		}
+		var err error
+		if body, err = service.FilterCodexModelsManifest(body, group.IsModelBlocked); err != nil {
+			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Codex models manifest has an invalid models array")
+			return
+		}
+	}
+	if account.IsOpenAIOAuth() || account.IsOpenAICodexNativeRelay() {
+		h.gatewayService.WriteNativeCodexResponseHeaders(c.Writer.Header(), manifest.Headers)
+	}
+	if filterBlocked {
+		c.Writer.Header().Del("ETag")
+		c.Writer.Header().Del("Last-Modified")
+		c.Header("Cache-Control", "private, no-store")
 		c.Data(http.StatusOK, "application/json", body)
 		return
 	}
+	if manifest.ETag != "" && !account.IsOpenAIOAuth() && !account.IsOpenAICodexNativeRelay() {
+		c.Header("ETag", manifest.ETag)
+	}
+	if manifest.NotModified {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
 }
 
 // codexModelsManifestStaleHeader marks a manifest served from the stale
@@ -193,6 +203,7 @@ func (h *OpenAIGatewayHandler) serveCodexModelsManifestFallback(c *gin.Context, 
 	// of the original answer are not. The stale copy must not be persisted by
 	// clients or intermediaries (upstream itself answers private, no-store).
 	c.Header(codexModelsManifestStaleHeader, "1")
+	c.Header(codexModelsManifestCacheHeader, codexModelsManifestCacheStale)
 	c.Header("Cache-Control", "private, no-store")
 	if filterBlocked {
 		c.Data(http.StatusOK, "application/json", body)

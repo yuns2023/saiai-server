@@ -32,6 +32,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 type chatGPTBillingSettingsReader interface {
@@ -55,6 +56,12 @@ type OpenAIGatewayHandler struct {
 	chatGPTUpdatesMu          sync.Mutex
 	chatGPTUpdatesConnections map[string]int
 	chatGPTUpdatesActive      int
+	// codexModelsManifestFlight coalesces Codex manifest fetches per group
+	// cache key (misses and background refreshes).
+	codexModelsManifestFlight singleflight.Group
+	// codexModelsManifestRefreshDone is called when a background manifest
+	// refresh finishes (tests only).
+	codexModelsManifestRefreshDone func()
 }
 
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler

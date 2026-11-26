@@ -96,6 +96,10 @@ func newCodexModelsFallbackHandler(t *testing.T, accounts ...service.Account) (*
 	upstream.repo = &codexModelsFallbackRepo{chatGPTAccountRepo: &chatGPTAccountRepo{account: accounts[0], accounts: accounts}}
 	svc := service.NewOpenAIGatewayService(upstream.repo, nil, nil, nil, nil, nil, nil,
 		cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+	// These tests exercise the stale-on-error fallback directly; with the
+	// group cache an OAuth entry younger than its max age is served before
+	// upstream is asked (see openai_codex_models_group_cache_test.go).
+	svc.DisableCodexModelsManifestGroupCacheForTest()
 	return NewOpenAIGatewayHandler(svc, nil, nil, nil, nil, nil, nil, cfg, nil), upstream
 }
 
@@ -166,6 +170,7 @@ func TestCodexModelsStaleFallbackAfterSingleAccountTimeout(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, codexModelsFallbackManifest, rec.Body.String())
 	require.Equal(t, "1", rec.Header().Get("X-Saiai-Manifest-Stale"))
+	require.Equal(t, "stale", rec.Header().Get("X-Saiai-Manifest-Cache"))
 	require.Equal(t, `"TEST_ONLY_ETAG"`, rec.Header().Get("ETag"))
 	require.Empty(t, rec.Header().Get("X-Test-Only-Hint"), "upstream headers of the original answer are not replayed")
 	require.Empty(t, rec.Header().Get("Date"))
