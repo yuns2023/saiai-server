@@ -469,13 +469,12 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 		tierMultiplier = serviceTierCostMultiplier(serviceTier)
 	}
 	if longContextPricing {
-		inputPricePerToken *= longContextCategoryMultiplier(pricing.LongContextInputMultiplier)
-		outputPricePerToken *= longContextCategoryMultiplier(pricing.LongContextOutputMultiplier)
-		cacheWrite := longContextCategoryMultiplier(pricing.LongContextCacheCreationMultiplier)
-		cacheCreationPricePerToken *= cacheWrite
-		cacheCreation5mPrice *= cacheWrite
-		cacheCreation1hPrice *= cacheWrite
-		cacheReadPricePerToken *= longContextCategoryMultiplier(pricing.LongContextCacheReadMultiplier)
+		inputPricePerToken *= pricing.LongContextInputMultiplier
+		outputPricePerToken *= pricing.LongContextOutputMultiplier
+		cacheCreationPricePerToken *= pricing.LongContextCacheCreationMultiplier
+		cacheCreation5mPrice *= pricing.LongContextCacheCreationMultiplier
+		cacheCreation1hPrice *= pricing.LongContextCacheCreationMultiplier
+		cacheReadPricePerToken *= pricing.LongContextCacheReadMultiplier
 	}
 
 	// 计算输入token费用（使用per-token价格）
@@ -592,14 +591,21 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 	return &cloned
 }
 
-// longContextCategoryMultiplier keeps a category at its short-context price
-// when the feed publishes no long-context price for it (multiplier 0); a
-// missing category must never make that category free above the threshold.
-func longContextCategoryMultiplier(m float64) float64 {
-	if m > 0 {
-		return m
+// fillMissingLongContextMultipliers sets a category without a long-context
+// price (multiplier 0, after model-specific policies) to its short-context
+// price (1) when the whole-request rule is active, so billing, snapshots and
+// the pricing page agree and no category becomes free above the threshold.
+func fillMissingLongContextMultipliers(p *ModelPricing) {
+	if p == nil || p.LongContextInputThreshold <= 0 || (p.LongContextInputMultiplier <= 1 && p.LongContextOutputMultiplier <= 1 &&
+		p.LongContextCacheCreationMultiplier <= 1 && p.LongContextCacheReadMultiplier <= 1) {
+		return
 	}
-	return 1
+	for _, m := range []*float64{&p.LongContextInputMultiplier, &p.LongContextOutputMultiplier,
+		&p.LongContextCacheCreationMultiplier, &p.LongContextCacheReadMultiplier} {
+		if *m <= 0 {
+			*m = 1
+		}
+	}
 }
 
 func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) bool {

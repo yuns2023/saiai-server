@@ -73,7 +73,13 @@ func TestLongContextMissingCategoryKeepsShortPrice(t *testing.T) {
 		require.NoError(t, err, tier)
 		require.True(t, cost.PricingSnapshot.LongContext.Applied, tier)
 		require.InDelta(t, 300000*cacheRead, cost.CacheReadCost, 1e-12, tier)
+		require.Equal(t, 1.0, cost.PricingSnapshot.LongContext.CacheReadMultiplier, tier)
+		require.Equal(t, 1.0, cost.PricingSnapshot.Effective.LongContextCacheReadMultiplier, tier)
+		require.Equal(t, 2.0, cost.PricingSnapshot.LongContext.InputMultiplier, tier)
 	}
+	pricing, err := b.GetModelPricing("lc-partial")
+	require.NoError(t, err)
+	require.InDelta(t, 0.4, b.DisplayLongContextUnitPrices(pricing, "priority")["cache_read"], 1e-9)
 }
 
 // An administrator zero Priority price stays zero above the threshold, other
@@ -114,5 +120,8 @@ func TestOpenAIGatewayServiceRecordUsage_PriorityLongContext(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, short.PricingSnapshot.LongContext.Applied)
 	require.InDelta(t, want.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
+	require.NotNil(t, usageRepo.lastLog.PricingSnapshot)
+	require.True(t, usageRepo.lastLog.PricingSnapshot.LongContext.Applied)
+	require.Equal(t, 300000, usageRepo.lastLog.PricingSnapshot.LongContext.TotalInputTokens)
 	require.Greater(t, usageRepo.lastLog.InputCost, short.InputCost*1.99)
 }

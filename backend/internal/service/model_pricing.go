@@ -216,6 +216,7 @@ type LongContextPricing struct {
 
 func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution) *ModelPricing {
 	base := *s.applyModelSpecificPricingPolicy(r.ResolvedModel, p)
+	fillMissingLongContextMultipliers(&base)
 	base.Reference = nil
 	base.Snapshot = nil
 	effective := base

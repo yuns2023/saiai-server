@@ -200,10 +200,11 @@ Priority/Fast included: above the threshold each category's tier unit price
 multiplier path) is multiplied by that category's long-context multiplier, once.
 For OpenAI direct models this equals the published
 `*_above_272k_tokens_priority` prices; those fields are not read separately.
-A category without a published long-context price keeps its short-context price
-(multiplier 1), never becomes free. Earlier Priority rows recorded
-`long_context.applied=false` and are not recalculated; the frontend shows them
-without the surcharge. During a rolling deploy, requests settled by an old
+A category whose multiplier is still missing after model-specific policies
+(GPT-5.4/5.5 defaults are filled first) keeps its short-context price
+(multiplier 1, also in snapshots and the pricing page), never becomes free.
+History is not recalculated: rows that recorded `long_context.applied=false`
+keep showing no surcharge, rows that recorded `true` show it. During a rolling deploy, requests settled by an old
 replica still use the old rule; audit by the recorded `long_context.applied`.
 The reference feed is community pricing even when an official pricing link is
 shown. Subscription procurement cost, reference amount, platform base charge
