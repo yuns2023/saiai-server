@@ -418,7 +418,7 @@ func (s *BillingService) calculateCostAndSnapshot(model string, tokens UsageToke
 		billedTier := billingServiceTier(serviceTier, pricing)
 		snapshot.PriorityBilledAsStandard = snapshot.ServiceTier == "priority" && billedTier != "priority"
 		snapshot.LongContext = &LongContextPricing{
-			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing) && billedTier != "priority",
+			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing),
 			Mode:    "whole_request", Threshold: pricing.LongContextInputThreshold,
 			TotalInputTokens: tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens,
 			InputMultiplier:  pricing.LongContextInputMultiplier, OutputMultiplier: pricing.LongContextOutputMultiplier,
@@ -439,7 +439,10 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 	cacheReadPricePerToken := pricing.CacheReadPricePerToken
 	serviceTier = billingServiceTier(serviceTier, pricing)
 	tierMultiplier := 1.0
-	longContextPricing := s.shouldApplySessionLongContextPricing(tokens, pricing) && normalizeBillingServiceTier(serviceTier) != "priority"
+	// The whole-request long-context multipliers apply on top of every tier's
+	// unit prices, Priority/Fast included (official Fast long-context prices
+	// are the Fast prices times the same multipliers).
+	longContextPricing := s.shouldApplySessionLongContextPricing(tokens, pricing)
 	if usePriorityServiceTierPricing(serviceTier, pricing) || (normalizeBillingServiceTier(serviceTier) == "priority" && pricing.Snapshot != nil && pricing.Reference != nil && usePriorityServiceTierPricing(serviceTier, pricing.Reference)) {
 		// A zero native price means "not published" and keeps the Standard
 		// price; synthesized and administrator prices are complete.
@@ -466,12 +469,13 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 		tierMultiplier = serviceTierCostMultiplier(serviceTier)
 	}
 	if longContextPricing {
-		inputPricePerToken *= pricing.LongContextInputMultiplier
-		outputPricePerToken *= pricing.LongContextOutputMultiplier
-		cacheCreationPricePerToken *= pricing.LongContextCacheCreationMultiplier
-		cacheCreation5mPrice *= pricing.LongContextCacheCreationMultiplier
-		cacheCreation1hPrice *= pricing.LongContextCacheCreationMultiplier
-		cacheReadPricePerToken *= pricing.LongContextCacheReadMultiplier
+		inputPricePerToken *= longContextCategoryMultiplier(pricing.LongContextInputMultiplier)
+		outputPricePerToken *= longContextCategoryMultiplier(pricing.LongContextOutputMultiplier)
+		cacheWrite := longContextCategoryMultiplier(pricing.LongContextCacheCreationMultiplier)
+		cacheCreationPricePerToken *= cacheWrite
+		cacheCreation5mPrice *= cacheWrite
+		cacheCreation1hPrice *= cacheWrite
+		cacheReadPricePerToken *= longContextCategoryMultiplier(pricing.LongContextCacheReadMultiplier)
 	}
 
 	// 计算输入token费用（使用per-token价格）
@@ -586,6 +590,16 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 		return pricing
 	}
 	return &cloned
+}
+
+// longContextCategoryMultiplier keeps a category at its short-context price
+// when the feed publishes no long-context price for it (multiplier 0); a
+// missing category must never make that category free above the threshold.
+func longContextCategoryMultiplier(m float64) float64 {
+	if m > 0 {
+		return m
+	}
+	return 1
 }
 
 func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) bool {

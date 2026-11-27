@@ -35,7 +35,7 @@ the generic x2 multiplier; the reference amount does the same. Flex is
 unchanged. An administrator Priority override for the billed model is still
 honoured as intentional operator pricing: overridden categories use the
 override and every unedited Priority category inherits the Standard reference
-price (not x2), with the usual Priority long-context exclusion. The pricing
+price (not x2); the whole-request long-context multipliers apply on top. The pricing
 list and preview show these effective prices, `effective`/`reference` carry
 `no_priority_tier`, and usage snapshots record
 `priority_billed_as_standard` when Priority was billed at Standard. Aliases
@@ -82,11 +82,11 @@ All routes require the existing administrator middleware and return no-store:
   aliases/overrides, with recently billed models from the last 24h included.
   Configured and recent models sort first. Recent usage reads have a one-second
   deadline and a 30-second cache. Tier prices come from the billing calculator. `long_context_tiers` exposes
-  whole-request long-context prices separately, only for supported billing tiers.
+  whole-request long-context prices separately for every billing tier.
   The list can switch between short and long context; the editor shows both tables
   and the preview reports which rule applied. 272K means 272,000 input tokens,
   including cache, rather than kilobytes. Pricing UI follows existing Gateway tier
-  behavior (including Priority exclusions); it is not an assertion of official
+  behavior; it is not an assertion of official
   pricing parity for every tier.
 - `PUT /api/v1/admin/settings/model-pricing`: update one exact model's alias
   and unit prices, checking the displayed `expected_version` first. A 409
@@ -194,12 +194,17 @@ policies and, last, explicitly labelled known-model historical inference.
 An explicit recorded `applied=false` wins over every inference. Count total
 input including cache once, and apply the strict `>` threshold.
 
-Priority currently bypasses the Gateway whole-request long-context multiplier,
-in both calculation and snapshot creation, except where Priority is billed as
-Standard for a model without an official Priority/Fast tier (no administrator
-Priority override). The pricing UI reflects that exclusion. Any proposal to match newer official Priority long-context prices
-requires a separate billing review, fixtures for every transport and a decision
-about future records; this display change does not resolve that policy question.
+Since 2026-11 the whole-request long-context multipliers apply to every tier,
+Priority/Fast included: above the threshold each category's tier unit price
+(native, synthesized or administrator Priority price, or the x2 / x0.5 tier
+multiplier path) is multiplied by that category's long-context multiplier, once.
+For OpenAI direct models this equals the published
+`*_above_272k_tokens_priority` prices; those fields are not read separately.
+A category without a published long-context price keeps its short-context price
+(multiplier 1), never becomes free. Earlier Priority rows recorded
+`long_context.applied=false` and are not recalculated; the frontend shows them
+without the surcharge. During a rolling deploy, requests settled by an old
+replica still use the old rule; audit by the recorded `long_context.applied`.
 The reference feed is community pricing even when an official pricing link is
 shown. Subscription procurement cost, reference amount, platform base charge
 and the discounted user charge must remain distinguishable.

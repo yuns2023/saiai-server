@@ -18,6 +18,8 @@ export function usageLongContext(row?: Record | null): LongContextPricing | null
       total_input_tokens: row.input_tokens + row.cache_read_tokens, input_multiplier: snapshot.long_context_extra_multiplier,
       output_multiplier: 1, cache_read_multiplier: snapshot.long_context_extra_multiplier, cache_write_multiplier: 1 }
   }
+  // Without explicit evidence, Priority rows predate Fast long-context pricing
+  // (2026-11) and were billed without the surcharge; new rows always record it.
   if ((snapshot?.service_tier || row.service_tier || '').trim().toLowerCase() === 'priority') return null
   const policy = snapshot?.effective
   if (policy?.long_context_threshold) {
@@ -60,7 +62,7 @@ function longContextTierThreshold(row: Record): number {
 }
 
 // A size observation against the model's own long-context price tier, shown
-// even when no surcharge applied (for example Priority). Models without such a
+// even when no surcharge applied (for example Priority rows billed before Fast long-context pricing). Models without such a
 // tier (Claude, older GPT) get no marker. Do not use this to reprice usage.
 export function usageInputContext(row?: Record | null): { total: number, threshold: number } | null {
   if (!row || isNativeChatUsage(row) || (row.image_count || 0) > 0 || /\/images\/(generations|edits)$/.test(row.inbound_endpoint || '')) return null
