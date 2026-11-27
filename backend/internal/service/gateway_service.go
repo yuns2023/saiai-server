@@ -929,6 +929,8 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
+	// allRateLimited caches AllAccountsRateLimitedUntil answers.
+	allRateLimited        allRateLimitedCache
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
 	usageLogRepo          UsageLogRepository

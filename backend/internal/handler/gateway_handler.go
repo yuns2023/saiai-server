@@ -1020,9 +1020,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					continue
 				}
 				if len(fs.FailedAccountIDs) == 0 {
-					if platform == service.PlatformAnthropic && !fallbackUsed && errors.Is(err, service.ErrNoAvailableAccounts) &&
-						onlyGroupTried(smartSwitchExcluded, currentAPIKey.GroupID) &&
-						h.writeAllAccountsRateLimited(c, currentAPIKey.GroupID, reqModel, streamStarted) {
+					// No upstream attempt yet (a reselect after a cleared
+					// exclusion set still has LastFailoverErr), no fallback
+					// group, and no smart switch policy spanning groups.
+					if platform == service.PlatformAnthropic && !fallbackUsed && fs.LastFailoverErr == nil &&
+						errors.Is(err, service.ErrNoAvailableAccounts) && !smartSwitchSpansGroups(currentAPIKey) &&
+						h.writeAllAccountsRateLimited(c, currentAPIKey, reqModel, streamStarted) {
 						return
 					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
@@ -2232,16 +2235,25 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 // Retry-After.
 const allAccountsRateLimitedNoRetryWait = 5 * time.Minute
 
-// onlyGroupTried reports whether account selection ran on groupID alone: no
-// smart switch moved the request between groups. A reset time computed for
-// the last group would ignore the other groups tried.
-func onlyGroupTried(smartSwitchExcluded map[int64]bool, groupID *int64) bool {
-	for id := range smartSwitchExcluded {
-		if groupID == nil || id != *groupID {
-			return false
+// smartSwitchSpansGroups reports whether key has a smart switch policy over
+// more than one group. Such a request may have been kept off another group
+// for a reason that ends sooner, or by a failed read of it
+// (advanceSmartSwitch returns false either way), so a reset computed for the
+// current group alone is not the Key's recovery time: those keep the 503.
+func smartSwitchSpansGroups(key *service.APIKey) bool {
+	if key == nil || key.SmartSwitch == nil || !key.SmartSwitch.Enabled {
+		return false
+	}
+	ids := make(map[int64]struct{}, len(key.SmartSwitch.GroupIDs)+2)
+	for _, id := range key.SmartSwitch.GroupIDs {
+		ids[id] = struct{}{}
+	}
+	for _, id := range []*int64{key.GroupID, key.SmartSwitchOriginalGroupID} {
+		if id != nil {
+			ids[*id] = struct{}{}
 		}
 	}
-	return true
+	return len(ids) > 1
 }
 
 // writeAllAccountsRateLimited answers a failed first selection with a 429
@@ -2252,11 +2264,11 @@ func onlyGroupTried(smartSwitchExcluded map[int64]bool, groupID *int64) bool {
 // the request body each time. It writes nothing and returns false when the
 // reset is unknown or the response can no longer carry headers (a wait ping
 // was already flushed); the caller then keeps the generic 503.
-func (h *GatewayHandler) writeAllAccountsRateLimited(c *gin.Context, groupID *int64, model string, streamStarted bool) bool {
-	if h == nil || h.gatewayService == nil || streamStarted || c.Writer.Written() {
+func (h *GatewayHandler) writeAllAccountsRateLimited(c *gin.Context, apiKey *service.APIKey, model string, streamStarted bool) bool {
+	if h == nil || h.gatewayService == nil || apiKey == nil || streamStarted || c.Writer.Written() {
 		return false
 	}
-	resetAt, ok := h.gatewayService.AllAccountsRateLimitedUntil(c.Request.Context(), groupID, model)
+	resetAt, ok := h.gatewayService.AllAccountsRateLimitedUntil(c.Request.Context(), apiKey.ID, apiKey.GroupID, model)
 	if !ok {
 		return false
 	}

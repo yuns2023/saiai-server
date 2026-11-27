@@ -5,13 +5,17 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -30,12 +34,20 @@ func (r entrypointAccountRepo) ListWithFilters(ctx context.Context, _ pagination
 // the response and the Ops row.
 func serveAllLimited(t *testing.T, h *entrypointHarness, apiKey *service.APIKey) (*httptest.ResponseRecorder, *service.OpsInsertErrorLogInput) {
 	t.Helper()
+	return serveAllLimitedWith(t, h, apiKey, nil)
+}
+
+func serveAllLimitedWith(t *testing.T, h *entrypointHarness, apiKey *service.APIKey, setup func(*gin.Context)) (*httptest.ResponseRecorder, *service.OpsInsertErrorLogInput) {
+	t.Helper()
 	prepareOpsLogFilterTestQueue(t)
 	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	r := gin.New()
 	r.POST("/v1/messages", OpsErrorLoggerMiddleware(ops), func(c *gin.Context) {
 		c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: h.user.ID, Concurrency: h.user.Concurrency})
+		if setup != nil {
+			setup(c)
+		}
 		h.handler.Messages(c)
 	})
 	rec := httptest.NewRecorder()
@@ -145,12 +157,86 @@ func TestAllAccountsRateLimitedRetryHeaders(t *testing.T) {
 	}
 }
 
-func TestOnlyGroupTried(t *testing.T) {
-	id := int64(55)
-	require.True(t, onlyGroupTried(nil, &id))
-	require.True(t, onlyGroupTried(map[int64]bool{55: true}, &id))
-	require.False(t, onlyGroupTried(map[int64]bool{54: true, 55: true}, &id))
-	require.False(t, onlyGroupTried(map[int64]bool{54: true}, nil))
+func TestSmartSwitchSpansGroups(t *testing.T) {
+	a, b := int64(55), int64(56)
+	policy := func(enabled bool, ids ...int64) *service.APIKey {
+		return &service.APIKey{GroupID: &a, SmartSwitch: &domain.KeySmartSwitchPolicy{Enabled: enabled, GroupIDs: ids}}
+	}
+	require.False(t, smartSwitchSpansGroups(nil))
+	require.False(t, smartSwitchSpansGroups(&service.APIKey{GroupID: &a}))
+	require.False(t, smartSwitchSpansGroups(policy(false, a, b)), "disabled policy")
+	require.False(t, smartSwitchSpansGroups(policy(true, a)), "policy of the bound group only")
+	require.True(t, smartSwitchSpansGroups(policy(true, a, b)))
+	require.True(t, smartSwitchSpansGroups(policy(true, b)), "policy group differs from the bound group")
+	switched := policy(true, b)
+	switched.GroupID, switched.SmartSwitchOriginalGroupID = &b, &a
+	require.True(t, smartSwitchSpansGroups(switched))
+}
+
+// A multi-group smart switch policy keeps the 503 even when the switch to
+// group B did not happen: B's read failed, or B was skipped because it
+// recovers sooner. A reset for A alone would tell the client to wait for 22 h.
+func TestMessagesAllAccountsRateLimitedKeeps503WithMultiGroupSmartSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		next middleware2.SmartSwitchNext
+	}{
+		{name: "group B read fails", next: func(map[int64]bool) (*service.SmartSwitchSelection, error) {
+			return nil, errors.New("TEST_ONLY group read failure")
+		}},
+		{name: "group B recovers sooner and is skipped", next: func(map[int64]bool) (*service.SmartSwitchSelection, error) {
+			return nil, service.ErrSmartSwitchUnavailable
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := map[int64]*service.Group{
+				entrypointGroupA: anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyOff),
+				entrypointGroupB: anthropicGroup(entrypointGroupB, service.ClaudeEntrypointPolicyOff),
+			}
+			h := newEntrypointHarness(t, groups, entrypointGroupA)
+			resetAt := time.Now().Add(22 * time.Hour)
+			h.lab.accounts[0].RateLimitResetAt = &resetAt
+			key := h.key(entrypointGroupA)
+			key.SmartSwitch = &domain.KeySmartSwitchPolicy{Enabled: true, GroupIDs: []int64{entrypointGroupA, entrypointGroupB}}
+
+			rec, entry := serveAllLimitedWith(t, h, key, func(c *gin.Context) { c.Set("smart_switch_next", tc.next) })
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+			require.Empty(t, rec.Header().Get("Retry-After"))
+			require.Empty(t, rec.Header().Get("x-should-retry"))
+			require.Equal(t, "routing", entry.ErrorPhase)
+			require.Zero(t, h.lab.upstreamCalls())
+		})
+	}
+}
+
+// After an upstream 503 the failover loop clears the exclusion set and
+// reselects; that reselection failing is not a routing-only failure, so it
+// must not become the "all accounts rate limited" 429.
+func TestMessagesAllAccountsRateLimitedNotAfterUpstreamAttempt(t *testing.T) {
+	groups := map[int64]*service.Group{entrypointGroupA: anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyOff)}
+	h := newEntrypointHarness(t, groups, entrypointGroupA)
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if calls.Add(1) == 1 {
+			// The account hits its limit while the request is in flight.
+			resetAt := time.Now().Add(22 * time.Hour)
+			h.lab.mu.Lock()
+			h.lab.accounts[0].RateLimitResetAt = &resetAt
+			h.lab.mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"TEST_ONLY unavailable"}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	h.lab.accounts[0].Credentials = map[string]any{"api_key": "TEST_ONLY_UPSTREAM", "base_url": upstream.URL}
+
+	rec, _ := serveAllLimited(t, h, h.key(entrypointGroupA))
+	require.GreaterOrEqual(t, calls.Load(), int32(1))
+	require.NotEqual(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+	require.Empty(t, rec.Header().Get("Retry-After"))
+	require.NotContains(t, rec.Body.String(), "all accounts in this group are rate limited")
 }
 
 func TestWriteAllAccountsRateLimitedAfterStreamStartWritesNothing(t *testing.T) {
@@ -158,6 +244,6 @@ func TestWriteAllAccountsRateLimitedAfterStreamStartWritesNothing(t *testing.T) 
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	h := &GatewayHandler{gatewayService: &service.GatewayService{}}
 	id := int64(55)
-	require.False(t, h.writeAllAccountsRateLimited(c, &id, entrypointModel, true))
+	require.False(t, h.writeAllAccountsRateLimited(c, &service.APIKey{ID: 1, GroupID: &id}, entrypointModel, true))
 	require.False(t, c.Writer.Written())
 }

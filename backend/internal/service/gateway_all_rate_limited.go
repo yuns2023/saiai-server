@@ -2,15 +2,70 @@ package service
 
 import (
 	"context"
+	"strconv"
+	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"golang.org/x/sync/singleflight"
 )
 
 // allRateLimitedListPageSize bounds the group read behind
 // AllAccountsRateLimitedUntil (the repository caps a page at 100). A larger
 // group keeps the generic "no available accounts" answer.
 const allRateLimitedListPageSize = 100
+
+const (
+	// allRateLimitedCacheTTL bounds how long a computed answer (429 reset or
+	// "unknown", i.e. 503) is reused for the same Key, group and model, so a
+	// retry storm costs one group read per TTL per replica. Staleness is at
+	// most the TTL, like the existing snapshot/DB read race.
+	allRateLimitedCacheTTL = 10 * time.Second
+	// allRateLimitedCacheMaxEntries caps the per-process cache; it is simply
+	// emptied when full.
+	allRateLimitedCacheMaxEntries = 4096
+	// allRateLimitedComputeTimeout bounds the shared computation, which runs
+	// detached from the first caller's cancellation (singleflight).
+	allRateLimitedComputeTimeout = 5 * time.Second
+)
+
+type allRateLimitedResult struct {
+	resetAt time.Time
+	ok      bool
+}
+
+type allRateLimitedEntry struct {
+	result    allRateLimitedResult
+	expiresAt time.Time
+}
+
+// allRateLimitedCache is the per-process cache behind
+// AllAccountsRateLimitedUntil; the zero value is ready to use.
+type allRateLimitedCache struct {
+	mu      sync.Mutex
+	entries map[string]allRateLimitedEntry
+	group   singleflight.Group
+}
+
+func (c *allRateLimitedCache) get(key string, now time.Time) (allRateLimitedResult, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok || !now.Before(e.expiresAt) {
+		return allRateLimitedResult{}, false
+	}
+	return e.result, true
+}
+
+func (c *allRateLimitedCache) put(key string, result allRateLimitedResult, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil || len(c.entries) >= allRateLimitedCacheMaxEntries {
+		c.entries = make(map[string]allRateLimitedEntry)
+	}
+	c.entries[key] = allRateLimitedEntry{result: result, expiresAt: now.Add(allRateLimitedCacheTTL)}
+}
 
 // AllAccountsRateLimitedUntil explains a failed account selection for a
 // group: it reports the earliest time one of the group's candidate accounts
@@ -26,6 +81,7 @@ const allRateLimitedListPageSize = 100
 //
 // Candidates are the group's members on the platform selection uses (with
 // mixed Antigravity accounts), allowed for the user, supporting the model.
+// Accounts on retired platforms are never scheduled and are not candidates.
 // Ungrouped Keys, simple mode and market tiers are out of scope (ok=false).
 //
 // The result is a lower bound: it is when the first candidate's time-bound
@@ -36,10 +92,38 @@ const allRateLimitedListPageSize = 100
 // The block ends are timestamps stored in the database by whichever gateway
 // replica saw the upstream limit; they are compared with this process's
 // clock, the same clock account selection uses for them.
-func (s *GatewayService) AllAccountsRateLimitedUntil(ctx context.Context, groupID *int64, requestedModel string) (time.Time, bool) {
+//
+// Answers are cached per process for allRateLimitedCacheTTL and computed
+// once per key at a time. The cache key is the API Key, the group, the model
+// and the client kind, not the group alone: candidates depend on the Key's
+// user (trusted-only and carpool user lists), its market buyer state and on
+// whether the client is Claude Code (claude_code_only fallback). Callers
+// derive Retry-After from the returned time at write time.
+func (s *GatewayService) AllAccountsRateLimitedUntil(ctx context.Context, apiKeyID int64, groupID *int64, requestedModel string) (time.Time, bool) {
 	if s == nil || s.accountRepo == nil || groupID == nil || *groupID <= 0 || s.isRunModeSimple() {
 		return time.Time{}, false
 	}
+	key := strconv.FormatInt(apiKeyID, 10) + "|" + strconv.FormatInt(*groupID, 10) + "|" +
+		strconv.FormatBool(IsClaudeCodeClient(ctx)) + "|" + requestedModel
+	if cached, ok := s.allRateLimited.get(key, time.Now()); ok {
+		return cached.resetAt, cached.ok
+	}
+	v, _, _ := s.allRateLimited.group.Do(key, func() (any, error) {
+		if cached, ok := s.allRateLimited.get(key, time.Now()); ok {
+			return cached, nil
+		}
+		computeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), allRateLimitedComputeTimeout)
+		defer cancel()
+		resetAt, ok := s.computeAllAccountsRateLimitedUntil(computeCtx, groupID, requestedModel)
+		result := allRateLimitedResult{resetAt: resetAt, ok: ok}
+		s.allRateLimited.put(key, result, time.Now())
+		return result, nil
+	})
+	result, _ := v.(allRateLimitedResult)
+	return result.resetAt, result.ok
+}
+
+func (s *GatewayService) computeAllAccountsRateLimitedUntil(ctx context.Context, groupID *int64, requestedModel string) (time.Time, bool) {
 	group, resolvedID, err := s.checkClaudeCodeRestriction(ctx, groupID)
 	if err != nil || resolvedID == nil || *resolvedID <= 0 {
 		return time.Time{}, false
@@ -83,7 +167,8 @@ func (s *GatewayService) earliestTimeBoundRelease(ctx context.Context, accounts 
 	candidates := 0
 	for i := range accounts {
 		acc := &accounts[i]
-		if !s.isAccountAllowedForPlatform(acc, platform, useMixed) ||
+		if domain.IsRetiredPlatform(acc.Platform) || // IsSchedulable rejects these first
+			!s.isAccountAllowedForPlatform(acc, platform, useMixed) ||
 			!accountAllowsUser(ctx, acc) ||
 			s.excludedInSimpleMode(acc) ||
 			(requestedModel != "" && !s.isModelSupportedByAccountWithContext(ctx, acc, requestedModel)) {
