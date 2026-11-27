@@ -2269,10 +2269,12 @@ func (h *GatewayHandler) writeAllAccountsRateLimited(c *gin.Context, apiKey *ser
 		return false
 	}
 	resetAt, ok := h.gatewayService.AllAccountsRateLimitedUntil(c.Request.Context(), apiKey.ID, apiKey.GroupID, model)
-	if !ok {
+	now := time.Now()
+	if !ok || !now.Before(resetAt) {
+		// A reset already passed is no answer: keep the 503.
 		return false
 	}
-	retryAfter, shouldRetry := allAccountsRateLimitedRetryHeaders(resetAt, time.Now())
+	retryAfter, shouldRetry := allAccountsRateLimitedRetryHeaders(resetAt, now)
 	c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
 	if !shouldRetry {
 		c.Header("x-should-retry", "false")

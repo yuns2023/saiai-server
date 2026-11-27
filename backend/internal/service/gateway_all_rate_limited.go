@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"golang.org/x/sync/singleflight"
 )
@@ -23,8 +24,11 @@ const (
 	// most the TTL, like the existing snapshot/DB read race.
 	allRateLimitedCacheTTL = 10 * time.Second
 	// allRateLimitedCacheMaxEntries caps the per-process cache; it is simply
-	// emptied when full.
+	// swept of expired entries when full, and emptied if still full.
 	allRateLimitedCacheMaxEntries = 4096
+	// allRateLimitedMaxModelLen bounds the request model kept in a cache key
+	// (the model string is client input); longer ones skip the diagnosis.
+	allRateLimitedMaxModelLen = 256
 	// allRateLimitedComputeTimeout bounds the shared computation, which runs
 	// detached from the first caller's cancellation (singleflight).
 	allRateLimitedComputeTimeout = 5 * time.Second
@@ -58,13 +62,32 @@ func (c *allRateLimitedCache) get(key string, now time.Time) (allRateLimitedResu
 	return e.result, true
 }
 
+// put stores result until now+TTL; a reset answer never outlives its reset,
+// so a client returning after Retry-After gets a fresh answer.
 func (c *allRateLimitedCache) put(key string, result allRateLimitedResult, now time.Time) {
+	expiresAt := now.Add(allRateLimitedCacheTTL)
+	if result.ok && result.resetAt.Before(expiresAt) {
+		expiresAt = result.resetAt
+	}
+	if !now.Before(expiresAt) {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.entries == nil || len(c.entries) >= allRateLimitedCacheMaxEntries {
+	if c.entries == nil {
 		c.entries = make(map[string]allRateLimitedEntry)
 	}
-	c.entries[key] = allRateLimitedEntry{result: result, expiresAt: now.Add(allRateLimitedCacheTTL)}
+	if _, exists := c.entries[key]; !exists && len(c.entries) >= allRateLimitedCacheMaxEntries {
+		for k, e := range c.entries {
+			if !now.Before(e.expiresAt) {
+				delete(c.entries, k)
+			}
+		}
+		if len(c.entries) >= allRateLimitedCacheMaxEntries {
+			c.entries = make(map[string]allRateLimitedEntry)
+		}
+	}
+	c.entries[key] = allRateLimitedEntry{result: result, expiresAt: expiresAt}
 }
 
 // AllAccountsRateLimitedUntil explains a failed account selection for a
@@ -100,7 +123,13 @@ func (c *allRateLimitedCache) put(key string, result allRateLimitedResult, now t
 // whether the client is Claude Code (claude_code_only fallback). Callers
 // derive Retry-After from the returned time at write time.
 func (s *GatewayService) AllAccountsRateLimitedUntil(ctx context.Context, apiKeyID int64, groupID *int64, requestedModel string) (time.Time, bool) {
-	if s == nil || s.accountRepo == nil || groupID == nil || *groupID <= 0 || s.isRunModeSimple() {
+	if s == nil || s.accountRepo == nil || groupID == nil || *groupID <= 0 || s.isRunModeSimple() ||
+		len(requestedModel) > allRateLimitedMaxModelLen {
+		return time.Time{}, false
+	}
+	// A forced platform resolves no group (see computeAllAccountsRateLimitedUntil);
+	// rule it out before the cache, whose key does not carry it.
+	if forced, _ := ctx.Value(ctxkey.ForcePlatform).(string); forced != "" {
 		return time.Time{}, false
 	}
 	key := strconv.FormatInt(apiKeyID, 10) + "|" + strconv.FormatInt(*groupID, 10) + "|" +
@@ -108,7 +137,7 @@ func (s *GatewayService) AllAccountsRateLimitedUntil(ctx context.Context, apiKey
 	if cached, ok := s.allRateLimited.get(key, time.Now()); ok {
 		return cached.resetAt, cached.ok
 	}
-	v, _, _ := s.allRateLimited.group.Do(key, func() (any, error) {
+	ch := s.allRateLimited.group.DoChan(key, func() (any, error) {
 		if cached, ok := s.allRateLimited.get(key, time.Now()); ok {
 			return cached, nil
 		}
@@ -119,8 +148,18 @@ func (s *GatewayService) AllAccountsRateLimitedUntil(ctx context.Context, apiKey
 		s.allRateLimited.put(key, result, time.Now())
 		return result, nil
 	})
-	result, _ := v.(allRateLimitedResult)
-	return result.resetAt, result.ok
+	var result allRateLimitedResult
+	select {
+	case r := <-ch:
+		result, _ = r.Val.(allRateLimitedResult)
+	case <-ctx.Done():
+		// The shared computation keeps running for the other waiters.
+		return time.Time{}, false
+	}
+	if !result.ok || !time.Now().Before(result.resetAt) {
+		return time.Time{}, false
+	}
+	return result.resetAt, true
 }
 
 func (s *GatewayService) computeAllAccountsRateLimitedUntil(ctx context.Context, groupID *int64, requestedModel string) (time.Time, bool) {

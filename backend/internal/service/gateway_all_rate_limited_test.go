@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/stretchr/testify/require"
@@ -159,11 +162,15 @@ type allLimitedListRepo struct {
 	total    int64
 	groupID  int64
 	calls    atomic.Int64
+	block    chan struct{}
 }
 
 func (r *allLimitedListRepo) ListWithFilters(_ context.Context, _ pagination.PaginationParams, _, _, _, _ string, groupID int64, _ AccountListSort) ([]Account, *pagination.PaginationResult, error) {
 	r.groupID = groupID
 	r.calls.Add(1)
+	if r.block != nil {
+		<-r.block
+	}
 	return r.accounts, &pagination.PaginationResult{Total: r.total}, nil
 }
 
@@ -311,4 +318,109 @@ func TestAllAccountsRateLimitedUntilCachesAndCoalesces(t *testing.T) {
 	_, ok = svc.AllAccountsRateLimitedUntil(context.Background(), 262, &gid, "claude-sonnet-4-5")
 	require.False(t, ok)
 	require.EqualValues(t, 3, repo.calls.Load())
+}
+
+func newAllLimitedCacheService(resetAt *time.Time) (*GatewayService, *allLimitedListRepo) {
+	repo := &allLimitedListRepo{accounts: []Account{allLimitedAccount(293, func(a *Account) { a.RateLimitResetAt = resetAt })}, total: 1}
+	groups := map[int64]*Group{55: {ID: 55, Platform: PlatformAnthropic, Status: StatusActive, Hydrated: true}}
+	return &GatewayService{accountRepo: repo, groupRepo: &allLimitedGroupRepo{groups: groups}}, repo
+}
+
+// A reset sooner than the TTL ends the cached answer: a client returning
+// after Retry-After gets a fresh computation, not "resets at <past time>".
+func TestAllAccountsRateLimitedUntilEntryEndsAtReset(t *testing.T) {
+	resetAt := time.Now().Add(300 * time.Millisecond)
+	svc, repo := newAllLimitedCacheService(&resetAt)
+	gid := int64(55)
+	got, ok := svc.AllAccountsRateLimitedUntil(context.Background(), 262, &gid, "claude-sonnet-4-5")
+	require.True(t, ok)
+	require.True(t, got.Equal(resetAt))
+
+	time.Sleep(400 * time.Millisecond)
+	repo.accounts = []Account{allLimitedAccount(293, nil)} // recovered
+	_, ok = svc.AllAccountsRateLimitedUntil(context.Background(), 262, &gid, "claude-sonnet-4-5")
+	require.False(t, ok)
+	require.EqualValues(t, 2, repo.calls.Load())
+}
+
+func TestAllRateLimitedCachePutExpiry(t *testing.T) {
+	var c allRateLimitedCache
+	now := time.Now()
+	c.put("soon", allRateLimitedResult{resetAt: now.Add(2 * time.Second), ok: true}, now)
+	c.put("later", allRateLimitedResult{resetAt: now.Add(time.Hour), ok: true}, now)
+	c.put("unknown", allRateLimitedResult{}, now)
+	c.put("past", allRateLimitedResult{resetAt: now.Add(-time.Second), ok: true}, now)
+	require.Equal(t, now.Add(2*time.Second), c.entries["soon"].expiresAt)
+	require.Equal(t, now.Add(allRateLimitedCacheTTL), c.entries["later"].expiresAt)
+	require.Equal(t, now.Add(allRateLimitedCacheTTL), c.entries["unknown"].expiresAt)
+	require.NotContains(t, c.entries, "past")
+	_, hit := c.get("soon", now.Add(2*time.Second))
+	require.False(t, hit)
+}
+
+// The cap is real: a full table is swept of expired entries on insert.
+func TestAllRateLimitedCacheEvictsExpired(t *testing.T) {
+	var c allRateLimitedCache
+	old := time.Now().Add(-time.Minute)
+	for i := 0; i < allRateLimitedCacheMaxEntries; i++ {
+		c.put("old"+strconv.Itoa(i), allRateLimitedResult{}, old)
+	}
+	require.Len(t, c.entries, allRateLimitedCacheMaxEntries)
+	now := time.Now()
+	c.put("live1", allRateLimitedResult{}, now)
+	require.Len(t, c.entries, 1)
+	for i := 0; i < allRateLimitedCacheMaxEntries-1; i++ {
+		c.put("live"+strconv.Itoa(i+2), allRateLimitedResult{}, now)
+	}
+	require.Len(t, c.entries, allRateLimitedCacheMaxEntries)
+	c.put("overflow", allRateLimitedResult{}, now)
+	require.LessOrEqual(t, len(c.entries), allRateLimitedCacheMaxEntries)
+}
+
+// An oversized model skips the diagnosis (and the cache); a forced
+// platform is ruled out before the cache lookup.
+func TestAllAccountsRateLimitedUntilSkipsBeforeCache(t *testing.T) {
+	resetAt := time.Now().Add(time.Hour)
+	svc, repo := newAllLimitedCacheService(&resetAt)
+	gid := int64(55)
+	_, ok := svc.AllAccountsRateLimitedUntil(context.Background(), 262, &gid, strings.Repeat("m", allRateLimitedMaxModelLen+1))
+	require.False(t, ok)
+	require.Zero(t, repo.calls.Load())
+	require.Empty(t, svc.allRateLimited.entries)
+
+	_, ok = svc.AllAccountsRateLimitedUntil(context.Background(), 262, &gid, "claude-sonnet-4-5")
+	require.True(t, ok)
+	forced := context.WithValue(context.Background(), ctxkey.ForcePlatform, PlatformAnthropic)
+	_, ok = svc.AllAccountsRateLimitedUntil(forced, 262, &gid, "claude-sonnet-4-5")
+	require.False(t, ok, "forced platform must not reuse the cached answer")
+	require.EqualValues(t, 1, repo.calls.Load())
+}
+
+// A cancelled waiter returns at once; the shared detached computation
+// completes and serves the next caller.
+func TestAllAccountsRateLimitedUntilCancelledWaiterReturns(t *testing.T) {
+	resetAt := time.Now().Add(time.Hour)
+	svc, repo := newAllLimitedCacheService(&resetAt)
+	repo.block = make(chan struct{})
+	gid := int64(55)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := svc.AllAccountsRateLimitedUntil(ctx, 262, &gid, "claude-sonnet-4-5")
+		done <- ok
+	}()
+	require.Eventually(t, func() bool { return repo.calls.Load() == 1 }, time.Second, 5*time.Millisecond)
+	cancel()
+	select {
+	case ok := <-done:
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("cancelled waiter did not return")
+	}
+	close(repo.block)
+	require.Eventually(t, func() bool {
+		got, ok := svc.AllAccountsRateLimitedUntil(context.Background(), 262, &gid, "claude-sonnet-4-5")
+		return ok && got.Equal(resetAt)
+	}, time.Second, 5*time.Millisecond)
+	require.EqualValues(t, 1, repo.calls.Load())
 }
