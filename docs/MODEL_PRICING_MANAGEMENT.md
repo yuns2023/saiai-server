@@ -198,8 +198,9 @@ Since 2026-11 the whole-request long-context multipliers apply to every tier,
 Priority/Fast included: above the threshold each category's tier unit price
 (native, synthesized or administrator Priority price, or the x2 / x0.5 tier
 multiplier path) is multiplied by that category's long-context multiplier, once.
-For OpenAI direct models this equals the published
-`*_above_272k_tokens_priority` prices; those fields are not read separately.
+For the OpenAI direct entries that publish `*_above_272k_tokens_priority`
+(checked against the bundled feed) this equals those prices; the fields are not
+read separately, and entries without them (GPT-5.4/5.5) follow the gateway policy.
 A category whose multiplier is still missing after model-specific policies
 (GPT-5.4/5.5 defaults are filled first) keeps its short-context price
 (multiplier 1, also in snapshots and the pricing page), never becomes free.
