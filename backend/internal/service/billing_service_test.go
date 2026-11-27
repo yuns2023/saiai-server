@@ -368,16 +368,18 @@ func TestCalculateCost_OpenAILongContextModelsApplyOfficialWholeRequestPricing(t
 
 	priorityCost, err := svc.CalculateCostWithServiceTier("gpt-5.6-sol", tokens, 1.0, "priority")
 	require.NoError(t, err)
-	require.InDelta(t, float64(tokens.InputTokens)*10e-6, priorityCost.InputCost, 1e-10)
-	require.InDelta(t, float64(tokens.CacheCreationTokens)*12.5e-6, priorityCost.CacheCreationCost, 1e-10)
-	require.InDelta(t, float64(tokens.CacheReadTokens)*1e-6, priorityCost.CacheReadCost, 1e-10)
-	require.InDelta(t, float64(tokens.OutputTokens)*60e-6, priorityCost.OutputCost, 1e-10)
+	// Priority/Fast pays its tier price times the same long-context multipliers.
+	require.True(t, priorityCost.PricingSnapshot == nil || priorityCost.PricingSnapshot.LongContext.Applied)
+	require.InDelta(t, float64(tokens.InputTokens)*10e-6*2, priorityCost.InputCost, 1e-10)
+	require.InDelta(t, float64(tokens.CacheCreationTokens)*12.5e-6*2, priorityCost.CacheCreationCost, 1e-10)
+	require.InDelta(t, float64(tokens.CacheReadTokens)*1e-6*2, priorityCost.CacheReadCost, 1e-10)
+	require.InDelta(t, float64(tokens.OutputTokens)*60e-6*1.5, priorityCost.OutputCost, 1e-10)
 
 	gpt55PriorityCost, err := svc.CalculateCostWithServiceTier("gpt-5.5-2026-04-23", tokens, 1.0, "priority")
 	require.NoError(t, err)
-	require.InDelta(t, float64(tokens.InputTokens)*12.5e-6, gpt55PriorityCost.InputCost, 1e-10)
-	require.InDelta(t, float64(tokens.CacheReadTokens)*1.25e-6, gpt55PriorityCost.CacheReadCost, 1e-10)
-	require.InDelta(t, float64(tokens.OutputTokens)*75e-6, gpt55PriorityCost.OutputCost, 1e-10)
+	require.InDelta(t, float64(tokens.InputTokens)*12.5e-6*2, gpt55PriorityCost.InputCost, 1e-10)
+	require.InDelta(t, float64(tokens.CacheReadTokens)*1.25e-6*2, gpt55PriorityCost.CacheReadCost, 1e-10)
+	require.InDelta(t, float64(tokens.OutputTokens)*75e-6*1.5, gpt55PriorityCost.OutputCost, 1e-10)
 
 	standardCost, err := svc.CalculateCost("gpt-5.6-sol", tokens, 1.0)
 	require.NoError(t, err)
