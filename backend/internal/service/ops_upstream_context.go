@@ -55,6 +55,12 @@ const (
 	// a per-context flag and is never cleared.
 	OpsUserLimitKey = "ops_user_limit"
 
+	// OpsRoutingRateLimitedKey marks the gateway's own 429 for "every account
+	// of the group is rate limited" (selection found no account; no upstream
+	// call). Ops keeps it a routing failure (platform owner, in the SLA)
+	// instead of reading the 429 rate_limit_error as an upstream limit.
+	OpsRoutingRateLimitedKey = "ops_routing_rate_limited"
+
 	// Success request-body capture is opt-in and API-key scoped. When enabled,
 	// gateway services may attach a sanitized snapshot of the final upstream
 	// request for post-rewrite debugging.
@@ -633,6 +639,24 @@ func MarkOpsUserLimit(c *gin.Context) {
 	if c != nil {
 		c.Set(OpsUserLimitKey, true)
 	}
+}
+
+// MarkOpsRoutingRateLimited sets OpsRoutingRateLimitedKey on c (see there).
+func MarkOpsRoutingRateLimited(c *gin.Context) {
+	if c != nil {
+		c.Set(OpsRoutingRateLimitedKey, true)
+	}
+}
+
+// IsOpsRoutingRateLimited reports whether MarkOpsRoutingRateLimited was
+// called on c.
+func IsOpsRoutingRateLimited(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	v, ok := c.Get(OpsRoutingRateLimitedKey)
+	marked, _ := v.(bool)
+	return ok && marked
 }
 
 // IsOpsUserLimit reports whether MarkOpsUserLimit was called on c.

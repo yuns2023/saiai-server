@@ -1018,6 +1018,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		normalizedType := normalizeOpsErrorType(parsed.ErrorType, parsed.Code)
 
 		phase := classifyOpsPhase(normalizedType, parsed.Message, parsed.Code)
+		if service.IsOpsRoutingRateLimited(c) {
+			// The gateway's own "all accounts rate limited" 429: a routing
+			// failure, not an upstream limit (see OpsRoutingRateLimitedKey).
+			phase = "routing"
+		}
 		isBusinessLimited := classifyOpsIsBusinessLimited(normalizedType, phase, parsed.Code, status, parsed.Message)
 		if service.IsOpsUserLimit(c) {
 			// The gateway rejected the request for the user's or Key's own

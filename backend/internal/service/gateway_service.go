@@ -3702,14 +3702,22 @@ func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
 // 仅适用于 Anthropic OAuth/SetupToken 账号
 // 返回 true 表示可调度，false 表示不可调度
 func (s *GatewayService) isAccountSchedulableForWindowCost(ctx context.Context, account *Account, isSticky bool) bool {
+	schedulable, _ := s.windowCostSchedulability(ctx, account, isSticky)
+	return schedulable
+}
+
+// windowCostSchedulability is isAccountSchedulableForWindowCost that also
+// reports whether the window cost was actually known: a failed usage read
+// fails open (schedulable, known=false).
+func (s *GatewayService) windowCostSchedulability(ctx context.Context, account *Account, isSticky bool) (schedulable bool, known bool) {
 	// 只检查 Anthropic OAuth/SetupToken 账号
 	if !account.IsAnthropicOAuthOrSetupToken() {
-		return true
+		return true, true
 	}
 
 	limit := account.GetWindowCostLimit()
 	if limit <= 0 {
-		return true // 未启用窗口费用限制
+		return true, true // 未启用窗口费用限制
 	}
 
 	// 尝试从缓存获取窗口费用
@@ -3733,7 +3741,7 @@ func (s *GatewayService) isAccountSchedulableForWindowCost(ctx context.Context, 
 		stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, startTime)
 		if err != nil {
 			// 失败开放：查询失败时允许调度
-			return true
+			return true, false
 		}
 
 		// 使用标准费用（不含账号倍率）
@@ -3750,13 +3758,13 @@ checkSchedulability:
 
 	switch schedulability {
 	case WindowCostSchedulable:
-		return true
+		return true, true
 	case WindowCostStickyOnly:
-		return isSticky
+		return isSticky, true
 	case WindowCostNotSchedulable:
-		return false
+		return false, true
 	}
-	return true
+	return true, true
 }
 
 // rpmPrefetchContextKey is the context key for prefetched RPM counts.

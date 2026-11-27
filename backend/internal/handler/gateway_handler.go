@@ -1020,6 +1020,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					continue
 				}
 				if len(fs.FailedAccountIDs) == 0 {
+					if platform == service.PlatformAnthropic && !fallbackUsed && errors.Is(err, service.ErrNoAvailableAccounts) &&
+						onlyGroupTried(smartSwitchExcluded, currentAPIKey.GroupID) &&
+						h.writeAllAccountsRateLimited(c, currentAPIKey.GroupID, reqModel, streamStarted) {
+						return
+					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 					return
 				}
@@ -2219,6 +2224,61 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 	markOpsUserConcurrency(c, err, slotType)
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
 		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", concurrencyLimitSlotType(err, slotType)), streamStarted)
+}
+
+// allAccountsRateLimitedNoRetryWait is the wait beyond which the "all
+// accounts rate limited" 429 also tells SDK clients not to retry. Shorter
+// waits keep the client's normal retries, which Claude Code spaces by
+// Retry-After.
+const allAccountsRateLimitedNoRetryWait = 5 * time.Minute
+
+// onlyGroupTried reports whether account selection ran on groupID alone: no
+// smart switch moved the request between groups. A reset time computed for
+// the last group would ignore the other groups tried.
+func onlyGroupTried(smartSwitchExcluded map[int64]bool, groupID *int64) bool {
+	for id := range smartSwitchExcluded {
+		if groupID == nil || id != *groupID {
+			return false
+		}
+	}
+	return true
+}
+
+// writeAllAccountsRateLimited answers a failed first selection with a 429
+// when every candidate account of the group is blocked only by time-bound
+// limits with a known end (service.AllAccountsRateLimitedUntil). Clients
+// learn when the group recovers (Retry-After) and, for long waits, not to
+// retry (x-should-retry: false), instead of retrying a 503 and re-uploading
+// the request body each time. It writes nothing and returns false when the
+// reset is unknown or the response can no longer carry headers (a wait ping
+// was already flushed); the caller then keeps the generic 503.
+func (h *GatewayHandler) writeAllAccountsRateLimited(c *gin.Context, groupID *int64, model string, streamStarted bool) bool {
+	if h == nil || h.gatewayService == nil || streamStarted || c.Writer.Written() {
+		return false
+	}
+	resetAt, ok := h.gatewayService.AllAccountsRateLimitedUntil(c.Request.Context(), groupID, model)
+	if !ok {
+		return false
+	}
+	retryAfter, shouldRetry := allAccountsRateLimitedRetryHeaders(resetAt, time.Now())
+	c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
+	if !shouldRetry {
+		c.Header("x-should-retry", "false")
+	}
+	service.MarkOpsRoutingRateLimited(c)
+	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", service.AllAccountsRateLimitedMessage(resetAt), false)
+	return true
+}
+
+// allAccountsRateLimitedRetryHeaders returns the Retry-After seconds until
+// resetAt (rounded up, at least 1) and whether the client may keep retrying.
+func allAccountsRateLimitedRetryHeaders(resetAt, now time.Time) (retryAfterSeconds int64, shouldRetry bool) {
+	wait := resetAt.Sub(now)
+	retryAfterSeconds = int64((wait + time.Second - 1) / time.Second)
+	if retryAfterSeconds < 1 {
+		retryAfterSeconds = 1
+	}
+	return retryAfterSeconds, wait <= allAccountsRateLimitedNoRetryWait
 }
 
 // handleFailoverExhaustedAfterSelection is handleFailoverExhausted for the
