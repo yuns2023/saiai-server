@@ -418,7 +418,7 @@ func (s *BillingService) calculateCostAndSnapshot(model string, tokens UsageToke
 		billedTier := billingServiceTier(serviceTier, pricing)
 		snapshot.PriorityBilledAsStandard = snapshot.ServiceTier == "priority" && billedTier != "priority"
 		snapshot.LongContext = &LongContextPricing{
-			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing) && billedTier != "priority",
+			Applied: s.shouldApplySessionLongContextPricing(tokens, pricing),
 			Mode:    "whole_request", Threshold: pricing.LongContextInputThreshold,
 			TotalInputTokens: tokens.InputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens,
 			InputMultiplier:  pricing.LongContextInputMultiplier, OutputMultiplier: pricing.LongContextOutputMultiplier,
@@ -439,7 +439,10 @@ func (s *BillingService) calculateTokenCost(tokens UsageTokens, rateMultiplier f
 	cacheReadPricePerToken := pricing.CacheReadPricePerToken
 	serviceTier = billingServiceTier(serviceTier, pricing)
 	tierMultiplier := 1.0
-	longContextPricing := s.shouldApplySessionLongContextPricing(tokens, pricing) && normalizeBillingServiceTier(serviceTier) != "priority"
+	// The whole-request long-context multipliers apply on top of every tier's
+	// unit prices, Priority/Fast included (official Fast long-context prices
+	// are the Fast prices times the same multipliers).
+	longContextPricing := s.shouldApplySessionLongContextPricing(tokens, pricing)
 	if usePriorityServiceTierPricing(serviceTier, pricing) || (normalizeBillingServiceTier(serviceTier) == "priority" && pricing.Snapshot != nil && pricing.Reference != nil && usePriorityServiceTierPricing(serviceTier, pricing.Reference)) {
 		// A zero native price means "not published" and keeps the Standard
 		// price; synthesized and administrator prices are complete.
@@ -586,6 +589,23 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 		return pricing
 	}
 	return &cloned
+}
+
+// fillMissingLongContextMultipliers sets a category without a long-context
+// price (multiplier 0, after model-specific policies) to its short-context
+// price (1) when the whole-request rule is active, so billing, snapshots and
+// the pricing page agree and no category becomes free above the threshold.
+func fillMissingLongContextMultipliers(p *ModelPricing) {
+	if p == nil || p.LongContextInputThreshold <= 0 || (p.LongContextInputMultiplier <= 1 && p.LongContextOutputMultiplier <= 1 &&
+		p.LongContextCacheCreationMultiplier <= 1 && p.LongContextCacheReadMultiplier <= 1) {
+		return
+	}
+	for _, m := range []*float64{&p.LongContextInputMultiplier, &p.LongContextOutputMultiplier,
+		&p.LongContextCacheCreationMultiplier, &p.LongContextCacheReadMultiplier} {
+		if *m <= 0 {
+			*m = 1
+		}
+	}
 }
 
 func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) bool {

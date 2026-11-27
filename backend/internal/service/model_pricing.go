@@ -216,6 +216,7 @@ type LongContextPricing struct {
 
 func (s *BillingService) finishModelPricing(p *ModelPricing, r pricingResolution) *ModelPricing {
 	base := *s.applyModelSpecificPricingPolicy(r.ResolvedModel, p)
+	fillMissingLongContextMultipliers(&base)
 	base.Reference = nil
 	base.Snapshot = nil
 	effective := base
@@ -347,9 +348,9 @@ func (s *BillingService) DisplayUnitPrices(p *ModelPricing, tier string) map[str
 }
 
 // DisplayLongContextUnitPrices follows the same tier selection and whole-request
-// rule as actual billing. Unsupported tiers have no separate long-context price.
+// rule as actual billing, for every tier including Priority.
 func (s *BillingService) DisplayLongContextUnitPrices(p *ModelPricing, tier string) map[string]float64 {
-	if p == nil || !s.shouldApplySessionLongContextPricing(UsageTokens{InputTokens: p.LongContextInputThreshold + 1}, p) || billingServiceTier(tier, p) == "priority" {
+	if p == nil || !s.shouldApplySessionLongContextPricing(UsageTokens{InputTokens: p.LongContextInputThreshold + 1}, p) {
 		return nil
 	}
 	return s.displayContextUnitPrices(p, tier, true)

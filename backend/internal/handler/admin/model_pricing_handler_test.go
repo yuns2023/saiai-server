@@ -274,8 +274,9 @@ func TestModelPricingAdminListsAndPreviewsLongContextTierPrices(t *testing.T) {
 	require.Len(t, list.Data.Items, 1)
 	row := list.Data.Items[0]
 	require.NotEmpty(t, row.LongContextTiers["default"])
-	require.NotContains(t, row.LongContextTiers, "priority")
+	require.NotEmpty(t, row.LongContextTiers["priority"])
 	require.InDelta(t, row.Tiers["default"]["effective"]["input"]*2, row.LongContextTiers["default"]["effective"]["input"], 1e-12)
+	require.InDelta(t, row.Tiers["priority"]["effective"]["input"]*2, row.LongContextTiers["priority"]["effective"]["input"], 1e-12)
 	body := map[string]any{"model": "model-base", "tokens": map[string]any{"input_tokens": 1000, "cache_read_tokens": 272000}, "service_tier": "default", "group_rate": 1, "model_rate": 1, "user_discount": 1, "subscription": true}
 	w = priceHandlerRequest(router, http.MethodPost, "/preview", body)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

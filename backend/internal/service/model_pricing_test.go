@@ -172,7 +172,10 @@ func TestModelPricingLongContextEvidenceAndDisplayUseActualCalculator(t *testing
 	require.Zero(t, long["cache_read"])
 	require.InDelta(t, 25, long["cache_write_5m"], 1e-12)
 	require.InDelta(t, 10, b.DisplayUnitPrices(pricing, "default")["input"], 1e-12)
-	require.Nil(t, b.DisplayLongContextUnitPrices(pricing, "priority"))
+	// No native Priority price: Priority is the Standard price x2, then the
+	// long-context multiplier applies on top like every other tier.
+	require.InDelta(t, 40, b.DisplayLongContextUnitPrices(pricing, "priority")["input"], 1e-12)
+	require.InDelta(t, 150, b.DisplayLongContextUnitPrices(pricing, "priority")["output"], 1e-12)
 	require.InDelta(t, 10, b.DisplayLongContextUnitPrices(pricing, "flex")["input"], 1e-12)
 	for _, tier := range []string{"default", "flex", "priority"} {
 		for _, total := range []int{272000, 272001} {
@@ -181,7 +184,7 @@ func TestModelPricingLongContextEvidenceAndDisplayUseActualCalculator(t *testing
 			require.NoError(t, err)
 			info := cost.PricingSnapshot.LongContext
 			require.Equal(t, total, info.TotalInputTokens)
-			require.Equal(t, total > 272000 && tier != "priority", info.Applied)
+			require.Equal(t, total > 272000, info.Applied)
 			require.Equal(t, "whole_request", info.Mode)
 			require.Equal(t, 272000, info.Threshold)
 			require.Equal(t, 1.5, info.OutputMultiplier)
