@@ -22,6 +22,8 @@ import (
 type sharedMarketStore struct {
 	mu       sync.Mutex
 	account  service.Account
+	unpolled bool // the registry poll does not see the listing yet
+	rt       *service.MarketRuntime
 	groups   []int64 // groups the registry poll reports as fully shared by the owner
 	listed   bool
 	total    int
@@ -33,6 +35,12 @@ type sharedMarketStore struct {
 }
 
 func (s *sharedMarketStore) LoadMarketDispatchState(context.Context) (*service.MarketDispatchState, error) {
+	s.mu.Lock()
+	unpolled := s.unpolled
+	s.mu.Unlock()
+	if unpolled {
+		return &service.MarketDispatchState{}, nil
+	}
 	fully := map[int64]int64{}
 	for _, g := range s.groups {
 		fully[g] = *s.account.OwnerUserID
@@ -94,6 +102,7 @@ func newHostedSharedHarnessWith(t *testing.T, registryGroups []int64) (*entrypoi
 	rt := service.NewMarketRuntime(store)
 	require.True(t, rt.Refresh(context.Background()))
 	h.handler.gatewayService.SetMarketRuntime(rt)
+	store.rt = rt
 	return h, store, h.key(entrypointGroupA)
 }
 
@@ -193,4 +202,62 @@ func TestMessagesMixedOwnerGroupNoFullGroupRead(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	}
 	require.Zero(t, store.reads, "no full-group query on the normal path")
+}
+
+// Exact order: the owner's request is selected as self-use, then another
+// request of this process starts listing the account; Forward refuses at the
+// gate (listing in progress); the listing commits and ends; the reselect is
+// exhausted. The gate refusal is shared evidence, so the exhaustion answers
+// the HTTP 403 (not a retryable 503) with nothing sent upstream.
+func TestHostedAccountSharedEvidenceFromGatePending(t *testing.T) {
+	h, store, key := newHostedSharedHarnessWith(t, nil)
+	store.unpolled = true
+	require.True(t, store.rt.Refresh(context.Background()))
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := entrypointBody("cli")
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	ctx := service.WithMarketDispatch(service.WithAccountUserID(c.Request.Context(), h.user.ID), key)
+	c.Request = c.Request.WithContext(ctx)
+	gateway := h.handler.gatewayService
+
+	selection, err := gateway.SelectAccountWithLoadAwareness(ctx, key.GroupID, "", entrypointModel, nil, "")
+	require.NoError(t, err)
+	require.Nil(t, selection.Market, "selected as self-use")
+	token := store.rt.BeginListing(selection.Account.ID)
+
+	parsed, err := service.ParseGatewayRequest([]byte(body), service.PlatformAnthropic)
+	require.NoError(t, err)
+	fctx, _ := service.WithMarketAttempt(ctx, nil)
+	_, err = gateway.Forward(fctx, c, selection.Account, parsed)
+	var failover *service.UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.True(t, failover.MarketInvalidated, "the account's mode changed")
+	require.True(t, service.MarketSharedEvidence(ctx), "the gate refusal recorded shared evidence")
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+
+	store.rt.EndListing(selection.Account.ID, token) // committed
+	store.mu.Lock()
+	store.unpolled = false
+	store.mu.Unlock()
+	fs := NewFailoverState(3, false)
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, gateway, selection.Account.ID, service.PlatformAnthropic, failover))
+	_, err = gateway.SelectAccountWithLoadAwareness(ctx, key.GroupID, "", entrypointModel, fs.FailedAccountIDs, "")
+	require.ErrorIs(t, err, service.ErrNoAvailableAccounts)
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(ctx))
+	require.True(t, fs.OnlyMarketInvalidated())
+
+	// The exhaustion branch of Messages (same condition, same writer).
+	require.True(t, fs.OnlyMarketInvalidated() && service.MarketSharedEvidence(ctx) && errors.Is(err, service.ErrNoAvailableAccounts))
+	require.True(t, h.handler.writeHostedAccountShared(c, key, false, true))
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, "false", rec.Header().Get("x-should-retry"))
+	require.Empty(t, rec.Header().Get("Retry-After"))
+	require.Contains(t, rec.Body.String(), "HOSTED_ACCOUNT_SHARED")
+	require.Zero(t, h.lab.upstreamCalls())
+	require.Equal(t, 1, store.reads)
 }

@@ -2033,6 +2033,7 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 			s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
 			return body, nil, ErrMarketAdmissionRejected
 		}
+		s.markSharedEvidenceForOwner(ctx, account)
 		return body, nil, marketInvalidatedFailoverError(ErrMarketListingInvalidated)
 	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {

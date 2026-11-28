@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -56,9 +57,10 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 	return state, nil
 }
 
-// loadFullySharedGroups: the admin groups of listed accounts whose every
-// live admin member is listed and owned by one and the same user (only
-// groups with a listed member are scanned; nothing runs without listings).
+// loadFullySharedGroups: the owner groups (marketOwnerGroupPredicate for
+// that user) of listed accounts whose every live admin member is listed and
+// owned by that one user (only groups with a listed member are scanned;
+// nothing runs without listings).
 func (r *marketListingRepository) loadFullySharedGroups(ctx context.Context) (map[int64]int64, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		WITH candidate AS (
@@ -66,15 +68,19 @@ func (r *marketListingRepository) loadFullySharedGroups(ctx context.Context) (ma
 			FROM account_market_listings l
 			JOIN account_groups ag ON ag.account_id = l.account_id AND ag.source = 'admin'
 			WHERE l.status = 'listed'
+		), fully AS (
+			SELECT ag.group_id, min(a.owner_user_id) AS owner_user_id
+			FROM candidate c
+			JOIN account_groups ag ON ag.group_id = c.group_id AND ag.source = 'admin'
+			JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+			LEFT JOIN account_market_listings l ON l.account_id = a.id
+			GROUP BY ag.group_id
+			HAVING bool_and(COALESCE(l.status = 'listed', FALSE) AND a.owner_user_id IS NOT NULL)
+			   AND count(DISTINCT a.owner_user_id) = 1
 		)
-		SELECT ag.group_id, min(a.owner_user_id)
-		FROM candidate c
-		JOIN account_groups ag ON ag.group_id = c.group_id AND ag.source = 'admin'
-		JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
-		LEFT JOIN account_market_listings l ON l.account_id = a.id
-		GROUP BY ag.group_id
-		HAVING bool_and(COALESCE(l.status = 'listed', FALSE) AND a.owner_user_id IS NOT NULL)
-		   AND count(DISTINCT a.owner_user_id) = 1`)
+		SELECT f.group_id, f.owner_user_id
+		FROM fully f JOIN groups g ON g.id = f.group_id
+		WHERE `+strings.ReplaceAll(marketOwnerGroupPredicate, "$2", "f.owner_user_id"))
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +204,13 @@ func (r *marketListingRepository) marketEnabled(ctx context.Context, q sqlQuerye
 const marketOwnerGroupQuery = `
 	SELECT EXISTS (
 		SELECT 1 FROM groups g
-		WHERE g.id = $1 AND g.deleted_at IS NULL AND g.status = 'active'
+		WHERE g.id = $1 AND ` + marketOwnerGroupPredicate + `
+	)`
+
+// marketOwnerGroupPredicate is the owner-group condition on a groups row g
+// for the user in $2 (shared by the owner admission, the all-shared read
+// and, with $2 replaced, the registry's fully-shared index).
+const marketOwnerGroupPredicate = `g.deleted_at IS NULL AND g.status = 'active'
 			AND g.platform = 'anthropic' AND g.subscription_type = 'standard'
 			AND g.hosted_usage_enabled AND g.is_exclusive AND NOT g.market_tier
 			AND g.rate_multiplier >= 0 AND g.rate_multiplier <> 'NaN'::numeric
@@ -208,8 +220,7 @@ const marketOwnerGroupQuery = `
 			AND NOT EXISTS (
 				SELECT 1 FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
 				WHERE ag.group_id = g.id AND a.deleted_at IS NULL AND a.owner_user_id IS DISTINCT FROM $2
-			)
-	)`
+			)`
 
 // checkMarketCandidate is the read-only authoritative check (owner and
 // platform paths), one REPEATABLE READ snapshot.

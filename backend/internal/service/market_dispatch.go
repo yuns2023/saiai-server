@@ -1277,6 +1277,7 @@ func (s *GatewayService) marketGate(ctx context.Context, account *Account) (*Mar
 			if s.marketUpgradePlainAttempt(ctx, account) {
 				return attempt, nil
 			}
+			s.markSharedEvidenceForOwner(ctx, account)
 			return nil, ErrMarketListingInvalidated
 		}
 		return nil, nil
@@ -1312,8 +1313,27 @@ func (s *GatewayService) marketUpgradePlainAttempt(ctx context.Context, account 
 // plain attempt against the billed Key's group (the owner path requires that
 // group); nil = not an owner self-use candidate.
 func (s *GatewayService) marketGateOwnerSelection(ctx context.Context, account *Account) *MarketSelection {
+	if account == nil || s.market.marketListingPending(account.ID) {
+		return nil
+	}
+	return s.marketKeyOwnerCandidate(ctx, account)
+}
+
+// markSharedEvidenceForOwner: a refusal because of a pending or new listing,
+// on an account of the billed Key owner's own owner group, is evidence for
+// the exhaustion-time HOSTED_ACCOUNT_SHARED check.
+func (s *GatewayService) markSharedEvidenceForOwner(ctx context.Context, account *Account) {
+	if s.marketKeyOwnerCandidate(ctx, account) != nil {
+		markMarketSharedEvidence(ctx)
+	}
+}
+
+// marketKeyOwnerCandidate: the owner self-use candidate of the account in
+// the billed Key's group, whatever the listing state (nil = not the Key
+// owner's own owner-group account).
+func (s *GatewayService) marketKeyOwnerCandidate(ctx context.Context, account *Account) *MarketSelection {
 	dispatch := marketDispatchFromContext(ctx)
-	if dispatch == nil || dispatch.APIKey.GroupID == nil || s.market.marketListingPending(account.ID) {
+	if account == nil || dispatch == nil || dispatch.APIKey.GroupID == nil {
 		return nil
 	}
 	group := s.groupForMarket(ctx, dispatch.APIKey.GroupID)
@@ -1383,6 +1403,7 @@ func (s *GatewayService) marketSendBoundaryErr(ctx context.Context, account *Acc
 		if s.marketUpgradePlainAttempt(ctx, account) {
 			return s.finalizeMarketAdmission(ctx, account, marketAttemptFromContext(ctx), "")
 		}
+		s.markSharedEvidenceForOwner(ctx, account)
 		return ErrMarketListingInvalidated
 	}
 	if resend {
