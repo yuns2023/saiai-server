@@ -746,3 +746,59 @@ func TestHandleFailoverError_FableCreditsRequiredExcludesAccount(t *testing.T) {
 	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(context.Background()))
 	require.Contains(t, fs.FailedAccountIDs, int64(100))
 }
+
+// A candidate refused because its sharing mode or listing changed is not an
+// account failure: no cache-read billing for the switch, no switch counted,
+// the earlier real failure stays the client's error, and it stays excluded
+// even across the 503 backoff that clears the exclusion set.
+func TestFailoverMarketInvalidated(t *testing.T) {
+	ctx := context.Background()
+	invalidated := func() *service.UpstreamFailoverError {
+		return &service.UpstreamFailoverError{StatusCode: 503, MarketInvalidated: true}
+	}
+
+	fs := NewFailoverState(1, true)
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 1, service.PlatformAnthropic, invalidated()))
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, invalidated()),
+		"bounded by the group size, not by MaxSwitches")
+	require.False(t, fs.ForceCacheBilling, "a bound session does not switch to cache-read billing")
+	require.Zero(t, fs.SwitchCount)
+	require.True(t, fs.OnlyMarketInvalidated())
+	require.Contains(t, fs.FailedAccountIDs, int64(1))
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(ctx), "nothing to back off from")
+
+	// Device full on A, then B refused as shared: the device-full error is
+	// what the client gets, and the 403 check does not run.
+	full := &service.UpstreamFailoverError{StatusCode: 429, Cause: service.ErrClaudeOAuthCarpoolDevicesFull}
+	fs = NewFailoverState(3, true)
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 1, service.PlatformAnthropic, full)
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, invalidated())
+	require.Same(t, full, fs.LastFailoverErr)
+	require.False(t, fs.OnlyMarketInvalidated())
+
+	// Shared on A, then a database error (generic 503) on B: the backoff may
+	// clear the exclusion set, but A stays excluded; no 403.
+	fs = NewFailoverState(3, false)
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 1, service.PlatformAnthropic, invalidated())
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, newTestFailoverErr(503, false, false))
+	require.False(t, fs.OnlyMarketInvalidated())
+	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(ctx))
+	require.Equal(t, map[int64]struct{}{1: {}}, fs.FailedAccountIDs)
+	// B became unschedulable: the next selection is empty again with no new
+	// attempt. The request ends with B's real error instead of backing off
+	// every 2 s until the client gives up.
+	last := fs.LastFailoverErr
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(ctx))
+	require.Same(t, last, fs.LastFailoverErr)
+	require.False(t, fs.LastFailoverErr.MarketInvalidated)
+	// A new attempt re-arms the backoff (old behavior for real 503s).
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, newTestFailoverErr(503, false, false))
+	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(ctx))
+
+	// A generic 503 keeps the old behavior.
+	generic := NewFailoverState(3, true)
+	require.Equal(t, FailoverContinue, generic.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, newTestFailoverErr(503, false, false)))
+	require.True(t, generic.ForceCacheBilling)
+	require.False(t, generic.MarketInvalidatedSeen)
+	require.Equal(t, 1, generic.SwitchCount)
+}

@@ -205,6 +205,10 @@ type HostedApproveParams struct {
 	// Build runs inside the transaction on the locked pending application
 	// (no network I/O). Its error aborts the approval.
 	Build func(app *HostedApplicationSecrets) (*HostedApprovedAccountSpec, error)
+	// MarketPlan ("" = none): the approval also creates the account's
+	// sharing listing (unlisted = 自用, this plan, no reservations) in the
+	// same transaction; the plan must name a live, active market tier.
+	MarketPlan string
 }
 
 // HostedApproveResult is the approval outcome (also returned on replays).
@@ -612,6 +616,8 @@ type HostedApproveRequest struct {
 	CarpoolDeviceLimit        *int
 	CarpoolAdmissionsPerCycle *int
 	CarpoolIntervalHours      *int
+	// MarketPlan: optional sharing plan slug (see HostedApproveParams).
+	MarketPlan string
 }
 
 // Resolve fills omitted values from the settings defaults.
@@ -680,6 +686,12 @@ func (s *HostedSelfOnboardService) Approve(ctx context.Context, adminUserID, id 
 		return nil, err
 	}
 	params := HostedApproveParams{ApplicationID: id, AdminUserID: adminUserID}
+	if plan := req.MarketPlan; plan != "" {
+		if !ValidMarketPlan(plan) {
+			return nil, ErrMarketPlanInvalid
+		}
+		params.MarketPlan = plan
+	}
 	if in.ProxyMode == HostedApproveProxyExisting {
 		params.ExistingProxyID = in.ProxyID
 	} else {

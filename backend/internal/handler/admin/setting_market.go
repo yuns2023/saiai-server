@@ -8,13 +8,13 @@ import (
 
 // marketSettingsRequest fields are pointers: omitted keeps the stored value.
 type marketSettingsRequest struct {
-	MarketEnabled                    *bool    `json:"market_enabled"`
-	MarketPlatformCutRate            *float64 `json:"market_platform_cut_rate"`
-	MarketEarningFreezeDays          *int     `json:"market_earning_freeze_days"`
-	MarketMinConvertUSD              *float64 `json:"market_min_convert_usd"`
-	MarketDefaultReservedConcurrency *int     `json:"market_default_reserved_concurrency"`
-	MarketDefaultReservedDevices     *int     `json:"market_default_reserved_devices"`
-	MarketDefaultReservedAdmissions  *int     `json:"market_default_reserved_admissions"`
+	MarketEnabled                 *bool    `json:"market_enabled"`
+	MarketPlatformCutRate         *float64 `json:"market_platform_cut_rate"`
+	MarketEarningFreezeDays       *int     `json:"market_earning_freeze_days"`
+	MarketMinConvertUSD           *float64 `json:"market_min_convert_usd"`
+	MarketModeSwitchCooldownHours *int     `json:"market_mode_switch_cooldown_hours"`
+	// The removed market_default_reserved_* keys are not fields: a request
+	// that still sends them is not an error, they are simply ignored.
 }
 
 func (r *marketSettingsRequest) present() bool {
@@ -33,15 +33,13 @@ func (r *marketSettingsRequest) providedKeys() []string {
 	add(r.MarketPlatformCutRate != nil, service.SettingKeyMarketPlatformCutRate)
 	add(r.MarketEarningFreezeDays != nil, service.SettingKeyMarketEarningFreezeDays)
 	add(r.MarketMinConvertUSD != nil, service.SettingKeyMarketMinConvertUSD)
-	add(r.MarketDefaultReservedConcurrency != nil, service.SettingKeyMarketDefaultReservedConcurrency)
-	add(r.MarketDefaultReservedDevices != nil, service.SettingKeyMarketDefaultReservedDevices)
-	add(r.MarketDefaultReservedAdmissions != nil, service.SettingKeyMarketDefaultReservedAdmissions)
+	add(r.MarketModeSwitchCooldownHours != nil, service.SettingKeyMarketModeSwitchCooldownHours)
 	return keys
 }
 
 // resolveMarketSettings merges the request into the stored values and
 // validates them. An explicit 0 is kept wherever 0 is in range (cut rate,
-// freeze days, reservations). A non-empty string is the 400 message.
+// freeze days, cooldown). A non-empty string is the 400 message.
 func resolveMarketSettings(req *marketSettingsRequest, prev *service.SystemSettings) (service.MarketSettings, string) {
 	v := service.ParseMarketSettings(nil)
 	if prev != nil && prev.Market != nil {
@@ -72,9 +70,7 @@ func resolveMarketSettings(req *marketSettingsRequest, prev *service.SystemSetti
 		lo, hi int
 	}{
 		{"market_earning_freeze_days", req.MarketEarningFreezeDays, &v.EarningFreezeDays, 0, service.MaxMarketEarningFreezeDays},
-		{"market_default_reserved_concurrency", req.MarketDefaultReservedConcurrency, &v.DefaultProtection.ReservedConcurrency, 0, service.MaxMarketReservedConcurrency},
-		{"market_default_reserved_devices", req.MarketDefaultReservedDevices, &v.DefaultProtection.ReservedDevices, 0, service.MaxMarketReservedDevices},
-		{"market_default_reserved_admissions", req.MarketDefaultReservedAdmissions, &v.DefaultProtection.ReservedAdmissions, 0, service.MaxMarketReservedAdmissions},
+		{"market_mode_switch_cooldown_hours", req.MarketModeSwitchCooldownHours, &v.ModeSwitchCooldownHours, 0, service.MaxMarketModeSwitchCooldownHours},
 	}
 	for _, f := range ints {
 		if f.in == nil {
@@ -107,8 +103,8 @@ func diffMarketSettings(before, after *service.SystemSettings) []string {
 	if !b.MinConvertUSD.Equal(a.MinConvertUSD) {
 		changed = append(changed, "market_min_convert_usd")
 	}
-	if b.DefaultProtection != a.DefaultProtection {
-		changed = append(changed, "market_default_protection")
+	if b.ModeSwitchCooldownHours != a.ModeSwitchCooldownHours {
+		changed = append(changed, "market_mode_switch_cooldown_hours")
 	}
 	return changed
 }

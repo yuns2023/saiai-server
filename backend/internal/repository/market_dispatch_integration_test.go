@@ -27,8 +27,7 @@ func buyerSelection(t *testing.T, f *marketFixture, accountID, tier, owner int64
 	require.NoError(t, err)
 	return &service.MarketSelection{
 		Class: service.MarketClassBuyer, AccountID: accountID, GroupID: tier, OwnerUserID: owner,
-		ListingVersion: l.Version, Concurrency: 4, BuyerMaxConcurrency: 4 - l.Protection.ReservedConcurrency,
-		ReservedDevices: l.Protection.ReservedDevices, ReservedAdmissions: l.Protection.ReservedAdmissions,
+		ListingVersion: l.Version, Concurrency: 4, BuyerMaxConcurrency: 4, // no reservations
 		DeviceLimit: 5, // fixture: claude_oauth_carpool_device_limit = 5, no cycle budget
 	}
 }
@@ -95,21 +94,33 @@ func TestMarketAdmitBuyerRefusesChangedState(t *testing.T) {
 	require.NoError(t, err)
 	sel := buyerSelection(t, f, acc, tier, owner)
 
-	// Protection changed while waiting (reserved concurrency 1 -> 2): the
-	// listing version moved on.
-	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{
-		AccountID: acc, AdminUserID: 1, AllowedGroupIDs: []int64{tier}, Defaults: marketTestDefaults(),
-		Merge: func(p service.MarketProtectionParams) service.MarketProtectionParams {
-			p.ReservedConcurrency = 2
-			return p
-		},
-	})
+	// Stored reservations (legacy row / previous binary) are ignored.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE account_market_listings SET reserved_concurrency = 3, reserved_devices = 4, reserved_admissions = 2 WHERE account_id = $1", acc)
 	require.NoError(t, err)
 	v := admit(t, f, sel, buyerRequest(acc, tier, buyer))
+	require.True(t, v.Admitted, v.Reason)
+
+	// The owner switched off and on again while waiting: the listing
+	// version moved on.
+	svc := service.NewMarketListingService(f.market, NewSettingRepository(integrationEntClient))
+	_, err = svc.OwnerSet(ctx, owner, acc, 0, false)
+	require.NoError(t, err)
+	_, err = svc.OwnerSet(ctx, owner, acc, 0, true)
+	require.NoError(t, err)
+	v = admit(t, f, sel, buyerRequest(acc, tier, buyer))
 	require.False(t, v.Admitted)
 	require.Equal(t, "listing_changed", v.Reason)
 	sel = buyerSelection(t, f, acc, tier, owner)
 	require.True(t, admit(t, f, sel, buyerRequest(acc, tier, buyer)).Admitted)
+
+	// The tier's plan changed under an old row (no re-plan hook ran): the
+	// plan is the only permission.
+	plan := marketGroupPlan(t, tier)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_plan = 'other-plan' WHERE id = $1", tier)
+	require.NoError(t, err)
+	require.Equal(t, "plan_mismatch", admit(t, f, sel, buyerRequest(acc, tier, buyer)).Reason)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_plan = $2 WHERE id = $1", tier, plan)
+	require.NoError(t, err)
 
 	// Seller disabled.
 	_, err = integrationDB.ExecContext(ctx, "UPDATE users SET status='disabled' WHERE id=$1", owner)
@@ -171,7 +182,6 @@ func TestMarketAdmitBuyerRefusesChangedState(t *testing.T) {
 
 	before := admissionCount(t, acc)
 	// Owner unlists while a request waited.
-	svc := service.NewMarketListingService(f.market, NewSettingRepository(integrationEntClient))
 	_, err = svc.OwnerSet(ctx, owner, acc, 0, false)
 	require.NoError(t, err)
 	require.Equal(t, "not_market_member", admit(t, f, sel, buyerRequest(acc, tier, buyer)).Reason)
@@ -222,9 +232,73 @@ func TestMarketAdmitPlatformAndOwnerPaths(t *testing.T) {
 	require.Equal(t, "not_owner_group", admit(t, f, ownerSel, ownerReq).Reason, "the owner is not an allowed user of the group yet")
 	_, err = integrationDB.ExecContext(ctx, "INSERT INTO user_allowed_groups (user_id, group_id) VALUES ($1, $2)", owner, hosted)
 	require.NoError(t, err)
+	// 共享 and 自用 are exclusive: listed in the database = refused as shared.
+	require.Equal(t, "shared", admit(t, f, ownerSel, ownerReq).Reason)
+	state, err := f.market.LoadMarketDispatchState(ctx)
+	require.NoError(t, err)
+	require.Equal(t, owner, state.FullySharedGroups[hosted], "the registry knows the owner group is fully shared")
+	// Not an owner group of that user any more (another allowed user): not
+	// indexed, so the owner's requests never read the group early.
+	_, err = integrationDB.ExecContext(ctx, "INSERT INTO user_allowed_groups (user_id, group_id) VALUES ($1, $2)", other, hosted)
+	require.NoError(t, err)
+	state, err = f.market.LoadMarketDispatchState(ctx)
+	require.NoError(t, err)
+	_, indexed := state.FullySharedGroups[hosted]
+	require.False(t, indexed, "the owner-group predicate applies to the index")
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM user_allowed_groups WHERE user_id = $1 AND group_id = $2", other, hosted)
+	require.NoError(t, err)
+	// A second, self-use member: no longer fully shared (no early read).
+	selfUse := f.account(t, owner)
+	require.NoError(t, f.accounts.BindGroups(ctx, selfUse, []int64{hosted}))
+	state, err = f.market.LoadMarketDispatchState(ctx)
+	require.NoError(t, err)
+	_, fully := state.FullySharedGroups[hosted]
+	require.False(t, fully, "mixed group")
+	require.NoError(t, f.accounts.BindGroups(ctx, selfUse, nil))
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM user_allowed_groups WHERE group_id = $1", hosted)
+	})
+	total, shared, err := f.market.HostedGroupSharedAccounts(ctx, hosted, owner)
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Equal(t, []int64{listed}, shared)
+	total, shared, err = f.market.HostedGroupSharedAccounts(ctx, hosted, other)
+	require.NoError(t, err)
+	require.Zero(t, total, "not an owner group of that user: nothing to report")
+	require.Empty(t, shared)
+	// The group stopped being a hosted group after the Key snapshot: no 403.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET hosted_usage_enabled = FALSE WHERE id = $1", hosted)
+	require.NoError(t, err)
+	total, _, err = f.market.HostedGroupSharedAccounts(ctx, hosted, owner)
+	require.NoError(t, err)
+	require.Zero(t, total)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET hosted_usage_enabled = TRUE WHERE id = $1", hosted)
+	require.NoError(t, err)
+
+	// Opposite timing 1: a listing transaction not yet committed — the
+	// database still says unlisted (the gateway avoids such an account
+	// through its local pending mark, see the service tests).
+	svc := service.NewMarketListingService(f.market, NewSettingRepository(integrationEntClient))
+	_, err = svc.OwnerSet(ctx, owner, listed, 0, false)
+	require.NoError(t, err)
+	listingTx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = listingTx.Rollback() }()
+	_, err = listingTx.ExecContext(ctx, `UPDATE account_market_listings SET status = 'listed', selected_group_id = $2,
+		allowed_group_ids = ARRAY[$2::bigint], listed_at = NOW(), version = version + 1 WHERE account_id = $1`, listed, tier)
+	require.NoError(t, err)
+	v = admit(t, f, ownerSel, ownerReq)
+	require.True(t, v.Admitted, "uncommitted listing invisible: %s", v.Reason)
+	require.NoError(t, listingTx.Rollback())
+	// Opposite timing 2: unlisted (committed) while a cache still says
+	// listed — the authoritative check admits the owner's self-use.
 	v = admit(t, f, ownerSel, ownerReq)
 	require.True(t, v.Admitted, v.Reason)
 	require.Nil(t, v.Admission)
+	total, shared, err = f.market.HostedGroupSharedAccounts(ctx, hosted, owner)
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Empty(t, shared, "self-use account: not all shared")
 	// Another user of the same group is not the owner.
 	require.Equal(t, "not_owner", admit(t, f, ownerSel, &service.MarketAdmissionRequest{Class: service.MarketClassOwner, AccountID: listed, GroupID: hosted, AuthUserID: other}).Reason)
 	// The tier itself is never an owner group.

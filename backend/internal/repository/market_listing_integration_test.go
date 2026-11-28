@@ -48,18 +48,27 @@ func newMarketFixture(t *testing.T) *marketFixture {
 		owners:   &hostedOwnerRepository{db: integrationDB, accounts: accounts},
 		apps:     &hostedApplicationRepository{client: integrationEntClient, db: integrationDB, accounts: accounts},
 	}
-	var previous sql.NullString
-	err := integrationDB.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=$1", service.SettingKeyMarketEnabled).Scan(&previous)
-	if err != nil {
-		require.ErrorIs(t, err, sql.ErrNoRows)
+	previous := map[string]sql.NullString{}
+	for _, key := range []string{service.SettingKeyMarketEnabled, service.SettingKeyMarketModeSwitchCooldownHours} {
+		var value sql.NullString
+		err := integrationDB.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=$1", key).Scan(&value)
+		if err != nil {
+			require.ErrorIs(t, err, sql.ErrNoRows)
+		}
+		previous[key] = value
 	}
 	f.setMarketEnabled(t, true)
+	// Most lifecycle tests switch several times in a row; the cooldown
+	// tests set their own value.
+	f.setCooldownHours(t, 0)
 	t.Cleanup(func() {
 		bg := context.Background()
-		if previous.Valid {
-			_, _ = integrationDB.ExecContext(bg, "UPDATE settings SET value=$2 WHERE key=$1", service.SettingKeyMarketEnabled, previous.String)
-		} else {
-			_, _ = integrationDB.ExecContext(bg, "DELETE FROM settings WHERE key=$1", service.SettingKeyMarketEnabled)
+		for key, value := range previous {
+			if value.Valid {
+				_, _ = integrationDB.ExecContext(bg, "UPDATE settings SET value=$2 WHERE key=$1", key, value.String)
+			} else {
+				_, _ = integrationDB.ExecContext(bg, "DELETE FROM settings WHERE key=$1", key)
+			}
 		}
 		accountIDs := pq.Array(f.accountIDs)
 		groupIDs := pq.Array(f.groupIDs)
@@ -99,6 +108,13 @@ func (f *marketFixture) setMarketEnabled(t *testing.T, on bool) {
 	require.NoError(t, err)
 }
 
+func (f *marketFixture) setCooldownHours(t *testing.T, hours int) {
+	t.Helper()
+	_, err := integrationDB.ExecContext(context.Background(), `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`, service.SettingKeyMarketModeSwitchCooldownHours, fmt.Sprint(hours))
+	require.NoError(t, err)
+}
+
 func (f *marketFixture) user(t *testing.T) int64 {
 	t.Helper()
 	u := mustCreateUser(t, integrationEntClient, &service.User{Email: "market-" + uuid.NewString() + "@example.invalid"})
@@ -111,10 +127,24 @@ func (f *marketFixture) group(t *testing.T, tier bool) int64 {
 	g := mustCreateGroup(t, integrationEntClient, &service.Group{Name: "market-" + uuid.NewString(), Platform: service.PlatformAnthropic, RateMultiplier: 1.2})
 	f.groupIDs = append(f.groupIDs, g.ID)
 	if tier {
-		_, err := integrationDB.ExecContext(context.Background(), "UPDATE groups SET market_tier = TRUE WHERE id = $1", g.ID)
+		// Each tier gets its own plan unless configure joins them.
+		_, err := integrationDB.ExecContext(context.Background(), "UPDATE groups SET market_tier = TRUE, market_plan = $2 WHERE id = $1",
+			g.ID, marketTestPlan())
 		require.NoError(t, err)
 	}
 	return g.ID
+}
+
+func marketTestPlan() string {
+	return "p" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+}
+
+func marketGroupPlan(t *testing.T, groupID int64) string {
+	t.Helper()
+	var plan sql.NullString
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), "SELECT market_plan FROM groups WHERE id = $1", groupID).Scan(&plan))
+	require.True(t, plan.Valid, "group %d has a plan", groupID)
+	return plan.String
 }
 
 // account creates a setup-token carpool account (finite device limit) with
@@ -133,10 +163,18 @@ func (f *marketFixture) account(t *testing.T, owner int64) int64 {
 	return acc.ID
 }
 
-func (f *marketFixture) configure(t *testing.T, accountID int64, allowed ...int64) *service.MarketListing {
+// configure gives the account the plan of the first tier; further tiers are
+// moved into that plan (direct SQL: test setup only).
+func (f *marketFixture) configure(t *testing.T, accountID int64, tiers ...int64) *service.MarketListing {
 	t.Helper()
+	require.NotEmpty(t, tiers)
+	plan := marketGroupPlan(t, tiers[0])
+	for _, id := range tiers[1:] {
+		_, err := integrationDB.ExecContext(context.Background(), "UPDATE groups SET market_plan = $2 WHERE id = $1", id, plan)
+		require.NoError(t, err)
+	}
 	l, err := f.market.AdminConfigure(context.Background(), service.MarketAdminConfigureParams{
-		AccountID: accountID, AdminUserID: 1, AllowedGroupIDs: allowed, Defaults: marketTestDefaults(),
+		AccountID: accountID, AdminUserID: 1, Plan: plan,
 	})
 	require.NoError(t, err)
 	return l
@@ -152,8 +190,13 @@ func (f *marketFixture) list(accountID, owner, groupID int64) (*service.MarketLi
 	return f.market.GetListing(context.Background(), accountID)
 }
 
-func marketTestDefaults() service.MarketProtectionParams {
-	return service.MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1}
+// marketReservations reads the stored (ignored) reservation columns.
+func marketReservations(t *testing.T, accountID int64) [3]int {
+	t.Helper()
+	var r [3]int
+	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT reserved_concurrency, reserved_devices, reserved_admissions
+		FROM account_market_listings WHERE account_id = $1`, accountID).Scan(&r[0], &r[1], &r[2]))
+	return r
 }
 
 func marketMemberships(t *testing.T, accountID int64) map[int64]string {
@@ -494,7 +537,8 @@ func TestMarketListingBaselineOwnerEventAndList(t *testing.T) {
 	require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
 	require.Equal(t, int64(1), l.Version)
 	require.Equal(t, owner, l.OwnerUserID)
-	require.Equal(t, marketTestDefaults(), l.Protection)
+	require.Equal(t, marketGroupPlan(t, tier), *l.Plan)
+	require.Equal(t, [3]int{0, 0, 0}, marketReservations(t, acc), "no reservations")
 
 	l, err = f.list(acc, owner, tier)
 	require.NoError(t, err)
@@ -534,7 +578,8 @@ func TestMarketListingBaselineOwnerEventAndList(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tier2, *l.SelectedGroupID)
 	require.Equal(t, map[int64]string{tier2: "market"}, marketMemberships(t, acc))
-	require.Equal(t, "owner_switch", marketEventActions(t, acc)[3])
+	actions := marketEventActions(t, acc)
+	require.Equal(t, "owner_switch", actions[len(actions)-1], "the plan already covered tier2: no admin event, the move is an owner switch")
 
 	// Unlist keeps the selection, removes the row.
 	l, err = f.market.OwnerSet(ctx, service.MarketOwnerSetParams{OwnerUserID: owner, AccountID: acc, Listed: false})
@@ -570,10 +615,10 @@ func TestMarketListingOwnerScopeAndOverreach(t *testing.T) {
 	// Not allowed / not a tier / unknown group.
 	_, err = f.list(accA, ownerA, other)
 	requireReason(t, err, "MARKET_GROUP_NOT_ALLOWED")
-	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accA, AllowedGroupIDs: []int64{tier, plain}, Defaults: marketTestDefaults()})
-	requireReason(t, err, "MARKET_INVALID_TIER")
-	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accA, AllowedGroupIDs: []int64{tier, 1 << 40}, Defaults: marketTestDefaults()})
-	requireReason(t, err, "MARKET_INVALID_TIER")
+	_ = plain
+	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accA, Plan: "no-such-plan"})
+	requireReason(t, err, "MARKET_PLAN_UNKNOWN")
+	require.Equal(t, marketGroupPlan(t, tier), *marketListingState(t, f, accA).Plan, "nothing changed")
 	// Switch off: listing refused, unlisting always allowed.
 	f.setMarketEnabled(t, false)
 	_, err = f.list(accA, ownerA, tier)
@@ -592,7 +637,7 @@ func TestMarketListingOwnerScopeAndOverreach(t *testing.T) {
 	_, err = f.list(accC, ownerA, tier)
 	requireReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE")
 	accNoOwner := f.account(t, 0)
-	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accNoOwner, AllowedGroupIDs: []int64{tier}, Defaults: marketTestDefaults()})
+	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accNoOwner, Plan: marketGroupPlan(t, tier)})
 	requireReason(t, err, "MARKET_ACCOUNT_NO_OWNER")
 
 	// Deleted account: owner and admin both get not found.
@@ -600,7 +645,7 @@ func TestMarketListingOwnerScopeAndOverreach(t *testing.T) {
 	require.NoError(t, err)
 	_, err = f.list(accB, ownerB, tier)
 	requireReason(t, err, "HOSTED_ACCOUNT_NOT_FOUND")
-	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accB, AllowedGroupIDs: []int64{tier}, Defaults: marketTestDefaults()})
+	_, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: accB, Plan: marketGroupPlan(t, tier)})
 	require.ErrorIs(t, err, service.ErrAccountNotFound)
 }
 
@@ -713,7 +758,6 @@ func TestMarketListedAccountSchedulingReads(t *testing.T) {
 			require.NotNil(t, a.MarketListing)
 			require.Equal(t, tier, a.MarketListing.GroupID)
 			require.Equal(t, owner, a.MarketListing.OwnerUserID)
-			require.Equal(t, marketTestDefaults(), a.MarketListing.Protection)
 		case selfRun:
 			require.Nil(t, a.MarketListing)
 		}
@@ -743,7 +787,7 @@ func TestMarketListedAccountSchedulingReads(t *testing.T) {
 	require.Equal(t, int64(2), total)
 }
 
-func TestMarketListingOwnerLifecycleHooksUnlist(t *testing.T) {
+func TestMarketListingOwnerLifecycleHooks(t *testing.T) {
 	ctx := context.Background()
 	f := newMarketFixture(t)
 	owner := f.user(t)
@@ -759,7 +803,7 @@ func TestMarketListingOwnerLifecycleHooksUnlist(t *testing.T) {
 		t.Helper()
 		l := marketListingState(t, f, acc)
 		require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
-		require.Equal(t, []int64{tier}, l.AllowedGroupIDs, "permission kept")
+		require.Equal(t, marketGroupPlan(t, tier), *l.Plan, "permission (plan) kept")
 		require.Empty(t, marketMemberships(t, acc))
 		actions := marketEventActions(t, acc)
 		require.Equal(t, action, actions[len(actions)-1])
@@ -778,15 +822,42 @@ func TestMarketListingOwnerLifecycleHooksUnlist(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, service.MarketListingStatusUnlisted, marketListingState(t, f, cleared).Status)
 
+	// Pause keeps the owner's mode (the paused account serves nobody);
+	// resume only clears the pause.
 	paused := setup()
+	before := marketListingState(t, f, paused)
 	_, err = f.apps.SetOwnerAccountState(ctx, owner, paused, service.HostedOwnerActionPause)
 	require.NoError(t, err)
-	requireUnlisted(paused, service.MarketListingActionOwnerPaused)
+	l := marketListingState(t, f, paused)
+	require.Equal(t, service.MarketListingStatusListed, l.Status, "pause keeps 共享")
+	require.Equal(t, before.Version, l.Version, "no listing change")
+	require.Equal(t, map[int64]string{tier: "market"}, marketMemberships(t, paused))
+	require.NotContains(t, marketEventActions(t, paused), service.MarketListingActionOwnerPaused)
+	loaded, err := f.accounts.GetByID(ctx, paused)
+	require.NoError(t, err)
+	require.False(t, loaded.IsSchedulable(), "a paused account serves nobody")
 	_, err = f.list(paused, owner, tier)
-	requireReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE") // paused cannot list
+	require.NoError(t, err, "same-target PUT while paused is idempotent")
 	_, err = f.apps.SetOwnerAccountState(ctx, owner, paused, service.HostedOwnerActionResume)
 	require.NoError(t, err)
-	require.Equal(t, service.MarketListingStatusUnlisted, marketListingState(t, f, paused).Status, "resume never relists")
+	require.Equal(t, before.Version, marketListingState(t, f, paused).Version, "resume writes nothing")
+	// A paused self-use account cannot be listed; it can be taken back.
+	pausedSelfUse := setup()
+	_, err = f.market.OwnerSet(ctx, service.MarketOwnerSetParams{OwnerUserID: owner, AccountID: pausedSelfUse, Listed: false})
+	require.NoError(t, err)
+	_, err = f.apps.SetOwnerAccountState(ctx, owner, pausedSelfUse, service.HostedOwnerActionPause)
+	require.NoError(t, err)
+	_, err = f.list(pausedSelfUse, owner, tier)
+	requireReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE")
+	// While paused an admin revokes: resume relists nothing.
+	_, err = f.market.AdminRevoke(ctx, paused, 1)
+	require.NoError(t, err)
+	_, err = f.apps.SetOwnerAccountState(ctx, owner, paused, service.HostedOwnerActionPause)
+	require.NoError(t, err)
+	_, err = f.apps.SetOwnerAccountState(ctx, owner, paused, service.HostedOwnerActionResume)
+	require.NoError(t, err)
+	require.Equal(t, service.MarketListingStatusRevoked, marketListingState(t, f, paused).Status)
+	require.Empty(t, marketMemberships(t, paused))
 
 	withdrawn := setup()
 	_, err = f.apps.SetOwnerAccountState(ctx, owner, withdrawn, service.HostedOwnerActionWithdraw)
@@ -795,41 +866,52 @@ func TestMarketListingOwnerLifecycleHooksUnlist(t *testing.T) {
 
 	deleted := setup()
 	require.NoError(t, f.accounts.Delete(ctx, deleted))
-	l := marketListingState(t, f, deleted)
+	l = marketListingState(t, f, deleted)
 	require.Equal(t, service.MarketListingStatusRevoked, l.Status)
-	require.Empty(t, l.AllowedGroupIDs)
+	require.Nil(t, l.Plan)
 	require.Empty(t, marketMemberships(t, deleted))
 	require.Equal(t, service.MarketListingActionAccountDeleted, marketEventActions(t, deleted)[len(marketEventActions(t, deleted))-1])
 }
 
-func TestMarketListingAdminRevokeAndSelectedTierRemoval(t *testing.T) {
+func TestMarketListingAdminPlanChangeAndRevoke(t *testing.T) {
 	ctx := context.Background()
 	f := newMarketFixture(t)
 	owner := f.user(t)
 	tier := f.group(t, true)
-	tier2 := f.group(t, true)
+	other := f.group(t, true) // another plan
 	acc := f.account(t, owner)
-	f.configure(t, acc, tier, tier2)
+	f.configure(t, acc, tier)
 	_, err := f.list(acc, owner, tier)
 	require.NoError(t, err)
 
-	// Dropping the selected tier unlists immediately.
-	l := f.configure(t, acc, tier2)
+	// A plan whose tiers do not include the selected one unlists at once
+	// (selection cleared, market row removed), like a deleted tier.
+	l := f.configure(t, acc, other)
 	require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
 	require.Nil(t, l.SelectedGroupID)
+	require.Equal(t, marketGroupPlan(t, other), *l.Plan)
 	require.Empty(t, marketMemberships(t, acc))
+	require.Equal(t, service.MarketListingActionAdminConfigure, marketEventActions(t, acc)[len(marketEventActions(t, acc))-1])
 	// Unchanged PUT is a no-op (no version bump).
-	again := f.configure(t, acc, tier2)
+	again := f.configure(t, acc, other)
 	require.Equal(t, l.Version, again.Version)
-	// Protection params: merged and validated against the account.
-	p, err := f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: acc, AllowedGroupIDs: []int64{tier2}, Defaults: marketTestDefaults(),
-		Merge: func(b service.MarketProtectionParams) service.MarketProtectionParams {
-			b.ReservedConcurrency = 0
-			return b
-		}})
+	// Same plan while listed keeps the listing, also when its tier was
+	// deactivated meanwhile (deactivation never unlists).
+	_, err = f.list(acc, owner, other)
 	require.NoError(t, err)
-	require.Equal(t, 0, p.Protection.ReservedConcurrency)
-	require.Equal(t, 2, p.Protection.ReservedDevices)
+	l = f.configure(t, acc, other)
+	require.Equal(t, service.MarketListingStatusListed, l.Status)
+	second := f.group(t, true)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET market_plan = $2 WHERE id = $1", second, marketGroupPlan(t, other))
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET status = 'inactive' WHERE id = $1", other)
+	require.NoError(t, err)
+	l, err = f.market.AdminConfigure(ctx, service.MarketAdminConfigureParams{AccountID: acc, AdminUserID: 1, Plan: marketGroupPlan(t, other)})
+	require.NoError(t, err)
+	require.Equal(t, service.MarketListingStatusListed, l.Status)
+	require.Equal(t, other, *l.SelectedGroupID)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET status = 'active' WHERE id = $1", other)
+	require.NoError(t, err)
 	// The retired share-cap columns are no longer written: the insert takes
 	// the column defaults and every history row copies them, so the
 	// previous binary (which still reads and writes them) keeps working.
@@ -840,21 +922,30 @@ func TestMarketListingAdminRevokeAndSelectedTierRemoval(t *testing.T) {
 	require.Zero(t, hostedCountRows(t, `SELECT COUNT(*) FROM account_market_listing_events
 		WHERE account_id = $1 AND (cap_5h_pct, cap_7d_pct, sample_max_age_minutes) <> (70, 60, 30)`, acc))
 	require.NotZero(t, hostedCountRows(t, "SELECT COUNT(*) FROM account_market_listing_events WHERE account_id = $1", acc))
+	require.Zero(t, hostedCountRows(t, `SELECT COUNT(*) FROM account_market_listing_events
+		WHERE account_id = $1 AND (reserved_concurrency, reserved_devices, reserved_admissions) <> (0, 0, 0)`, acc), "history: no reservations")
+	require.Zero(t, hostedCountRows(t, `SELECT COUNT(*) FROM account_market_listing_events
+		WHERE account_id = $1 AND plan IS NULL`, acc), "history carries the plan")
 
-	_, err = f.list(acc, owner, tier2)
-	require.NoError(t, err)
 	revoked, err := f.market.AdminRevoke(ctx, acc, 1)
 	require.NoError(t, err)
 	require.Equal(t, service.MarketListingStatusRevoked, revoked.Status)
-	require.Empty(t, revoked.AllowedGroupIDs)
+	require.Nil(t, revoked.Plan)
 	require.Empty(t, marketMemberships(t, acc))
-	_, err = f.list(acc, owner, tier2)
+	_, err = f.list(acc, owner, other)
 	requireReason(t, err, "MARKET_LISTING_REVOKED")
-	// Re-allowing makes it unlisted again (never auto-listed).
-	l = f.configure(t, acc, tier2)
+	// Only an explicit admin PUT re-grants (never auto-listed).
+	l = f.configure(t, acc, other)
 	require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
 	_, err = f.market.AdminRevoke(ctx, f.account(t, owner), 1)
 	requireReason(t, err, "MARKET_LISTING_NOT_FOUND")
+
+	// Legacy rows: stored reservations are normalized to 0 by the next write.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE account_market_listings SET reserved_concurrency = 2, reserved_devices = 3, reserved_admissions = 1 WHERE account_id = $1", acc)
+	require.NoError(t, err)
+	_, err = f.list(acc, owner, other)
+	require.NoError(t, err)
+	require.Equal(t, [3]int{0, 0, 0}, marketReservations(t, acc))
 }
 
 func TestMarketListingGroupDeleteAndDemote(t *testing.T) {
@@ -876,13 +967,12 @@ func TestMarketListingGroupDeleteAndDemote(t *testing.T) {
 	require.NoError(t, err)
 	l := marketListingState(t, f, acc)
 	require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
-	require.Equal(t, []int64{keep}, l.AllowedGroupIDs)
+	require.NotNil(t, l.Plan, "the plan stays")
 	require.Nil(t, l.SelectedGroupID)
 	require.Empty(t, marketMemberships(t, acc))
 	require.Equal(t, service.MarketListingActionGroupDeleted, marketEventActions(t, acc)[len(marketEventActions(t, acc))-1])
 	l2 := marketListingState(t, f, acc2)
 	require.Equal(t, service.MarketListingStatusListed, l2.Status, "other tiers unaffected")
-	require.Equal(t, []int64{keep}, l2.AllowedGroupIDs)
 
 	// Demoting a tier (market_tier true → false) does the same.
 	g, err := f.groups.GetByID(ctx, keep)
@@ -891,7 +981,7 @@ func TestMarketListingGroupDeleteAndDemote(t *testing.T) {
 	require.NoError(t, f.groups.Update(ctx, g))
 	l2 = marketListingState(t, f, acc2)
 	require.Equal(t, service.MarketListingStatusUnlisted, l2.Status)
-	require.Empty(t, l2.AllowedGroupIDs)
+	require.Nil(t, l2.SelectedGroupID)
 	require.Empty(t, marketMemberships(t, acc2))
 	require.Equal(t, service.MarketListingActionGroupDemoted, marketEventActions(t, acc2)[len(marketEventActions(t, acc2))-1])
 	// Other updates of a tier keep its listings.
@@ -905,6 +995,31 @@ func TestMarketListingGroupDeleteAndDemote(t *testing.T) {
 	require.NoError(t, f.groups.Update(ctx, g3))
 	require.Equal(t, service.MarketListingStatusListed, marketListingState(t, f, acc).Status)
 	require.Equal(t, map[int64]string{tier3: "market"}, marketMemberships(t, acc))
+
+	// Re-planning a tier (it stays a tier) unlists the listings of another
+	// plan selected there, like a demotion; listings of the new plan stay.
+	accSame := f.account(t, owner)
+	newPlan := marketTestPlan()
+	_, err = integrationDB.ExecContext(ctx, "INSERT INTO account_market_listings (account_id, owner_user_id, plan) VALUES ($1, $2, $3)", accSame, owner, newPlan)
+	require.NoError(t, err)
+	g3, err = f.groups.GetByID(ctx, tier3)
+	require.NoError(t, err)
+	g3.MarketPlan, g3.MarketPlanWrite = &newPlan, true
+	require.NoError(t, f.groups.Update(ctx, g3))
+	l = marketListingState(t, f, acc)
+	require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
+	require.Nil(t, l.SelectedGroupID)
+	require.Empty(t, marketMemberships(t, acc))
+	require.Equal(t, service.MarketListingActionGroupReplanned, marketEventActions(t, acc)[len(marketEventActions(t, acc))-1])
+	require.GreaterOrEqual(t, marketOutboxCount(t, acc, service.SchedulerOutboxEventAccountGroupsChanged), 2)
+	// The account of the new plan can now list there.
+	_, err = f.list(accSame, owner, tier3)
+	require.NoError(t, err)
+	g3, err = f.groups.GetByID(ctx, tier3)
+	require.NoError(t, err)
+	g3.MarketPlan, g3.MarketPlanWrite = nil, true // a tier without a plan sells nothing
+	require.NoError(t, f.groups.Update(ctx, g3))
+	require.Equal(t, service.MarketListingStatusUnlisted, marketListingState(t, f, accSame).Status)
 }
 
 func TestMarketListingConcurrentListAndRevoke(t *testing.T) {

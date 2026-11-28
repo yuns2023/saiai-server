@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"slices"
+	"time"
 )
 
 // MarketListingService serves the admin and owner listing endpoints. The
@@ -15,6 +16,7 @@ type MarketListingService struct {
 	// this process treats the account as listed even before the registry
 	// poll (or a stale cached copy) catches up.
 	listings MarketListingObserver
+	now      func() time.Time
 }
 
 // MarketListingObserver is implemented by MarketRuntime.
@@ -35,7 +37,7 @@ func (s *MarketListingService) SetListingObserver(o MarketListingObserver) {
 }
 
 func NewMarketListingService(repo MarketListingRepository, settingRepo SettingRepository) *MarketListingService {
-	return &MarketListingService{repo: repo, settingRepo: settingRepo}
+	return &MarketListingService{repo: repo, settingRepo: settingRepo, now: time.Now}
 }
 
 // AdminMarketListingView is the body of GET/PUT/DELETE
@@ -43,15 +45,14 @@ func NewMarketListingService(repo MarketListingRepository, settingRepo SettingRe
 type AdminMarketListingView struct {
 	AccountID   int64  `json:"account_id"`
 	OwnerUserID *int64 `json:"owner_user_id"`
-	// Listing is null when the account was never configured.
+	// Listing is null when the account was never configured; listing.plan
+	// is the account's plan (null = none).
 	Listing *MarketListing `json:"listing"`
-	// AllowedTiers describes Listing.AllowedGroupIDs.
+	// AllowedTiers: the tiers derived from the plan.
 	AllowedTiers []MarketTierOption `json:"allowed_tiers"`
 	// IneligibleReason: why the account type/config cannot be listed ("" = ok).
 	IneligibleReason string `json:"ineligible_reason"`
-	// DefaultProtection: the site defaults used when a listing is created.
-	DefaultProtection MarketProtectionParams `json:"default_protection"`
-	MarketEnabled     bool                   `json:"market_enabled"`
+	MarketEnabled    bool   `json:"market_enabled"`
 }
 
 // OwnerMarketView is the body of GET/PUT /api/v1/hosted/owned-accounts/:id/market.
@@ -59,36 +60,29 @@ type OwnerMarketView struct {
 	AccountID     int64 `json:"account_id"`
 	MarketEnabled bool  `json:"market_enabled"`
 	// Status: not_configured | unlisted | listed | revoked.
-	Status          string             `json:"status"`
+	Status string `json:"status"`
+	// Mode: shared ⇔ status listed, else self_use.
+	Mode string `json:"mode"`
+	// Plan: the account's plan (null = none).
+	Plan            *string            `json:"plan"`
 	SelectedGroupID *int64             `json:"selected_group_id"`
 	Version         int64              `json:"version"`
 	AllowedTiers    []MarketTierOption `json:"allowed_tiers"`
-	// Protection is read-only for owners (admin-managed); null when not configured.
-	Protection *MarketProtectionParams `json:"protection"`
-	// UnavailableReasons: why listing is not possible now (empty = can list).
+	// CooldownHours: market_mode_switch_cooldown_hours (0 = no cooldown).
+	CooldownHours int `json:"cooldown_hours"`
+	// NextSwitchAt: when the owner may switch again (database time, rounded
+	// up to the second); null = may switch now.
+	NextSwitchAt *time.Time `json:"next_switch_at"`
+	// UpstreamWindows: the account's upstream 5h / 7d usage windows, the
+	// same objects as the owned-accounts list (empty without a sample).
+	UpstreamWindows []HostedQuotaWindow `json:"upstream_windows"`
+	// UnavailableReasons: why switching to 共享 is not possible now (empty =
+	// can list).
 	UnavailableReasons []string `json:"unavailable_reasons"`
-	CanList            bool     `json:"can_list"`
-}
-
-// AdminMarketListingInput is the admin PUT body (protection fields optional:
-// omitted keeps the stored value, or the site default on create).
-type AdminMarketListingInput struct {
-	AllowedGroupIDs     []int64
-	ReservedConcurrency *int
-	ReservedDevices     *int
-	ReservedAdmissions  *int
-}
-
-func (in AdminMarketListingInput) merge(base MarketProtectionParams) MarketProtectionParams {
-	set := func(dst *int, v *int) {
-		if v != nil {
-			*dst = *v
-		}
-	}
-	set(&base.ReservedConcurrency, in.ReservedConcurrency)
-	set(&base.ReservedDevices, in.ReservedDevices)
-	set(&base.ReservedAdmissions, in.ReservedAdmissions)
-	return base
+	// CanList: may switch to 共享 (or another tier) now.
+	CanList bool `json:"can_list"`
+	// CanUnlist: may switch back to 自用 now.
+	CanUnlist bool `json:"can_unlist"`
 }
 
 func (s *MarketListingService) settings(ctx context.Context) (MarketSettings, error) {
@@ -118,16 +112,15 @@ func (s *MarketListingService) adminView(ctx context.Context, account *Account, 
 		return nil, err
 	}
 	view := &AdminMarketListingView{
-		AccountID:         account.ID,
-		OwnerUserID:       account.OwnerUserID,
-		Listing:           listing,
-		AllowedTiers:      []MarketTierOption{},
-		IneligibleReason:  MarketAccountIneligibleReason(account),
-		DefaultProtection: cfg.DefaultProtection,
-		MarketEnabled:     cfg.Enabled,
+		AccountID:        account.ID,
+		OwnerUserID:      account.OwnerUserID,
+		Listing:          listing,
+		AllowedTiers:     []MarketTierOption{},
+		IneligibleReason: MarketAccountIneligibleReason(account),
+		MarketEnabled:    cfg.Enabled,
 	}
-	if listing != nil && len(listing.AllowedGroupIDs) > 0 {
-		tiers, err := s.accountTierOptions(ctx, account.ID, listing.AllowedGroupIDs)
+	if listing != nil {
+		tiers, err := s.planTierOptions(ctx, account, listing)
 		if err != nil {
 			return nil, err
 		}
@@ -136,49 +129,58 @@ func (s *MarketListingService) adminView(ctx context.Context, account *Account, 
 	return view, nil
 }
 
-// accountTierOptions describes the tiers and marks those the account is an
-// admin member of.
-func (s *MarketListingService) accountTierOptions(ctx context.Context, accountID int64, groupIDs []int64) ([]MarketTierOption, error) {
-	tiers, err := s.repo.ListTierOptions(ctx, groupIDs)
+// planTierOptions: the tiers derived from the listing's plan (plus its
+// selected tier when that no longer matches), with the admin-member marks.
+// Also fills listing.AllowedGroupIDs with the available ones.
+func (s *MarketListingService) planTierOptions(ctx context.Context, account *Account, listing *MarketListing) ([]MarketTierOption, error) {
+	listing.AllowedGroupIDs = []int64{}
+	plan := ""
+	if listing.Plan != nil {
+		plan = *listing.Plan
+	}
+	if plan == "" && listing.SelectedGroupID == nil {
+		return []MarketTierOption{}, nil
+	}
+	tiers, err := s.repo.ListPlanTierOptions(ctx, plan, account.Platform, listing.SelectedGroupID)
 	if err != nil {
 		return nil, err
 	}
-	members, err := s.repo.ListAdminMemberGroupIDs(ctx, accountID, groupIDs)
+	ids := make([]int64, 0, len(tiers))
+	for _, tier := range tiers {
+		ids = append(ids, tier.GroupID)
+	}
+	members, err := s.repo.ListAdminMemberGroupIDs(ctx, account.ID, ids)
 	if err != nil {
 		return nil, err
 	}
 	for i := range tiers {
 		tiers[i].AdminMember = slices.Contains(members, tiers[i].GroupID)
+		if tiers[i].Available {
+			listing.AllowedGroupIDs = append(listing.AllowedGroupIDs, tiers[i].GroupID)
+		}
 	}
 	return tiers, nil
 }
 
-// AdminConfigure creates or updates the listing (allowed tiers + protection).
-// Removing the selected tier unlists the account in the same transaction; a
-// revoked listing becomes unlisted again.
-func (s *MarketListingService) AdminConfigure(ctx context.Context, adminUserID, accountID int64, in AdminMarketListingInput) (*AdminMarketListingView, error) {
-	allowed, err := NormalizeMarketAllowedGroupIDs(in.AllowedGroupIDs)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := s.settings(ctx)
-	if err != nil {
-		return nil, err
+// AdminConfigure creates the listing (自用) or changes its plan. A revoked
+// listing is re-granted. If the selected tier no longer matches the plan,
+// the account is unlisted like a deleted tier, in the same transaction.
+func (s *MarketListingService) AdminConfigure(ctx context.Context, adminUserID, accountID int64, plan string) (*AdminMarketListingView, error) {
+	if !ValidMarketPlan(plan) {
+		return nil, ErrMarketPlanInvalid
 	}
 	listing, err := s.repo.AdminConfigure(ctx, MarketAdminConfigureParams{
-		AccountID:       accountID,
-		AdminUserID:     adminUserID,
-		AllowedGroupIDs: allowed,
-		Defaults:        cfg.DefaultProtection,
-		Merge:           in.merge,
-		Validate: func(account *Account, p MarketProtectionParams) error {
+		AccountID:   accountID,
+		AdminUserID: adminUserID,
+		Plan:        plan,
+		Validate: func(account *Account) error {
 			if account.OwnerUserID == nil {
 				return ErrMarketAccountNoOwner
 			}
 			if reason := MarketAccountIneligibleReason(account); reason != "" {
 				return NewMarketAccountNotEligibleError(reason)
 			}
-			return validateMarketProtectionForAccount(account, p)
+			return nil
 		},
 	})
 	if err != nil {
@@ -192,7 +194,7 @@ func (s *MarketListingService) AdminConfigure(ctx context.Context, adminUserID, 
 }
 
 // AdminRevoke withdraws the sharing permission (removes the market
-// membership); the history stays.
+// membership and the plan); the history stays.
 func (s *MarketListingService) AdminRevoke(ctx context.Context, adminUserID, accountID int64) (*AdminMarketListingView, error) {
 	listing, err := s.repo.AdminRevoke(ctx, accountID, adminUserID)
 	if err != nil {
@@ -214,10 +216,13 @@ func (s *MarketListingService) OwnerGet(ctx context.Context, ownerUserID, accoun
 	return s.ownerView(ctx, account)
 }
 
-// OwnerSet lists the account into one allowed tier (listed=true; requires
-// market_enabled) or stops sharing (listed=false; always allowed).
+// OwnerSet switches the account to 共享 (listed=true, requires
+// market_enabled; groupID 0 = the plan's only tier) or back to 自用
+// (listed=false). At most one effective switch per cooldown; a take-back
+// while the market is off is always allowed; a request for the current
+// state is an idempotent no-op.
 func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accountID, groupID int64, listed bool) (*OwnerMarketView, error) {
-	var beforeWrite, rolledBack func()
+	var beforeWrite, rolledBack, ended func()
 	if listed && s.listings != nil {
 		// Marked locally only once every check passed (inside the locked
 		// transaction, right before the writes); cleared at once on a
@@ -234,28 +239,37 @@ func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accoun
 				s.listings.AbortListing(accountID, token)
 			}
 		}
-		defer func() {
+		ended = func() {
 			if marked && !finished {
 				finished = true
 				s.listings.EndListing(accountID, token)
 			}
-		}()
+		}
+		defer ended()
 	}
-	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
+	_, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
 		BeforeListWrite:   beforeWrite,
 		ListingRolledBack: rolledBack,
 		OwnerUserID:       ownerUserID,
 		AccountID:         accountID,
 		GroupID:           groupID,
 		Listed:            listed,
-		Validate: func(account *Account, protection MarketProtectionParams) error {
+		Validate: func(account *Account) error {
 			if reason := marketListBlockedReason(account); reason != "" {
 				return NewMarketAccountNotEligibleError(reason)
 			}
-			// The account may have been reconfigured since the admin allowed it.
-			return validateMarketProtectionForAccount(account, protection)
+			if reason := marketCapacityReason(account); reason != "" {
+				return NewMarketAccountNotEligibleError(reason)
+			}
+			return nil
 		},
-	}); err != nil {
+	})
+	if ended != nil {
+		// The transaction is over: from now on the owner path's database
+		// check decides (no avoidance while the view is read back).
+		ended()
+	}
+	if err != nil {
 		return nil, err
 	}
 	return s.OwnerGet(ctx, ownerUserID, accountID)
@@ -270,41 +284,59 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	if s.now != nil {
+		now = s.now()
+	}
+	windows := hostedAccountSnapshot(account, now).Windows
+	if windows == nil {
+		windows = []HostedQuotaWindow{}
+	}
 	view := &OwnerMarketView{
 		AccountID:          account.ID,
 		MarketEnabled:      cfg.Enabled,
 		Status:             MarketListingStatusNotConfigured,
+		Mode:               MarketModeSelfUse,
 		AllowedTiers:       []MarketTierOption{},
+		CooldownHours:      cfg.ModeSwitchCooldownHours,
+		UpstreamWindows:    windows,
 		UnavailableReasons: []string{},
 	}
 	if listing != nil {
 		view.Status = listing.Status
+		view.Plan = listing.Plan
 		view.SelectedGroupID = listing.SelectedGroupID
 		view.Version = listing.Version
-		protection := listing.Protection
-		view.Protection = &protection
-		if len(listing.AllowedGroupIDs) > 0 {
-			tiers, err := s.accountTierOptions(ctx, account.ID, listing.AllowedGroupIDs)
+		if listing.Status == MarketListingStatusListed {
+			view.Mode = MarketModeShared
+		}
+		if listing.Status != MarketListingStatusRevoked {
+			tiers, err := s.planTierOptions(ctx, account, listing)
 			if err != nil {
 				return nil, err
 			}
 			view.AllowedTiers = tiers
 		}
-	}
-	reasons := view.UnavailableReasons
-	if listing != nil {
-		if err := validateMarketProtectionForAccount(account, listing.Protection); err != nil {
-			reasons = append(reasons, MarketReasonProtectionInvalid)
+		next, err := s.repo.NextOwnerSwitchAt(ctx, account.ID, cfg.ModeSwitchCooldownHours)
+		if err != nil {
+			return nil, err
+		}
+		// With the market off a shared account can be taken back now: one
+		// decision, no cooldown shown.
+		if next != nil && (listing.Status != MarketListingStatusListed || cfg.Enabled) {
+			at := ceilToSecond(*next)
+			view.NextSwitchAt = &at
 		}
 	}
+	reasons := view.UnavailableReasons
 	if !cfg.Enabled {
 		reasons = append(reasons, MarketReasonMarketDisabled)
 	}
 	switch {
-	case listing == nil:
+	case listing == nil, listing.Status == MarketListingStatusRevoked:
 		reasons = append(reasons, MarketReasonNotConfigured)
-	case listing.Status == MarketListingStatusRevoked:
-		reasons = append(reasons, MarketReasonNotConfigured)
+	case listing.Plan == nil:
+		reasons = append(reasons, MarketReasonNoPlan)
 	default:
 		available := false
 		for _, tier := range view.AllowedTiers {
@@ -317,10 +349,26 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 			reasons = append(reasons, MarketReasonNoAllowedTier)
 		}
 	}
+	if view.NextSwitchAt != nil {
+		reasons = append(reasons, MarketReasonSwitchCooldown)
+	}
 	if reason := marketListBlockedReason(account); reason != "" {
+		reasons = append(reasons, reason)
+	}
+	if reason := marketCapacityReason(account); reason != "" {
 		reasons = append(reasons, reason)
 	}
 	view.UnavailableReasons = reasons
 	view.CanList = len(reasons) == 0
+	view.CanUnlist = view.Mode == MarketModeShared && (view.NextSwitchAt == nil || !cfg.Enabled)
 	return view, nil
+}
+
+// ceilToSecond rounds up to a whole second, so a client that waits until
+// the reported time is never refused for a sub-second remainder.
+func ceilToSecond(t time.Time) time.Time {
+	if r := t.Truncate(time.Second); !r.Equal(t) {
+		return r.Add(time.Second).UTC()
+	}
+	return t.UTC()
 }

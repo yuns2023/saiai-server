@@ -65,6 +65,9 @@ type hostedApproveRequest struct {
 	CarpoolDeviceLimit        *int   `json:"carpool_device_limit"`
 	CarpoolAdmissionsPerCycle *int   `json:"carpool_admissions_per_cycle"`
 	CarpoolIntervalHours      *int   `json:"carpool_interval_hours"`
+	// MarketPlan (optional): the account's sharing plan; the approval then
+	// creates its listing in 自用 state.
+	MarketPlan string `json:"market_plan"`
 }
 
 // Approve handles POST /api/v1/admin/hosted-applications/:id/approve.
@@ -88,6 +91,7 @@ func (h *HostedApplicationHandler) Approve(c *gin.Context) {
 		CarpoolDeviceLimit:        req.CarpoolDeviceLimit,
 		CarpoolAdmissionsPerCycle: req.CarpoolAdmissionsPerCycle,
 		CarpoolIntervalHours:      req.CarpoolIntervalHours,
+		MarketPlan:                req.MarketPlan,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

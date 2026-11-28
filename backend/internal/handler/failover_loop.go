@@ -47,7 +47,25 @@ type FailoverState struct {
 	SameAccountRetryCount map[int64]int
 	LastFailoverErr       *service.UpstreamFailoverError
 	ForceCacheBilling     bool
-	hasBoundSession       bool
+	// MarketInvalidatedSeen: a candidate was refused because its sharing
+	// mode or listing changed.
+	MarketInvalidatedSeen bool
+	// marketExcluded: those candidates; they stay excluded for the whole
+	// request (also across the 503 backoff that clears FailedAccountIDs).
+	marketExcluded map[int64]struct{}
+	// backedOff: a 503 backoff cleared the exclusion set and no candidate
+	// was attempted since; a second exhaustion then ends the request (with
+	// market exclusions kept, the set is never empty again, so the "first
+	// selection" exit would not stop it).
+	backedOff       bool
+	hasBoundSession bool
+}
+
+// OnlyMarketInvalidated: every failure of this request so far was a market
+// invalidation (the HOSTED_ACCOUNT_SHARED check at exhaustion runs only
+// then; any other failure keeps its own error).
+func (s *FailoverState) OnlyMarketInvalidated() bool {
+	return s.MarketInvalidatedSeen && (s.LastFailoverErr == nil || s.LastFailoverErr.MarketInvalidated)
 }
 
 // NewFailoverState 创建 failover 状态
@@ -69,6 +87,25 @@ func (s *FailoverState) HandleFailoverError(
 	platform string,
 	failoverErr *service.UpstreamFailoverError,
 ) FailoverAction {
+	s.backedOff = false
+	if failoverErr.MarketInvalidated {
+		// The candidate's sharing mode or listing changed (nothing was
+		// sent). Not an account failure: no cache-read billing (the cache is
+		// rebuilt at the normal price), no switch counted (each account is
+		// excluded for good, so this is bounded by the group size), and an
+		// earlier real failure stays the error the client gets.
+		s.MarketInvalidatedSeen = true
+		if s.LastFailoverErr == nil {
+			s.LastFailoverErr = failoverErr
+		}
+		if s.marketExcluded == nil {
+			s.marketExcluded = make(map[int64]struct{})
+		}
+		s.marketExcluded[accountID] = struct{}{}
+		s.FailedAccountIDs[accountID] = struct{}{}
+		logger.FromContext(ctx).Info("gateway.failover_market_invalidated", zap.Int64("account_id", accountID))
+		return FailoverContinue
+	}
 	s.LastFailoverErr = failoverErr
 
 	// 缓存计费判断
@@ -132,7 +169,10 @@ func (s *FailoverState) HandleFailoverError(
 // 返回 FailoverExhausted 时，调用方应返回错误响应。
 // 返回 FailoverCanceled 时，调用方应直接 return。
 func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAction {
-	if s.LastFailoverErr != nil &&
+	// A request whose failures were all market invalidations has nothing to
+	// back off from; a second exhaustion right after a backoff (no new
+	// attempt) ends with the last real error.
+	if s.LastFailoverErr != nil && !s.LastFailoverErr.MarketInvalidated && !s.backedOff &&
 		s.LastFailoverErr.StatusCode == http.StatusServiceUnavailable &&
 		s.SwitchCount <= s.MaxSwitches {
 
@@ -148,7 +188,12 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 			zap.Int("switch_count", s.SwitchCount),
 			zap.Int("max_switches", s.MaxSwitches),
 		)
-		s.FailedAccountIDs = make(map[int64]struct{})
+		// Candidates refused for their sharing mode stay excluded.
+		s.FailedAccountIDs = make(map[int64]struct{}, len(s.marketExcluded))
+		for id := range s.marketExcluded {
+			s.FailedAccountIDs[id] = struct{}{}
+		}
+		s.backedOff = len(s.marketExcluded) > 0
 		return FailoverContinue
 	}
 	return FailoverExhausted

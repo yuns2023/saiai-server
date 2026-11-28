@@ -694,6 +694,7 @@ var (
 		{Name: "is_exclusive", Type: field.TypeBool, Default: false},
 		{Name: "hosted_usage_enabled", Type: field.TypeBool, Default: false},
 		{Name: "market_tier", Type: field.TypeBool, Default: false},
+		{Name: "market_plan", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "show_account_quota", Type: field.TypeBool, Default: false},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
 		{Name: "platform", Type: field.TypeString, Size: 50, Default: "anthropic"},
@@ -752,7 +753,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "groups_access_levels_required_groups",
-				Columns:    []*schema.Column{GroupsColumns[58]},
+				Columns:    []*schema.Column{GroupsColumns[59]},
 				RefColumns: []*schema.Column{AccessLevelsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -761,17 +762,17 @@ var (
 			{
 				Name:    "group_status",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[11]},
+				Columns: []*schema.Column{GroupsColumns[12]},
 			},
 			{
 				Name:    "group_platform",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[12]},
+				Columns: []*schema.Column{GroupsColumns[13]},
 			},
 			{
 				Name:    "group_subscription_type",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[13]},
+				Columns: []*schema.Column{GroupsColumns[14]},
 			},
 			{
 				Name:    "group_is_exclusive",
@@ -786,12 +787,12 @@ var (
 			{
 				Name:    "group_sort_order",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[39]},
+				Columns: []*schema.Column{GroupsColumns[40]},
 			},
 			{
 				Name:    "group_required_level_id",
 				Unique:  false,
-				Columns: []*schema.Column{GroupsColumns[58]},
+				Columns: []*schema.Column{GroupsColumns[59]},
 			},
 		},
 	}

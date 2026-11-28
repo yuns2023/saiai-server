@@ -73,6 +73,16 @@ func userGroupRatesToCheck(rates map[int64]*float64) []marketTierRateCheck {
 // see computeMarketPrice / marketSnapshotGroupPriced). Values that are >= 0
 // at that precision are valid on every group and need no lookup; the rest
 // are checked with one batched query of the groups' market_tier flag.
+// normalizeGroupMarketPlan: nil or "" means no plan; any other value is
+// kept as sent (validated as a slug, whitespace included).
+func normalizeGroupMarketPlan(plan *string) *string {
+	if plan == nil || *plan == "" {
+		return nil
+	}
+	v := *plan
+	return &v
+}
+
 func (s *adminServiceImpl) validateMarketTierRateOverrides(ctx context.Context, rates []marketTierRateCheck) error {
 	if s.groupRepo == nil {
 		return nil

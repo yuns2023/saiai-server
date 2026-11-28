@@ -67,6 +67,9 @@ type MarketAdmissionState struct {
 	GroupMarketTier bool
 	GroupStatus     string
 	GroupPlatform   string
+	// GroupMarketPlan: the tier's plan (nil = none); a sale needs it to equal
+	// the listing's plan.
+	GroupMarketPlan *string
 	// GroupRateMultiplier / GroupModelRateMultipliers: rate_multiplier and
 	// model_rate_multipliers of the group in the same snapshot (the final
 	// price positivity check).

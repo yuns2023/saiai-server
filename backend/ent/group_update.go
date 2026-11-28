@@ -160,6 +160,26 @@ func (_u *GroupUpdate) SetNillableMarketTier(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetMarketPlan sets the "market_plan" field.
+func (_u *GroupUpdate) SetMarketPlan(v string) *GroupUpdate {
+	_u.mutation.SetMarketPlan(v)
+	return _u
+}
+
+// SetNillableMarketPlan sets the "market_plan" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableMarketPlan(v *string) *GroupUpdate {
+	if v != nil {
+		_u.SetMarketPlan(*v)
+	}
+	return _u
+}
+
+// ClearMarketPlan clears the value of the "market_plan" field.
+func (_u *GroupUpdate) ClearMarketPlan() *GroupUpdate {
+	_u.mutation.ClearMarketPlan()
+	return _u
+}
+
 // SetShowAccountQuota sets the "show_account_quota" field.
 func (_u *GroupUpdate) SetShowAccountQuota(v bool) *GroupUpdate {
 	_u.mutation.SetShowAccountQuota(v)
@@ -1451,6 +1471,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.MarketTier(); ok {
 		_spec.SetField(group.FieldMarketTier, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.MarketPlan(); ok {
+		_spec.SetField(group.FieldMarketPlan, field.TypeString, value)
+	}
+	if _u.mutation.MarketPlanCleared() {
+		_spec.ClearField(group.FieldMarketPlan, field.TypeString)
+	}
 	if value, ok := _u.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
 	}
@@ -2195,6 +2221,26 @@ func (_u *GroupUpdateOne) SetNillableMarketTier(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetMarketTier(*v)
 	}
+	return _u
+}
+
+// SetMarketPlan sets the "market_plan" field.
+func (_u *GroupUpdateOne) SetMarketPlan(v string) *GroupUpdateOne {
+	_u.mutation.SetMarketPlan(v)
+	return _u
+}
+
+// SetNillableMarketPlan sets the "market_plan" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableMarketPlan(v *string) *GroupUpdateOne {
+	if v != nil {
+		_u.SetMarketPlan(*v)
+	}
+	return _u
+}
+
+// ClearMarketPlan clears the value of the "market_plan" field.
+func (_u *GroupUpdateOne) ClearMarketPlan() *GroupUpdateOne {
+	_u.mutation.ClearMarketPlan()
 	return _u
 }
 
@@ -3518,6 +3564,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.MarketTier(); ok {
 		_spec.SetField(group.FieldMarketTier, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.MarketPlan(); ok {
+		_spec.SetField(group.FieldMarketPlan, field.TypeString, value)
+	}
+	if _u.mutation.MarketPlanCleared() {
+		_spec.ClearField(group.FieldMarketPlan, field.TypeString)
 	}
 	if value, ok := _u.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)

@@ -29,6 +29,11 @@ type fakeMarketStore struct {
 	requests   []*MarketAdmissionRequest
 	inserted   []*MarketAdmission
 	members    int
+	// HostedGroupSharedAccounts answer.
+	sharedTotal int
+	shared      []int64
+	sharedErr   error
+	sharedReads int
 }
 
 func (f *fakeMarketStore) LoadMarketDispatchState(context.Context) (*MarketDispatchState, error) {
@@ -79,6 +84,16 @@ func (f *fakeMarketStore) GetMarketAdmissionByAttempt(_ context.Context, attempt
 
 func (f *fakeMarketStore) CountMarketTierPlatformMembers(context.Context, int64) (int, error) {
 	return f.members, nil
+}
+
+func (f *fakeMarketStore) HostedGroupSharedAccounts(_ context.Context, groupID, userID int64) (int, []int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sharedReads++
+	if f.sharedErr != nil {
+		return 0, nil, f.sharedErr
+	}
+	return f.sharedTotal, f.shared, nil
 }
 
 // dualSlotCache is an in-memory total + buyer slot store with the Lua
@@ -201,8 +216,9 @@ const (
 	mktKey    = int64(77)
 )
 
-func mktProtection() MarketProtectionParams {
-	return MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1}
+func mktPlan() *string {
+	plan := "max"
+	return &plan
 }
 
 func mktListedAccount(id int64) Account {
@@ -213,7 +229,7 @@ func mktListedAccount(id int64) Account {
 		Credentials:    map[string]any{"access_token": "setup-token"},
 		Extra:          map[string]any{"claude_oauth_mode": ClaudeOAuthModeCarpool, "claude_oauth_carpool_device_limit": 5},
 		MarketGroupIDs: []int64{mktTier},
-		MarketListing:  &AccountMarketListing{GroupID: mktTier, OwnerUserID: mktOwner, Version: 3, Protection: mktProtection()},
+		MarketListing:  &AccountMarketListing{GroupID: mktTier, OwnerUserID: mktOwner, Version: 3},
 	}
 }
 
@@ -351,11 +367,11 @@ func TestMarketClassification(t *testing.T) {
 	c, sel = svc.classifyMarketCandidate(self, &listed)
 	require.Equal(t, MarketClassBuyer, c)
 	require.True(t, sel.SelfPurchase)
-	require.Equal(t, 3, sel.BuyerMaxConcurrency)
+	require.Equal(t, 4, sel.BuyerMaxConcurrency, "no reservation: buyers may use the whole account")
 
-	// Buyer effective cap 0 is excluded, never "unlimited".
+	// Unlimited concurrency is excluded, never "unlimited buyers".
 	full := mktListedAccount(1)
-	full.MarketListing.Protection.ReservedConcurrency = 4
+	full.Concurrency = 0
 	require.Equal(t, MarketClassExcluded, class(buyer, full))
 	// Account-level session limit is not allowed on a listed account.
 	sessions := mktListedAccount(1)
@@ -407,33 +423,28 @@ func TestMarketBuyerLeaseThroughSelection(t *testing.T) {
 	env := newMarketEnv(t, []Account{mktListedAccount(1)})
 	ctx := buyerCtx(mktTier)
 	var releases []func()
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		res, err := env.svc.SelectAccountWithLoadAwareness(ctx, ptr64(mktTier), "", "claude-fable-5", nil, "")
 		require.NoError(t, err)
 		require.True(t, res.Acquired, "buyer %d", i)
 		require.True(t, res.Market.IsBuyer())
-		require.Equal(t, 3, res.Market.BuyerMaxConcurrency)
+		require.Equal(t, 4, res.Market.BuyerMaxConcurrency)
 		releases = append(releases, res.ReleaseFunc)
 	}
 	total, buyers := env.slots.counts(1)
-	require.Equal(t, 3, total)
-	require.Equal(t, 3, buyers)
-	// The owner is idle, yet the 4th buyer gets a buyer wait plan, never a lease.
+	require.Equal(t, 4, total, "no owner reservation: buyers fill the account")
+	require.Equal(t, 4, buyers)
+	// The 5th buyer gets a buyer wait plan, never a lease.
 	res, err := env.svc.SelectAccountWithLoadAwareness(ctx, ptr64(mktTier), "", "claude-fable-5", nil, "")
 	require.NoError(t, err)
 	require.False(t, res.Acquired)
 	require.NotNil(t, res.WaitPlan)
 	require.True(t, res.WaitPlan.Market.IsBuyer(), "the wait keeps the buyer class")
 	require.Equal(t, 4, res.WaitPlan.MaxConcurrency)
-	// The reserved slot is still there for the owner (total < C).
-	ownerLease, err := env.svc.concurrencyService.AcquireAccountSlot(ctx, 1, 4)
-	require.NoError(t, err)
-	require.True(t, ownerLease.Acquired)
 	// Initial-serial release + reacquire inherits the class.
 	plan := NewFallbackWaitPlan(res, time.Second, 5)
 	require.True(t, plan.Market.IsBuyer())
-	require.Zero(t, env.slots.plainAcquires-1, "buyers never took a plain lease")
-	ownerLease.ReleaseFunc()
+	require.Zero(t, env.slots.plainAcquires, "buyers never took a plain lease")
 	for _, r := range releases {
 		r()
 	}
@@ -445,15 +456,15 @@ func TestMarketBuyerLeaseThroughSelection(t *testing.T) {
 func TestMarketBuyerLoadUsesTighterLimit(t *testing.T) {
 	env := newMarketEnv(t, []Account{mktListedAccount(1), mktPlatformAccount(2, mktTier)})
 	ctx := withMarketRequestedModel(withMarketSelectionGroup(context.WithValue(buyerCtx(mktTier), ctxkey.Group, mktGroups()[mktTier]), ptr64(mktTier)), "claude-fable-5")
-	for i := 0; i < 3; i++ {
-		ok, err := env.slots.AcquireAccountBuyerSlot(ctx, 1, 4, 3, string(rune('a'+i)))
+	for i := 0; i < 4; i++ {
+		ok, err := env.slots.AcquireAccountBuyerSlot(ctx, 1, 4, 4, string(rune('a'+i)))
 		require.NoError(t, err)
 		require.True(t, ok)
 	}
 	listed, platform := mktListedAccount(1), mktPlatformAccount(2, mktTier)
 	loads := map[int64]*AccountLoadInfo{1: {AccountID: 1, CurrentConcurrency: 3, LoadRate: 75}, 2: {AccountID: 2, LoadRate: 0}}
 	env.svc.adjustMarketBuyerLoads(ctx, []*Account{&listed, &platform}, loads)
-	require.Equal(t, 100, loads[1].LoadRate, "buyers full at C-R although the total has room")
+	require.Equal(t, 100, loads[1].LoadRate, "buyers full at C (no reservation) even if the total read lags")
 	require.Equal(t, 0, loads[2].LoadRate)
 }
 
@@ -462,8 +473,8 @@ func itoa(v int64) string { return strconv.FormatInt(v, 10) }
 // ---- authoritative evaluation ----
 
 func TestEvaluateMarketAdmission(t *testing.T) {
-	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3, Concurrency: 4, BuyerMaxConcurrency: 3,
-		ReservedDevices: 2, ReservedAdmissions: 1, DeviceLimit: 5}
+	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3, Concurrency: 4, BuyerMaxConcurrency: 4,
+		DeviceLimit: 5}
 	req := &MarketAdmissionRequest{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, AuthUserID: mktBuyer}
 	base := func() *MarketAuthoritativeFacts {
 		acc := mktListedAccount(1)
@@ -471,9 +482,9 @@ func TestEvaluateMarketAdmission(t *testing.T) {
 		owner := mktOwner
 		return &MarketAuthoritativeFacts{
 			AccountFound: true, Account: &acc, MembershipSource: AccountGroupSourceMarket,
-			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic,
+			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic, GroupMarketPlan: mktPlan(),
 			OwnerUserStatus: StatusActive, LatestOwnerEventID: 50, LatestOwnerEventOwner: &owner, MarketEnabled: true,
-			Listing: &MarketListing{AccountID: 1, OwnerUserID: mktOwner, SelectedGroupID: &selected, Status: MarketListingStatusListed, Version: 3, Protection: mktProtection()},
+			Listing: &MarketListing{AccountID: 1, OwnerUserID: mktOwner, Plan: mktPlan(), SelectedGroupID: &selected, Status: MarketListingStatusListed, Version: 3},
 		}
 	}
 	require.Equal(t, "", EvaluateMarketAdmission(sel, req, base()))
@@ -491,11 +502,12 @@ func TestEvaluateMarketAdmission(t *testing.T) {
 		{"account_inactive", func(f *MarketAuthoritativeFacts) { f.Account.Schedulable = false }},
 		{"account_inactive", func(f *MarketAuthoritativeFacts) { f.OwnerPaused = true }},
 		{"group_inactive", func(f *MarketAuthoritativeFacts) { f.GroupActive = false }},
-		{"capacity_changed", func(f *MarketAuthoritativeFacts) { f.Listing.Protection.ReservedConcurrency = 2 }},
 		{"capacity_changed", func(f *MarketAuthoritativeFacts) { f.Account.Concurrency = 6 }},
+		{"plan_mismatch", func(f *MarketAuthoritativeFacts) { f.GroupMarketPlan = nil }},
+		{"plan_mismatch", func(f *MarketAuthoritativeFacts) { f.Listing.Plan = nil }},
+		{"plan_mismatch", func(f *MarketAuthoritativeFacts) { pro := "pro"; f.GroupMarketPlan = &pro }},
 		{"ineligible_" + MarketReasonMaxSessions, func(f *MarketAuthoritativeFacts) { f.Account.Extra["max_sessions"] = 3 }},
 		{"account_missing", func(f *MarketAuthoritativeFacts) { f.AccountFound = false }},
-		{"reservation_changed", func(f *MarketAuthoritativeFacts) { f.Listing.Protection.ReservedDevices = 1 }},
 		{"device_policy_changed", func(f *MarketAuthoritativeFacts) { f.Account.Extra["claude_oauth_carpool_device_limit"] = 8 }},
 	}
 	for _, m := range mut {
@@ -533,13 +545,13 @@ func marketForwardEnv(t *testing.T) (*marketEnv, *queuedClaudeCodeUpstream, *Acc
 	acc.OwnerUserID = ptr64(mktOwner)
 	acc.Extra["claude_oauth_carpool_device_limit"] = 5
 	acc.MarketGroupIDs = []int64{mktTier}
-	acc.MarketListing = &AccountMarketListing{GroupID: mktTier, OwnerUserID: mktOwner, Version: 3, Protection: mktProtection()}
+	acc.MarketListing = &AccountMarketListing{GroupID: mktTier, OwnerUserID: mktOwner, Version: 3}
 	env := newMarketEnv(t, []Account{*acc})
 	upstream := &queuedClaudeCodeUpstream{responses: []func() *http.Response{okClaudeStreamResponse}}
 	base := claudeCodeCacheSafeRetryService(upstream)
 	base.market = env.rt
 	base.concurrencyService = env.svc.concurrencyService
-	ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 3, "lease-1")
+	ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 4, "lease-1")
 	require.NoError(t, err)
 	require.True(t, ok)
 	base.billingService = env.svc.billingService
@@ -551,9 +563,9 @@ func marketForwardEnv(t *testing.T) (*marketEnv, *queuedClaudeCodeUpstream, *Acc
 		a.Extra = map[string]any{"claude_oauth_mode": ClaudeOAuthModeCarpool, "claude_oauth_carpool_device_limit": 5}
 		selected, owner := mktTier, mktOwner
 		return &MarketAuthoritativeFacts{AccountFound: true, Account: &a, MembershipSource: AccountGroupSourceMarket,
-			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic,
+			GroupFound: true, GroupMarketTier: true, GroupActive: true, GroupPlatform: PlatformAnthropic, GroupMarketPlan: mktPlan(),
 			OwnerUserStatus: StatusActive, LatestOwnerEventID: 50, LatestOwnerEventOwner: &owner, MarketEnabled: true,
-			Listing:   &MarketListing{AccountID: 1, OwnerUserID: mktOwner, SelectedGroupID: &selected, Status: MarketListingStatusListed, Version: 3, Protection: mktProtection()},
+			Listing:   &MarketListing{AccountID: 1, OwnerUserID: mktOwner, Plan: mktPlan(), SelectedGroupID: &selected, Status: MarketListingStatusListed, Version: 3},
 			GroupRate: 1.2}
 	}
 	return env, upstream, acc
@@ -585,7 +597,7 @@ func buyerForwardCtx(t *testing.T, base context.Context) (context.Context, *Mark
 	ctx = context.WithValue(ctx, ctxkey.Group, &Group{ID: mktTier, Platform: PlatformAnthropic, Status: StatusActive, RateMultiplier: 1.2, MarketTier: true, Hydrated: true, ClaudeOAuthRequestGateDisabled: false})
 	ctx = WithMarketDispatch(ctx, key)
 	sel := &MarketSelection{Class: MarketClassBuyer, AccountID: 1, GroupID: mktTier, OwnerUserID: mktOwner, ListingVersion: 3,
-		Concurrency: 4, BuyerMaxConcurrency: 3, ReservedDevices: 2, ReservedAdmissions: 1, DeviceLimit: 5,
+		Concurrency: 4, BuyerMaxConcurrency: 4, DeviceLimit: 5,
 		LeaseID: "lease-1"}
 	return WithMarketAttempt(ctx, sel)
 }
@@ -688,7 +700,7 @@ func TestMarketForwardNeverDispatchesWithoutAdmission(t *testing.T) {
 		}},
 		{"lease expired and taken by someone else", func(env *marketEnv, _ *marketDeviceStub) {
 			require.NoError(t, env.slots.ReleaseAccountBuyerSlot(context.Background(), 1, "lease-1"))
-			ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 3, "someone-else")
+			ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 4, "someone-else")
 			require.NoError(t, err)
 			require.True(t, ok)
 		}},
@@ -993,7 +1005,7 @@ func (r *hookedMarketRepo) OwnerSet(ctx context.Context, p MarketOwnerSetParams)
 		return nil, err
 	}
 	if p.Listed && p.Validate != nil {
-		if err := p.Validate(r.account, MarketProtectionParams{}); err != nil {
+		if err := p.Validate(r.account); err != nil {
 			return nil, err
 		}
 	}
@@ -1243,7 +1255,7 @@ func TestMarketForwardLeaseLostDuringAdmission(t *testing.T) {
 		// The lease expires while the admission transaction runs and its
 		// capacity is taken by someone else.
 		require.NoError(t, env.slots.ReleaseAccountBuyerSlot(context.Background(), 1, "lease-1"))
-		ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 3, "someone-else")
+		ok, err := env.slots.AcquireAccountBuyerSlot(context.Background(), 1, 4, 4, "someone-else")
 		require.NoError(t, err)
 		require.True(t, ok)
 		return inner(req)

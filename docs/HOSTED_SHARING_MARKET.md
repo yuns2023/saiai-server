@@ -1,8 +1,14 @@
 # Hosted sharing market (P3a: owners sell their hosted accounts in price tiers)
 
-An owner of a hosted Anthropic **setup-token carpool** account can list it
-into a **price tier**: a group the admin marked with `market_tier`. Buyers
-use API keys bound to the tier group and pay the tier's ordinary price.
+An owner of a hosted Anthropic **setup-token carpool** account switches it
+between two exclusive modes: **共享 (shared)** — listed in a **price tier**
+(a group the admin marked with `market_tier`) and used by buyers only — and
+**自用 (self-use)** — not on the market. Buyers use API keys bound to the
+tier group and pay the tier's ordinary price. The admin gives each tier and
+each account a **plan** (套餐, e.g. `pro` / `max` / `ultra`); an account
+may be shared only in tiers of its own plan. There are no owner
+reservations: a shared account serves buyers with its whole capacity, and
+the owner's own hosted Key does not use it until the owner switches back.
 For each sale the owner earns
 
 ```text
@@ -30,8 +36,11 @@ Code: Server #230 (schema, listing lifecycle, migration 134), #232
 (selection, reservations, final admission), #233 (atomic settlement, earnings
 wallet, reconcile, migration 135), #234 (UI), #246 (removed the
 share caps, allows zero user rate overrides on tiers, migration 136; see
-Quota and Price under [Buyer and dispatch](#buyer-and-dispatch)). Design:
-`merry-rolling-ladybug-p3-design.md` (sections R1/R2 override the body).
+Quota and Price under [Buyer and dispatch](#buyer-and-dispatch)), and the
+共享/自用 revision (plans, owner toggle with cooldown, no reservations, no
+owner path on shared accounts, migration 138). Design:
+`merry-rolling-ladybug-p3-design.md` (sections R1/R2 override the body) and
+`zippy-popping-dolphin.md` (part A).
 Builds on [HOSTED_SELF_ONBOARD.md](HOSTED_SELF_ONBOARD.md) (P2c owner groups)
 and the P2b settlement events (migration 131).
 
@@ -51,6 +60,10 @@ and the P2b settlement events (migration 131).
   amount.
 - **Self purchase earns nothing.** An owner buying from their own listing is
   charged normally; the event records `earning_zero_reason = self_purchase`.
+- **Shared and self-use are exclusive.** A listed account never serves its
+  owner's hosted group (no owner path, no reservations); a self-use account
+  is not on the market. A stale "listed" view never blocks self-use: the
+  database decides.
 - **The switch stops new sales only.** With `market_enabled` off no new
   buyer admission passes and owners cannot list; requests already admitted
   settle normally, and earnings stay visible and convertible.
@@ -59,8 +72,9 @@ and the P2b settlement events (migration 131).
 
 ### Admin
 
-1. **Mark a tier.** Group form → 共享档位 (`market_tier` on
-   `POST /api/v1/admin/groups` / `PUT /api/v1/admin/groups/:id`). A tier must
+1. **Mark a tier and its plan.** Group form → 共享档位 + 套餐 (`market_tier`
+   and `market_plan` on `POST /api/v1/admin/groups` /
+   `PUT /api/v1/admin/groups/:id`). A tier must
    be a standard (balance-charged) anthropic group, not hosted, with
    `rate_multiplier` > 0. It may not have its own `claude_code_only` or
    invalid-request fallback, and no other group's fallback may point into it
@@ -73,23 +87,40 @@ and the P2b settlement events (migration 131).
    Negative overrides on a tier are refused (`MARKET_TIER_RATE_OVERRIDE`).
    Tiers may be exclusive or public, like any group; buyers bind keys to
    them as usual.
-2. **Allow an account.** Account action → 共享设置
-   (`PUT /api/v1/admin/accounts/:id/market-listing`). The account needs an
-   owner (`MARKET_ACCOUNT_NO_OWNER`) and must be eligible: anthropic
-   setup-token, carpool mode with a finite device limit and finite
-   concurrency, no account-level `max_sessions`, and for a self-onboarded
-   account a live, active proxy. The admin sets the allowed tiers (up to 32)
-   and the protection parameters (`reserved_concurrency`, `reserved_devices`,
-   `reserved_admissions`); omitted fields keep the stored value (site
-   defaults on create), explicit 0 is kept. Reservations must leave buyers at
-   least one slot and one device: `reserved_concurrency ≤ C − 1`,
-   `reserved_devices ≤ device limit − 1`, `reserved_admissions ≤` admissions
-   per cycle. An account that is already an admin member of a tier cannot be
-   listed there (`MARKET_ADMIN_MEMBERSHIP_CONFLICT`), and admin binding paths
-   never overwrite a market membership (`MARKET_MEMBERSHIP_CONFLICT`).
+   `market_plan` is a slug `^[a-z0-9][a-z0-9_-]{0,31}$` (`MARKET_PLAN_INVALID`
+   otherwise; never trimmed, whitespace is invalid), only on a tier
+   (`MARKET_PLAN_REQUIRES_TIER`). On update the field is optional: absent
+   keeps the stored plan (the save does not write the column at all, so a
+   save from a stale form never reverts another admin's plan change),
+   `null` or `""` clears it.
+   Demoting a tier clears its plan (and unlists, see below). A tier without a
+   plan sells nothing. Changing a tier's plan unlists every listing selected
+   there whose plan no longer matches (event `group_replanned`, same
+   semantics as a demotion). The plan is shown to admins only.
+2. **Give an account its plan.** Either when approving a self-onboard
+   application (`market_plan` on `POST /api/v1/admin/hosted-applications/:id/approve`;
+   the approval transaction then creates the listing in 自用 state) or later
+   with 共享设置 (`PUT /api/v1/admin/accounts/:id/market-listing`
+   `{"plan":"max"}`). The plan must be a slug (`MARKET_PLAN_INVALID`) that
+   names at least one live, active tier (`MARKET_PLAN_UNKNOWN`). The account
+   needs an owner
+   (`MARKET_ACCOUNT_NO_OWNER`) and must be eligible: anthropic setup-token,
+   carpool mode with a finite device limit, no account-level `max_sessions`
+   (and, to be listed, a finite concurrency and for a self-onboarded account
+   a live, active proxy). The allowed tiers are always derived from the plan:
+   the live, active tiers of that plan (`allowed_group_ids` is no longer a
+   permission; the column only mirrors the selected tier). If the selected
+   tier no longer matches a new plan, the account is unlisted at once like a
+   deleted tier (an inactive tier of the same plan still matches). On a
+   revoked listing the PUT re-grants. Legacy fields (`allowed_group_ids`,
+   `reserved_*`) in the body are ignored. Existing accounts are not
+   backfilled automatically: an admin sets their plan. An account that is
+   already an admin member of a tier cannot be listed there
+   (`MARKET_ADMIN_MEMBERSHIP_CONFLICT`), and admin binding paths never
+   overwrite a market membership (`MARKET_MEMBERSHIP_CONFLICT`).
 3. **Revoke.** 撤销共享 (`DELETE …/market-listing`): status `revoked`,
-   nothing allowed, market membership removed, history kept. The owner
-   cannot list again until the admin allows tiers again.
+   plan and selection removed, market membership removed, history kept.
+   Only an explicit admin PUT grants sharing again.
 4. **Reverse frozen earnings.** `/admin/market-earnings` → 冲正冻结收益
    (`POST /api/v1/admin/market/earnings/reverse`), by owner and/or account,
    with the overview's `as_of` as cutoff. Only still-frozen, unreversed
@@ -98,34 +129,82 @@ and the P2b settlement events (migration 131).
 
 Every listing change (owner or admin) runs in one transaction under the
 account row lock, increments the listing `version`, appends a row to
-`account_market_listing_events` and writes the scheduler outbox. These also
-unlist (status `unlisted`, permission kept): clearing the owner, owner
-pause, owner withdrawal request, and deleting or demoting the tier the
-account sells into. Resume never relists; assigning an owner never lists.
-Deleting the account revokes.
+`account_market_listing_events` (time = `clock_timestamp()` after the
+locks) and writes the scheduler outbox. These also unlist (status
+`unlisted`, plan kept): clearing the owner, the owner's withdrawal request
+(action `owner_withdraw`), deleting, demoting or re-planning the tier the
+account sells into. **Pause keeps the mode**: a paused account serves nobody
+(scheduling, the final admission and sticky bindings all check the pause)
+and resume only clears the pause, so whatever happened meanwhile (revoke,
+deleted or re-planned tier, owner switch) stays as it is. Assigning an owner
+never lists. Deleting the account revokes.
 
-### Owner (ccyou.dev `/hosted` → 共享出售 / 共享收益)
+### Owner (ccyou.dev `/hosted` → 共享 / 自用)
 
-- `GET /api/v1/hosted/owned-accounts/:id/market` shows the status
-  (`not_configured`, `unlisted`, `listed`, `revoked`), the allowed tiers
-  (name, rate, `available`, `admin_member`), the protection the admin set,
-  `unavailable_reasons` and `can_list`. Only the current owner of a live
-  account sees it; anyone else gets 404 `HOSTED_ACCOUNT_NOT_FOUND`.
-- The owner picks **one** allowed tier and lists (`PUT … {"group_id":3,"listed":true}`),
-  switches tier the same way, or stops (`{"listed":false}`). Listing needs
-  the switch on; unlisting always works.
-- Reason codes: `market_disabled`, `not_configured`, `no_allowed_tier`,
-  `protection_invalid`, `platform_not_anthropic`, `not_setup_token`,
+- `GET /api/v1/hosted/owned-accounts/:id/market` shows `status`
+  (`not_configured`, `unlisted`, `listed`, `revoked`), `mode` (`shared` ⇔
+  status listed, else `self_use`), `plan`, the tiers of the plan
+  (name, rate, `plan`, `available`, `admin_member`), `cooldown_hours`,
+  `next_switch_at` (database time, rounded up to the second; null = may switch
+  now; also null while the market is off and the account is shared, because
+  the take-back is allowed then), `upstream_windows` (the account's upstream
+  windows, the same objects as the owned-accounts list: `five_hour`,
+  `seven_day` and, when sampled, the per-model weekly windows, which the UI
+  ignores; empty without a sample),
+  `unavailable_reasons`, `can_list` (may switch to 共享 now) and `can_unlist`
+  (may switch back to 自用 now). Only the current owner of a live account sees
+  it; anyone else gets 404 `HOSTED_ACCOUNT_NOT_FOUND`.
+- `PUT … {"listed": true}` switches to 共享 (without `group_id` the plan's
+  only listable tier is used — tiers the account is an admin member of do
+  not count; with several, 400 `MARKET_TIER_REQUIRED`; with none,
+  `MARKET_ADMIN_MEMBERSHIP_CONFLICT`), `{"listed": false}` back to 自用.
+  Listing needs the switch on.
+- **Cooldown.** At most one effective switch per
+  `market_mode_switch_cooldown_hours` (default 24), measured in database
+  time from the last `owner_list` / `owner_unlist` / `owner_switch` event.
+  A request for the current state (same tier) is an idempotent 200 and uses
+  no cooldown. Admin revoke / re-grant, owner cleared, tier deleted, demoted
+  or re-planned and the withdrawal unlist neither count nor reset it. A
+  smaller setting (or 0) applies at once (it is read after the account
+  lock); reaching the boundary exactly is allowed. A request for the state
+  the account is already shared in is answered 200 before any other check
+  (also with the switch off or the tier inactive). While `market_enabled` is
+  off, switching back to 自用 is always allowed (it still counts as a
+  switch). Inside the cooldown:
+  429 `MARKET_SWITCH_COOLDOWN`, `Retry-After: <seconds>`,
+  `metadata.next_switch_at` (RFC3339).
+- Reason codes: `market_disabled`, `not_configured`, `no_plan`,
+  `no_allowed_tier`, `switch_cooldown`, `protection_invalid` (the account has
+  no finite concurrency), `platform_not_anthropic`, `not_setup_token`,
   `not_carpool`, `unlimited_devices`, `max_sessions_enabled`, `no_owner`,
   `owner_paused`, `withdraw_requested`, `proxy_unavailable`,
   `account_inactive`. The UI maps each to plain text, with a generic text for
   unknown codes.
+- **Using a shared account through the owner's hosted Key.** When every
+  account of the Key's own exclusive hosted group is shared by that user, the
+  gateway answers **403 `HOSTED_ACCOUNT_SHARED`** with `x-should-retry:
+  false` and no `Retry-After`: 该托管号正在共享中，请在托管页切回「自用」后再使用。
+  Normally this is decided before the request waits for anything (user slot,
+  queue, account slot), so the HTTP status and header come first even for a
+  streaming request: when the last registry poll found every live admin
+  account of the Key's group listed and owned by this user (local evidence,
+  refreshed with the registry every ~2 s), one database read confirms it and
+  that the group still is an owner group of this user. Without that local
+  evidence (a group with a self-use account, or a registry that has not
+  caught up) nothing is read early. The same read runs where the selection
+  is exhausted, only after this owner request saw a candidate refused as
+  shared or a listing in progress and no other failure, also if the local
+  registry has not caught up. Ops records it as a client-side business
+  limit; one WARN line `gateway.hosted_account_shared` per account per hour.
+  Device-full, quota exhaustion and database errors keep their existing
+  errors. Only when the listing committed while the request waited, or the
+  local index was not refreshed yet, and an SSE ping was already flushed,
+  the same error arrives as an SSE `error` event (status and headers are
+  committed by then).
 - Earnings: summary (`frozen`, `available`, `converted_total`, `min_convert`,
   `as_of`), a keyset-paged ledger and 转入余额. Amounts are exact decimal
   strings (up to 10 decimals); the UI never converts them to floats. The cut
   rate and freeze days are not shown to owners.
-- The block is hidden unless one of the owner's current accounts is listed
-  or allowed into at least one tier, or the owner has earnings.
 
 ### Buyer and dispatch
 
@@ -135,13 +214,24 @@ on (after `claude_code_only` / smart switch) and the authenticated key:
 | Class | When | Capacity | Admission row / earnings |
 |---|---|---|---|
 | **buyer** | the group is a tier and the account is listed in that tier | buyer share (below) | yes / owner earns |
-| **owner** | the account is listed, the group is an **owner group** of the user (below), the user is the current owner, the account is an admin member, and the billed key is the user's key of that group | total capacity, owner device class | no / none (owner pays the hosted fee) |
+| **owner** | self-use candidate whose "listed" view may be stale: the local view says listed (registry, cached copy, first load missing) but no listing write of this process is in progress, the group is an **owner group** of the user (below), the user is the current owner, the account is an admin member, and the billed key is the user's key of that group. The database must confirm it is **not listed** (else `shared`) | the account's own capacity, owner device class | no / none (owner pays the hosted fee) |
 | **platform** | the group is a tier and the account is an admin member with no owner and not listed | the account's own capacity | no / platform keeps all |
 | **excluded** | any other combination involving a listed account: other groups, ungrouped, Simple mode, unresolvable group, pinned-mode accounts in a tier, any path without a final admission (count_tokens, Ops retries, other handlers) | never selected | — |
 
 An account that is neither on the market nor in a tier takes exactly the old
-code path. An owner buying through a tier key is a buyer (`self_purchase`),
-not the owner path.
+code path (self-use accounts the registry knows as unlisted included). An
+owner buying through a tier key is a buyer (`self_purchase`), not the owner
+path. A listing write still running in this process (before its commit the
+database still says unlisted) makes the owner path avoid the account, at
+selection and again in the owner admission and at every send. Every
+selection path (load-aware layers, direct sticky hit, fresh-copy re-check,
+wait plan after an initial-serial release) carries the owner class; when
+the bucket copy looked listed and the fresh copy does not, the request keeps
+the owner check for the fresh copy. A plain attempt that meets a listed view
+at the dispatch boundary is upgraded to an owner attempt in the owner's
+group (elsewhere it reselects). A same-account resend of an owner attempt
+(retry after an upstream error) confirms the owner admission in the database
+again.
 
 **Owner group.** Checked in the database on the admission snapshot: the
 group is live, active, Anthropic, standard, hosted usage on, exclusive, not
@@ -154,8 +244,26 @@ an admin-assigned (P1) owner: allow only the owner, put only that owner's
 accounts in it, and the owner's key of that group uses the listed account
 through the owner path. An owner may have several such groups, each with its own fee rate. The check
 runs before the owner device registration (a refused candidate registers
-no device and uses no cycle admission) and again before the first send; a
-refusal or DB error fails over and is never downgraded to another path.
+no device and uses no cycle admission) and again before the first send,
+together with "not listed"; a refusal or DB error fails over and is never
+downgraded to another path. A refusal because the sharing mode or listing
+changed (owner path `shared`, buyer `not_listed`, `listing_changed`,
+`plan_mismatch`, …) reselects without the account and never switches a
+bound session to cache-read billing (the cache is rebuilt at the normal
+price), does not count as an account switch (each such account is excluded
+for the rest of the request, also across the 503 same-account backoff), and
+never replaces an earlier real failure as the error the client gets. The
+invalidating reasons are `shared`, `listing_pending`, `not_listed`,
+`not_market_member`, `listing_changed`, `plan_mismatch`, `owner_changed`,
+`owner_version`, `market_disabled`, `not_priced` (also the repricing just
+before the admission) and `group_inactive` (tier gone or inactive); every
+other refusal (account health, allowlists, capacity, device policy) and
+database errors keep the generic failover. After a 503 backoff, a second
+exhausted selection without any new attempt ends the request with the last
+real error. A plain attempt that sees a listed view later in Forward (at the
+identity step or right before a send) gets the same treatment as at the
+gate: an owner attempt checked in the database in the owner's group, a
+reselect elsewhere.
 
 **Final admission.** After the device check and pricing, before the first
 upstream send, a buyer attempt runs one REPEATABLE READ transaction that
@@ -163,7 +271,8 @@ share-locks the listing row and re-checks everything on one snapshot: switch
 on, market membership, listing still listed in this tier with the same
 version, same owner and owner version, owner user active, account eligible
 and schedulable (status, expiry, rate limit, overload, pause/withdraw,
-proxy), same concurrency, reservations and device policy, the trusted-user
+proxy), the tier's plan equal to the listing's plan, same concurrency and
+device policy, the trusted-user
 and key allowlists, the billed key group = the tier, and a positive
 effective rate (the buyer's user rate override on the tier if there is one,
 else the tier rate) and model rate factor. It then inserts the
@@ -172,32 +281,33 @@ without writing a row. Any refusal fails over before upstream work; a DB
 error or unknown commit is confirmed by attempt id or the candidate is
 dropped. A cancelled request never sends after its admission.
 
-**Dual concurrency.** `concurrency:account:{id}` stays the total set; buyer
-leases are also members of `concurrency:account_buyer:{id}`. A buyer gets a
-slot only if `total < C` and `buyer < C − R` (`R` = `reserved_concurrency`;
-a buyer cap ≤ 0 is refused, never "unlimited"). Owner and platform attempts
-check only the total. Example: C = 4, R = 1 → three buyers plus the owner.
-The reservation is a slot guarantee; there is no FIFO or wait-time promise.
+**Concurrency (no reservations).** `concurrency:account:{id}` stays the
+total set; buyer leases are also members of `concurrency:account_buyer:{id}`
+(bookkeeping for the final admission's "lease still held" check). A buyer
+gets a slot while `total < C` (the buyer cap is C itself; stored
+`reserved_*` values are never read, also not from old rows or snapshots).
 Buyer leases are renewed in both sets and must still be held right before
 the first send.
 
-**Device split.** Inside the existing device-registry WATCH transaction:
-total devices `< limit` and buyer devices `< limit − reserved_devices`.
-Device records carry a class (owner / buyer; records from before the market
-count as buyer). A buyer request on an owner device does not inherit the
-exemption. Cycle admissions: total `Q`, buyers `Q − reserved_admissions`;
-`Q = 0` means unlimited, `Q − reserved_admissions ≤ 0` means buyers cannot
-add a device this cycle. An unidentified device or a registry error makes the
-buyer candidate fail over; on the owner path a registry error fails open (see
-limitations).
+**Device registry (unchanged rules, one limit for the whole account).**
+Inside the existing device-registry WATCH transaction a new device needs
+`devices < L` (the admin's device limit) and, with a cycle budget, an unused
+cycle admission; idle eviction is unchanged. Records carry a class (owner /
+buyer; records from before the market have none) for bookkeeping only. An
+existing record is reused by either class without a new admission — for
+example the owner buying from the machine registered while the account was
+self-use. An unidentified device or a registry error makes the buyer
+candidate fail over; on the owner path a registry error fails open (see
+limitations). Acceptance case: L = 1, the cycle admission used, an existing
+owner record → after listing the same device passes on the buyer path, a new
+device is refused.
 
 **Quota (no share caps).** No usage quota is reserved for the owner: a
 listed, otherwise eligible account sells as soon as it is listed, and its
 5h/7d quota is shared by the owner and the buyers. When the quota is used
 up, upstream answers 429 and the ordinary rate-limit handling takes the
 account out of scheduling until the reset, for buyers and owner alike, like
-any platform account. The owner keeps only the slot and device reservations
-above. (P3a first shipped 5h/7d share caps and a usage-sample freshness gate;
+any platform account. (P3a first shipped 5h/7d share caps and a usage-sample freshness gate;
 they were removed. The columns `cap_5h_pct`, `cap_7d_pct` and
 `sample_max_age_minutes` of `account_market_listings` and
 `account_market_listing_events` stay in the schema, unused, so the previous
@@ -239,19 +349,18 @@ reads as its default; an explicit 0 is kept wherever 0 is in range.
 
 | Setting | Default | Allowed | Meaning |
 |---|---|---|---|
-| `market_enabled` | `false` | boolean | Master switch: listing and new buyer admissions |
+| `market_enabled` | `false` | boolean | Master switch: listing and new buyer admissions (taking an account back is always allowed) |
 | `market_platform_cut_rate` | 0.2 | 0–1, ≤ 4 decimals | Platform share of `charged_amount`; read inside the billing transaction |
 | `market_earning_freeze_days` | 7 | 0–90 | Frozen period; snapshotted per sale as `earning_available_at` (changing it does not move existing entries) |
 | `market_min_convert_usd` | 1 | 0.01–10000, ≤ 2 decimals | Smallest conversion; checked at conversion time |
-| `market_default_reserved_concurrency` | 1 | 0–100 | Default `reserved_concurrency` (R) for new listings |
-| `market_default_reserved_devices` | 2 | 0–32 | Default `reserved_devices` |
-| `market_default_reserved_admissions` | 1 | 0–32 | Default `reserved_admissions` per cycle |
+| `market_mode_switch_cooldown_hours` | 24 | 0–168 | Minimum time between two effective owner switches 共享 ↔ 自用 (0 = none) |
 
-The `market_default_*` values only seed new listings; per-listing values have
-the same static bounds plus the per-account bounds above. Stored values of
-the removed keys `market_default_cap_5h_pct`, `market_default_cap_7d_pct`
-and `market_default_sample_max_age_minutes` are ignored (a request that
-still sends them is not an error; they are simply not read).
+The reservation defaults `market_default_reserved_concurrency`,
+`market_default_reserved_devices` and `market_default_reserved_admissions`
+were removed (reservations are always 0), like the earlier
+`market_default_cap_5h_pct`, `market_default_cap_7d_pct` and
+`market_default_sample_max_age_minutes`: stored values are ignored, and a
+request that still sends them is not an error.
 
 ## API
 
@@ -261,14 +370,15 @@ an admin.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/hosted/owned-accounts/:id/market` | owner | Listing view, tiers, protection, reasons |
-| PUT | `/api/v1/hosted/owned-accounts/:id/market` | owner | `{group_id, listed:true}` list / switch tier; `{listed:false}` stop |
+| GET | `/api/v1/hosted/owned-accounts/:id/market` | owner | Mode, plan, tiers, cooldown, upstream windows, reasons |
+| PUT | `/api/v1/hosted/owned-accounts/:id/market` | owner | `{listed:true, group_id?}` 共享; `{listed:false}` 自用 |
 | GET | `/api/v1/hosted/earnings` | owner | Frozen / available / converted, `min_convert`, `as_of` |
 | GET | `/api/v1/hosted/earnings/entries?cursor=&limit=` | owner | Own ledger, keyset by entry id, limit 1–100 (default 20) |
 | POST | `/api/v1/hosted/earnings/convert` | owner | `{amount, request_id (UUID)}` → balance |
-| POST / PUT | `/api/v1/admin/groups`, `/api/v1/admin/groups/:id` | admin | `market_tier` on group create / update |
-| GET | `/api/v1/admin/accounts/:id/market-listing` | admin | Listing, allowed tiers, `ineligible_reason`, defaults |
-| PUT | `/api/v1/admin/accounts/:id/market-listing` | admin | `allowed_group_ids` (required, may be `[]`) + protection fields |
+| POST / PUT | `/api/v1/admin/groups`, `/api/v1/admin/groups/:id` | admin | `market_tier`, `market_plan` on group create / update |
+| POST | `/api/v1/admin/hosted-applications/:id/approve` | admin | optional `market_plan`: the approval creates the listing (自用) |
+| GET | `/api/v1/admin/accounts/:id/market-listing` | admin | Listing (`plan`), tiers of the plan, `ineligible_reason` |
+| PUT | `/api/v1/admin/accounts/:id/market-listing` | admin | `{plan}` (required); creates, changes the plan or re-grants |
 | DELETE | `/api/v1/admin/accounts/:id/market-listing` | admin | Revoke (404 `MARKET_LISTING_NOT_FOUND` if never configured) |
 | GET | `/api/v1/admin/market/earnings?owner_user_id=&page=&page_size=` | admin | Per-owner summary + `as_of` |
 | GET | `/api/v1/admin/market/earnings/entries?owner_user_id=&cursor=&limit=` | admin | Ledger with settlement / reverse / convert refs and notes |
@@ -292,10 +402,14 @@ purged by retention; the event columns are always present.
 |---|---|---|
 | `MARKET_DISABLED` | 409 | Listing while `market_enabled` is off |
 | `MARKET_ACCOUNT_NO_OWNER` | 409 | Admin allows tiers for an account without an owner |
-| `MARKET_ACCOUNT_NOT_ELIGIBLE` | 409 | Account cannot be shared; `metadata.reason` = reason code |
-| `MARKET_GROUP_NOT_ALLOWED` | 400 | Owner picked a tier the admin did not allow |
-| `MARKET_INVALID_TIER` | 400 | Allowed ids are not live tiers of the account's platform, or more than 32 |
-| `MARKET_INVALID_PARAMS` | 400 | Protection out of range or over the per-account bounds |
+| `MARKET_ACCOUNT_NOT_ELIGIBLE` | 409 | Account cannot be shared; `metadata.reason` = reason code (`no_plan` included) |
+| `MARKET_GROUP_NOT_ALLOWED` | 400 | Owner picked a tier that is not a live, active tier of the account's plan |
+| `MARKET_TIER_REQUIRED` | 400 | Owner omitted `group_id` while several tiers match the plan |
+| `MARKET_SWITCH_COOLDOWN` | 429 | Owner switch inside the cooldown; `Retry-After`, `metadata.next_switch_at` |
+| `MARKET_PLAN_UNKNOWN` | 400 | Approval / admin sharing settings: a well-formed plan no live, active tier has |
+| `MARKET_PLAN_INVALID` | 400 | Group save, approval, admin sharing settings: the plan is not a slug (whitespace included) |
+| `MARKET_PLAN_REQUIRES_TIER` | 400 | Group save: a plan on a group that is not a tier |
+| `HOSTED_ACCOUNT_SHARED` | 403 | Gateway (Anthropic error `type`): every account of the owner's hosted Key is shared; `x-should-retry: false` |
 | `MARKET_ADMIN_MEMBERSHIP_CONFLICT` | 409 | Account is already an admin member of that tier |
 | `MARKET_MEMBERSHIP_CONFLICT` | 409 | Admin binding hits a pair the owner listed; revoke first |
 | `MARKET_LISTING_REVOKED` | 409 | Owner action on a revoked listing |
@@ -404,6 +518,21 @@ earnings on one account. Each accrue can be reversed once.
   NaN user rate overrides are refused on a tier (0 is allowed). Function
   bodies only: no table, trigger, lock on user tables or scan; safe on the
   large sites.
+- `138_market_share_toggle.sql`: nullable `groups.market_plan`,
+  `account_market_listings.plan`, `account_market_listing_events.plan`
+  (catalog-only), two slug-format CHECKs (one scan each of `groups` and
+  `account_market_listings`, both small), `reserved_*` defaults set to 0 and
+  existing rows normalized to 0 (no CHECK forcing 0, rollback stays
+  possible), `allowed_group_ids` normalized to mirror the selected tier, and
+  a partial index on the events for the cooldown lookup.
+  Pre-check: `SELECT count(*) FROM groups; SELECT count(*), count(*) FILTER
+  (WHERE reserved_concurrency + reserved_devices + reserved_admissions > 0)
+  FROM account_market_listings; SELECT count(*) FROM
+  account_market_listing_events;` (expect tens to hundreds, a handful and a
+  handful); locks: ACCESS EXCLUSIVE on `groups` for the ADD COLUMN / ADD
+  CONSTRAINT (lock_timeout 5 s, scan of a small table), ROW EXCLUSIVE on the
+  listings for the UPDATE. The previous binary runs against it unchanged (it
+  never reads the new columns; its reservation reads see 0).
 - A site still on 131 (ccyou.dev at the time of writing) also applies
   `132_redeem_code_purchases.sql` and `133_hosted_self_onboard.sql` in the
   same upgrade; 133 aborts on duplicate upstream UUIDs, run its pre-check
@@ -442,7 +571,7 @@ touches these tables.
 **Single-container drain deploy.** At startup a process removes every slot
 member of other processes from the concurrency sets (total and buyer) and
 deletes the wait counters. If an old and a new process overlap, the new one
-wipes the old one's live leases and the reservations no longer hold. Deploy
+wipes the old one's live leases and the slot limits no longer hold. Deploy
 with the switch off: drain and stop the old process, start the new one
 (migrations run at its startup), and only then create tiers and listings and
 turn the switch on.
@@ -472,6 +601,16 @@ binary may briefly refuse all sales: the scheduler snapshots in Redis
 `sample_max_age_minutes`, which the old binary reads as 0 (sample gate
 refuses) until it rebuilds the snapshots from the database.
 
+The binary before migration 138 runs against the 138 schema unchanged, with
+these differences (keep the switch off when rolling back past it): it reads
+`allowed_group_ids` as the permission (new writes keep only the selected
+tier there, so owners can re-list only into that tier), it reads the
+reservations (all 0 after the migration, so nothing is reserved), pause
+unlists again, there is no cooldown, and a listed account again serves its
+owner's hosted group through the owner path. Scheduler snapshots written by
+this binary carry no `protection` object; the old binary reads that as 0
+(no reservation).
+
 **Pre-launch acceptance gates (on the target site, switch on, test
 accounts).**
 - Stale snapshot write-back: write back an old cached copy of a listed
@@ -480,7 +619,11 @@ accounts).**
 - Ops client retry: with an account bound to a plain group by the admin and
   listed in a tier, an Ops client-mode retry must skip it, and a pinned retry
   must refuse it.
-- Also from the plan: C = 4, R = 1 with the owner busy (owner 1 + buyers 3);
+- Also from the plan (共享/自用): with the owner's account shared, buyers
+  are served and the owner's hosted Key gets 403 `HOSTED_ACCOUNT_SHARED`;
+  a switch back inside the cooldown is refused with the next switch time;
+  with the cooldown set to 0 the switch back works at once and the owner's
+  registered device is usable immediately;
   a user with a 0 override on the tier is served by a platform account
   only; settlement to the original owner after the owner is cleared; convert/reverse across the maturity instant; count_tokens
   200/404/503 with the pilot's Claude Code version.
@@ -505,12 +648,48 @@ Listing and tiers
 - Tier groups with `show_account_quota` also show listed accounts in the
   hosted quota view.
 
+共享 / 自用 (migration 138)
+- A switch keeps the device registry as it is: devices registered in the
+  other mode stay and are reused; when the limit is full, a new device waits
+  for the existing idle eviction (`EvictIdleHours`, next maintenance round).
+  Admins can raise the limit or delete a device. A cycle admission is
+  consumed when a device registers, also if that request then is refused
+  (for example the account was switched at that moment).
+- The cooldown is a rolling 24 h by default: an owner who shares at night
+  and takes the account back in the morning waits until the next night to
+  share again (accepted trade-off of "once a day").
+- The owner's hosted Key gets 403 `HOSTED_ACCOUNT_SHARED` only when every
+  account of its group is shared; with another self-use account of the
+  group the request simply uses that one.
+- A listed row without a plan (rows from before migration 138) sells
+  nothing (`plan_mismatch` at the final admission) until an admin sets the
+  plan; the owner can still switch it back to 自用.
+- An owner's request on a shared account costs one database read before it
+  is answered (the early all-shared check, or the owner check).
+- A buyer whose model price entry disappears while the request waits gets
+  the existing HTTP 400 of the generic price check before the send (every
+  account of the tier shares the model price, so reselecting cannot help).
+- 单副本：账号保持共享期间，上架事务提交后才开始最终准入判定的号主请求不得转发；提交前已按自用状态通过最终判定的请求视为在途，可以完成。
+  (Single replica: while the account stays shared, an owner request whose
+  final admission check starts after the listing transaction committed is
+  never forwarded; a request that passed the final check as self-use before
+  the commit is in flight and may complete.)
+- 多副本：挂牌状态最终一致。其他副本通常在后续成功刷新注册表后识别新挂牌（轮询间隔约 2 秒），没有硬性传播上限；收敛前，持有旧状态的副本可能继续按原分组放行请求（不会产生市场成交）。扩容到多副本前需要跨进程互斥。
+  (Several replicas: the listing state is eventually consistent. Other
+  replicas usually see a new listing after their next successful registry
+  refresh (poll interval about 2 s); there is no hard propagation bound.
+  Until they converge, a replica with the old state may keep admitting
+  requests through the original group (no market sale results). Scaling to
+  several replicas needs a cross-process exclusion first.)
+
 Dispatch
 - Cold-start registry window (user decision): if the listing registry never
   loads at startup (database unavailable for about 20 s), a listed account
   whose cached copy predates both the listing and the owner assignment could
   be dispatched as an ordinary account until the first successful poll.
-  Until then only accounts with an owner are treated as listed.
+  Until then accounts with an owner are treated as possibly listed: in their
+  owner's hosted group they are checked in the database (self-use works if
+  the database answers), elsewhere they are not used.
 - No usage quota is reserved for the owner (user decision): buyers can use
   up the account's 5h/7d quota, after which the owner waits for the reset
   like the buyers.
@@ -525,8 +704,7 @@ Dispatch
   admission before the final admission re-reads the database value and
   refuses (no sale, no upstream send, no owner earning; the request fails
   over to a platform account). These side effects happen per candidate
-  attempt and can accumulate across concurrent requests and candidates, but
-  stay within the buyer-side limits (the owner's reservations hold); the
+  attempt and can accumulate across concurrent requests and candidates; the
   refusal does not give back registered devices or used cycle admissions.
   In the same window a platform account may still bill that user at the old
   positive rate (the general override cache, as on any group).

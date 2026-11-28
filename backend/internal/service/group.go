@@ -33,10 +33,17 @@ type Group struct {
 	ShowAccountQuota   bool
 	HostedUsageEnabled bool
 	MarketTier         bool // admin-designated sharing tier (P3a), see ValidateMarketTier
-	Status             string
-	Hydrated           bool // indicates the group was loaded from a trusted repository source
-	RequiredLevelID    *int64
-	RequiredLevel      *AccessLevel
+	// MarketPlan: the plan (套餐) slug of a market tier; accounts of that plan
+	// may sell in it (nil = not sellable by any account).
+	MarketPlan *string
+	// MarketPlanWrite (transient, never stored or serialized): Update writes
+	// MarketPlan only when set, so a save that did not carry the plan never
+	// writes back a value read before another admin changed it.
+	MarketPlanWrite bool `json:"-"`
+	Status          string
+	Hydrated        bool // indicates the group was loaded from a trusted repository source
+	RequiredLevelID *int64
+	RequiredLevel   *AccessLevel
 
 	SubscriptionType    string
 	FiveHourLimitUSD    *float64

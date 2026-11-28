@@ -817,6 +817,11 @@ type UpstreamFailoverError struct {
 	ForceCacheBilling      bool  // Antigravity 粘性会话切换时设为 true
 	RetryableOnSameAccount bool  // 临时性错误（如 Google 间歇性 400、空响应），应在同一账号上重试 N 次再切换
 	Cause                  error // 上游/账号失败的原始原因；用于 errors.Is/As
+	// MarketInvalidated: the candidate's sharing mode or listing changed
+	// (market refusal at the dispatch boundary, nothing sent). The handler
+	// reselects without it, never switches to cache-read billing for it and
+	// never clears the exclusion set for a same-account backoff.
+	MarketInvalidated bool
 }
 
 func (e *UpstreamFailoverError) Error() string {
@@ -2015,17 +2020,21 @@ func (s *GatewayService) prepareOAuthRequestIdentity(ctx context.Context, c *gin
 		matchedBillingCCHSeed = realClaudeCodeDiag.CCHSeed
 		matchedBillingCCHMode = claudebilling.CCHInputMode(realClaudeCodeDiag.CCHMode)
 	}
-	if marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) {
+	if marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account) &&
+		(forCountTokens || !s.marketUpgradePlainAttempt(ctx, account)) {
 		// A listed account is used only by a market attempt (Messages final
 		// admission); count_tokens and other paths never send through it,
 		// not even the auxiliary count_tokens shape below. It got listed
 		// after its selection: never a client error — Messages fails over
-		// (reselects), count_tokens answers "temporarily unavailable".
+		// (reselects), count_tokens answers "temporarily unavailable". In the
+		// owner's own hosted group a Messages attempt is upgraded to an owner
+		// attempt instead (the precheck below asks the database).
 		if forCountTokens {
 			s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "count_tokens is temporarily unavailable")
 			return body, nil, ErrMarketAdmissionRejected
 		}
-		return body, nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
+		s.markSharedEvidenceForOwner(ctx, account)
+		return body, nil, marketInvalidatedFailoverError(ErrMarketListingInvalidated)
 	}
 	if !realClaudeCodeDiag.Valid && !requestGateDisabled {
 		if forCountTokens && isClaudeOAuthCountTokensAuxRequest(c, parsed) {
@@ -5778,6 +5787,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if prepErr != nil {
 			return nil, prepErr
 		}
+		if marketAttempt == nil {
+			// Upgraded to an owner attempt during the identity step: the
+			// pre-send owner check below runs as well.
+			if upgraded := marketAttemptFromContext(ctx); upgraded != nil && upgraded.Selection != nil {
+				marketAttempt = upgraded
+			}
+		}
 	}
 
 	// Official OAuth/setup-token requests own their cache layout. Let the
@@ -5862,9 +5878,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := marketDispatchCancelled(ctx); err != nil {
 			return nil, err
 		}
-		if s.marketListedWithoutAdmission(ctx, account) {
+		if sendErr := s.marketSendBoundaryErr(ctx, account, attempt > 1); sendErr != nil {
 			// Listed while this non-market attempt waited (e.g. in device
-			// registration): never send through it.
+			// registration) and not the owner's self-use, or an owner attempt
+			// whose account is being / was listed before this send: never
+			// send through it.
 			if replayResp != nil {
 				// A same-account replay round: end with the response that
 				// asked for it, exactly as if no replay were allowed.
@@ -5875,8 +5893,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				resp.Body = io.NopCloser(bytes.NewReader(replayBody))
 				break
 			}
-			// First send: reselect.
-			return nil, marketAdmissionFailoverError(ErrMarketAdmissionRejected)
+			// First send: reselect (the account's mode changed, or the owner
+			// check could not run).
+			return nil, marketAdmissionError(ctx, sendErr)
 		}
 
 		// 发送请求

@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // Market dispatch store (P3a part 2): the polled "listed accounts + switch"
@@ -20,8 +22,8 @@ func NewMarketDispatchStore(sqlDB *sql.DB) service.MarketDispatchStore {
 }
 
 // LoadMarketDispatchState reads the listed account ids (account_market_listings
-// is small; status 'listed' ⇔ the account has a market membership) and the
-// market switch.
+// is small; status 'listed' ⇔ the account has a market membership), the
+// admin groups that are fully shared by one user, and the market switch.
 func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (*service.MarketDispatchState, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT account_id FROM account_market_listings WHERE status = 'listed'`)
 	if err != nil {
@@ -39,6 +41,13 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(state.ListedAccountIDs) > 0 {
+		// Only the early 403 check uses it: a failed read leaves it empty
+		// (that check is skipped), the listed set still refreshes.
+		if groups, groupsErr := r.loadFullySharedGroups(ctx); groupsErr == nil {
+			state.FullySharedGroups = groups
+		}
+	}
 	// The switch only gates new buyer admissions (re-read in the admission
 	// snapshot); a failed read must not drop the listed set: treat as off.
 	enabled, err := r.marketEnabled(ctx, r.db)
@@ -46,6 +55,45 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 		state.Enabled = enabled
 	}
 	return state, nil
+}
+
+// loadFullySharedGroups: the owner groups (marketOwnerGroupPredicate for
+// that user) of listed accounts whose every live admin member is listed and
+// owned by that one user (only groups with a listed member are scanned;
+// nothing runs without listings).
+func (r *marketListingRepository) loadFullySharedGroups(ctx context.Context) (map[int64]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		WITH candidate AS (
+			SELECT DISTINCT ag.group_id
+			FROM account_market_listings l
+			JOIN account_groups ag ON ag.account_id = l.account_id AND ag.source = 'admin'
+			WHERE l.status = 'listed'
+		), fully AS (
+			SELECT ag.group_id, min(a.owner_user_id) AS owner_user_id
+			FROM candidate c
+			JOIN account_groups ag ON ag.group_id = c.group_id AND ag.source = 'admin'
+			JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+			LEFT JOIN account_market_listings l ON l.account_id = a.id
+			GROUP BY ag.group_id
+			HAVING bool_and(COALESCE(l.status = 'listed', FALSE) AND a.owner_user_id IS NOT NULL)
+			   AND count(DISTINCT a.owner_user_id) = 1
+		)
+		SELECT f.group_id, f.owner_user_id
+		FROM fully f JOIN groups g ON g.id = f.group_id
+		WHERE `+strings.ReplaceAll(marketOwnerGroupPredicate, "$2", "f.owner_user_id"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var groupID, owner int64
+		if err := rows.Scan(&groupID, &owner); err != nil {
+			return nil, err
+		}
+		out[groupID] = owner
+	}
+	return out, rows.Err()
 }
 
 // AdmitMarketCandidate runs one candidate's final admission.
@@ -103,6 +151,7 @@ func marketFactsFromState(state *service.MarketAdmissionState) *service.MarketAu
 		Account:            state.Account,
 		GroupFound:         state.GroupFound,
 		GroupMarketTier:    state.GroupMarketTier,
+		GroupMarketPlan:    state.GroupMarketPlan,
 		GroupActive:        state.GroupStatus == service.StatusActive,
 		GroupPlatform:      state.GroupPlatform,
 		OwnerUserStatus:    state.OwnerUserStatus,
@@ -155,7 +204,13 @@ func (r *marketListingRepository) marketEnabled(ctx context.Context, q sqlQuerye
 const marketOwnerGroupQuery = `
 	SELECT EXISTS (
 		SELECT 1 FROM groups g
-		WHERE g.id = $1 AND g.deleted_at IS NULL AND g.status = 'active'
+		WHERE g.id = $1 AND ` + marketOwnerGroupPredicate + `
+	)`
+
+// marketOwnerGroupPredicate is the owner-group condition on a groups row g
+// for the user in $2 (shared by the owner admission, the all-shared read
+// and, with $2 replaced, the registry's fully-shared index).
+const marketOwnerGroupPredicate = `g.deleted_at IS NULL AND g.status = 'active'
 			AND g.platform = 'anthropic' AND g.subscription_type = 'standard'
 			AND g.hosted_usage_enabled AND g.is_exclusive AND NOT g.market_tier
 			AND g.rate_multiplier >= 0 AND g.rate_multiplier <> 'NaN'::numeric
@@ -165,8 +220,7 @@ const marketOwnerGroupQuery = `
 			AND NOT EXISTS (
 				SELECT 1 FROM account_groups ag JOIN accounts a ON a.id = ag.account_id
 				WHERE ag.group_id = g.id AND a.deleted_at IS NULL AND a.owner_user_id IS DISTINCT FROM $2
-			)
-	)`
+			)`
 
 // checkMarketCandidate is the read-only authoritative check (owner and
 // platform paths), one REPEATABLE READ snapshot.
@@ -246,4 +300,30 @@ func (r *marketListingRepository) CountMarketTierPlatformMembers(ctx context.Con
 			AND NOT (a.type IN ('oauth', 'setup-token') AND COALESCE(lower(trim(a.extra->>'claude_oauth_mode')), '') = 'pinned')`,
 		[]any{groupID}, &n)
 	return n, err
+}
+
+// HostedGroupSharedAccounts reads, in one statement, the live admin member
+// accounts of groupID (total) and the ids of those whose listing is listed
+// and whose current owner is userID (the HOSTED_ACCOUNT_SHARED decision:
+// every account the owner's hosted Key could use is shared). A group that is
+// not (any more) an owner group of userID (marketOwnerGroupQuery: live,
+// active, hosted, exclusive, only this user, every member owned by them)
+// yields 0 accounts, so no 403 is derived from a stale Key snapshot.
+func (r *marketListingRepository) HostedGroupSharedAccounts(ctx context.Context, groupID, userID int64) (int, []int64, error) {
+	var (
+		total  int
+		shared pq.Int64Array
+	)
+	err := scanSingleRow(ctx, r.db, `
+		SELECT COUNT(*),
+		       COALESCE(array_agg(a.id ORDER BY a.id) FILTER (WHERE l.status = 'listed' AND a.owner_user_id = $2), '{}')
+		FROM account_groups ag
+		JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+		LEFT JOIN account_market_listings l ON l.account_id = a.id
+		WHERE ag.group_id = $1 AND ag.source = 'admin' AND (`+marketOwnerGroupQuery+`)`,
+		[]any{groupID, userID}, &total, &shared)
+	if err != nil {
+		return 0, nil, err
+	}
+	return total, []int64(shared), nil
 }

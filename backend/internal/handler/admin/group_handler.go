@@ -61,6 +61,33 @@ func (f *optionalLimitField) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("invalid limit value: %s", string(trimmed))
 }
 
+// optionalPlanField is market_plan on a group update with presence
+// semantics: absent = keep, null or "" = clear, any other string = set as
+// sent (validated by the service; whitespace is invalid).
+type optionalPlanField struct {
+	set   bool
+	value *string
+}
+
+func (f *optionalPlanField) UnmarshalJSON(data []byte) error {
+	f.set = true
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		f.value = nil
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(trimmed, &text); err != nil {
+		return fmt.Errorf("invalid market_plan value: %s", string(trimmed))
+	}
+	if text == "" {
+		f.value = nil
+		return nil
+	}
+	f.value = &text
+	return nil
+}
+
 func (f optionalLimitField) ToServiceInput() *float64 {
 	if !f.set {
 		return nil
@@ -130,20 +157,22 @@ func NewGroupHandler(adminService service.AdminService, dashboardService *servic
 
 // CreateGroupRequest represents create group request
 type CreateGroupRequest struct {
-	Name               string             `json:"name" binding:"required"`
-	Description        string             `json:"description"`
-	Platform           string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
-	RateMultiplier     float64            `json:"rate_multiplier"`
-	IsExclusive        bool               `json:"is_exclusive"`
-	ShowAccountQuota   bool               `json:"show_account_quota"`
-	HostedUsageEnabled bool               `json:"hosted_usage_enabled"`
-	MarketTier         bool               `json:"market_tier"`
-	RequiredLevelID    *int64             `json:"required_level_id"`
-	SubscriptionType   string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
-	FiveHourLimitUSD   optionalLimitField `json:"five_hour_limit_usd"`
-	DailyLimitUSD      optionalLimitField `json:"daily_limit_usd"`
-	WeeklyLimitUSD     optionalLimitField `json:"weekly_limit_usd"`
-	MonthlyLimitUSD    optionalLimitField `json:"monthly_limit_usd"`
+	Name               string  `json:"name" binding:"required"`
+	Description        string  `json:"description"`
+	Platform           string  `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
+	RateMultiplier     float64 `json:"rate_multiplier"`
+	IsExclusive        bool    `json:"is_exclusive"`
+	ShowAccountQuota   bool    `json:"show_account_quota"`
+	HostedUsageEnabled bool    `json:"hosted_usage_enabled"`
+	MarketTier         bool    `json:"market_tier"`
+	// MarketPlan: plan slug of a market tier (only with market_tier).
+	MarketPlan       *string            `json:"market_plan"`
+	RequiredLevelID  *int64             `json:"required_level_id"`
+	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
+	FiveHourLimitUSD optionalLimitField `json:"five_hour_limit_usd"`
+	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
+	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
+	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
 	// 统计用订阅实收倍率（元/$1）；缺省=不变，null/""=清空。
 	SubscriptionRevenueRate optionalLimitField `json:"subscription_revenue_rate"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
@@ -195,21 +224,23 @@ type CreateGroupRequest struct {
 
 // UpdateGroupRequest represents update group request
 type UpdateGroupRequest struct {
-	Name               string             `json:"name"`
-	Description        string             `json:"description"`
-	Platform           string             `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
-	RateMultiplier     *float64           `json:"rate_multiplier"`
-	IsExclusive        *bool              `json:"is_exclusive"`
-	ShowAccountQuota   *bool              `json:"show_account_quota"`
-	HostedUsageEnabled *bool              `json:"hosted_usage_enabled"`
-	MarketTier         *bool              `json:"market_tier"`
-	RequiredLevelID    *int64             `json:"required_level_id"`
-	Status             string             `json:"status" binding:"omitempty,oneof=active inactive"`
-	SubscriptionType   string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
-	FiveHourLimitUSD   optionalLimitField `json:"five_hour_limit_usd"`
-	DailyLimitUSD      optionalLimitField `json:"daily_limit_usd"`
-	WeeklyLimitUSD     optionalLimitField `json:"weekly_limit_usd"`
-	MonthlyLimitUSD    optionalLimitField `json:"monthly_limit_usd"`
+	Name               string   `json:"name"`
+	Description        string   `json:"description"`
+	Platform           string   `json:"platform" binding:"omitempty,oneof=anthropic openai gemini antigravity sora"`
+	RateMultiplier     *float64 `json:"rate_multiplier"`
+	IsExclusive        *bool    `json:"is_exclusive"`
+	ShowAccountQuota   *bool    `json:"show_account_quota"`
+	HostedUsageEnabled *bool    `json:"hosted_usage_enabled"`
+	MarketTier         *bool    `json:"market_tier"`
+	// MarketPlan: absent = keep, null/"" = clear, string = set.
+	MarketPlan       optionalPlanField  `json:"market_plan"`
+	RequiredLevelID  *int64             `json:"required_level_id"`
+	Status           string             `json:"status" binding:"omitempty,oneof=active inactive"`
+	SubscriptionType string             `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
+	FiveHourLimitUSD optionalLimitField `json:"five_hour_limit_usd"`
+	DailyLimitUSD    optionalLimitField `json:"daily_limit_usd"`
+	WeeklyLimitUSD   optionalLimitField `json:"weekly_limit_usd"`
+	MonthlyLimitUSD  optionalLimitField `json:"monthly_limit_usd"`
 	// 统计用订阅实收倍率（元/$1）；缺省=不变，null/""=清空。
 	SubscriptionRevenueRate optionalLimitField `json:"subscription_revenue_rate"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
@@ -354,6 +385,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		ShowAccountQuota:                 req.ShowAccountQuota,
 		HostedUsageEnabled:               req.HostedUsageEnabled,
 		MarketTier:                       req.MarketTier,
+		MarketPlan:                       req.MarketPlan,
 		RequiredLevelID:                  req.RequiredLevelID,
 		SubscriptionType:                 req.SubscriptionType,
 		FiveHourLimitUSD:                 req.FiveHourLimitUSD.ToServiceInput(),
@@ -435,6 +467,8 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		ShowAccountQuota:                 req.ShowAccountQuota,
 		HostedUsageEnabled:               req.HostedUsageEnabled,
 		MarketTier:                       req.MarketTier,
+		MarketPlan:                       req.MarketPlan.value,
+		MarketPlanSet:                    req.MarketPlan.set,
 		RequiredLevelID:                  req.RequiredLevelID,
 		Status:                           req.Status,
 		SubscriptionType:                 req.SubscriptionType,

@@ -51,6 +51,12 @@ func (Group) Fields() []ent.Field {
 		// market_tier: admin-designated sharing tier (migration 134 CHECK:
 		// standard, not hosted, rate > 0, anthropic).
 		field.Bool("market_tier").Default(false),
+		// market_plan: the plan (套餐) slug of a market tier (migration 138
+		// format CHECK); accounts sell only in tiers of their own plan.
+		field.String("market_plan").
+			Optional().
+			Nillable().
+			SchemaType(map[string]string{dialect.Postgres: "text"}),
 		field.Bool("show_account_quota").
 			Default(false).
 			Comment("允许专属分组用户查看账号额度快照"),
