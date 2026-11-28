@@ -237,9 +237,15 @@ async function load(): Promise<void> {
   }
 }
 
+/** The dialog still shows the account (and the load) this request started from. */
+function stillOn(accountId: number, loadSeq: number): boolean {
+  return loadSeq === seq && props.show && props.account?.id === accountId
+}
+
 async function save(): Promise<void> {
   const a = props.account
   if (!a || !view.value || busy.value) return
+  const mine = seq
   tried.value = true
   if (!validMarketPlan(plan.value)) {
     error.value = t('market.account.planRequired')
@@ -251,17 +257,20 @@ async function save(): Promise<void> {
     // A form loaded before someone else changed the listing (e.g. revoked it) must not write it back.
     // Read it again right before saving; the server has no version check (remaining window accepted).
     const latest = await adminAPI.market.getListing(a.id)
+    // Another account (or a reload) meanwhile: this answer belongs to a form no longer on screen.
+    if (!stillOn(a.id, mine)) return
     if (changedSince(view.value, latest)) {
       applyView(latest)
       error.value = t('market.account.staleReload')
       return
     }
     const v = await adminAPI.market.putListing(a.id, { plan: plan.value })
+    if (!stillOn(a.id, mine)) return
     applyView(v)
     appStore.showSuccess(t('market.account.saved'))
     emit('updated', v)
   } catch (e) {
-    error.value = marketErrorText(e, t, t('market.account.saveFailed'))
+    if (stillOn(a.id, mine)) error.value = marketErrorText(e, t, t('market.account.saveFailed'))
   } finally {
     busy.value = false
   }
@@ -286,22 +295,26 @@ async function revoke(): Promise<void> {
   revokePin = null
   const a = props.account
   if (!a || !pin || pin.accountId !== a.id || busy.value) return
+  const mine = seq
   busy.value = true
   error.value = ''
   try {
     // Like saving: the listing (or its owner) changed since the confirmation opened → show it, revoke nothing.
     const latest = await adminAPI.market.getListing(a.id)
+    // The dialog moved to another account meanwhile: revoke nothing, write nothing into its form.
+    if (!stillOn(a.id, mine)) return
     if (changedSince(pin.view, latest)) {
       applyView(latest)
       error.value = t('market.account.staleReload')
       return
     }
     const v = await adminAPI.market.revokeListing(a.id)
+    if (!stillOn(a.id, mine)) return
     applyView(v)
     appStore.showSuccess(t('market.account.revoked'))
     emit('updated', v)
   } catch (e) {
-    error.value = marketErrorText(e, t, t('market.account.saveFailed'))
+    if (stillOn(a.id, mine)) error.value = marketErrorText(e, t, t('market.account.saveFailed'))
   } finally {
     busy.value = false
   }

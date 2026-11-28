@@ -201,6 +201,76 @@ describe('AccountMarketModal', () => {
     expect(market.revokeListing).not.toHaveBeenCalled()
   })
 
+  describe('answers for an account no longer shown never touch the new one', () => {
+    const B = { id: 12, name: 'acct-b', platform: 'anthropic', type: 'setup-token', concurrency: 4, owner_user_id: 8 } as Account
+    const viewA = view({ listing: listing({ version: 3, plan: 'max' }) })
+    const viewB = view({ account_id: 12, owner_user_id: 8, listing: listing({ account_id: 12, owner_user_id: 8, version: 7, plan: 'pro' }) })
+
+    async function switchWhileRevokeGetPending(answerA: unknown) {
+      let resolveA!: (v: unknown) => void
+      market.getListing.mockResolvedValueOnce(viewA).mockReturnValueOnce(new Promise((r) => (resolveA = r))).mockResolvedValueOnce(viewB)
+      const w = await mountModal()
+      await w.get('[data-testid=market-revoke]').trigger('click')
+      await w.get('[data-testid=confirm-yes]').trigger('click')
+      // A's re-read is pending; the dialog moves to B, which loads.
+      await w.setProps({ account: B })
+      await flushPromises()
+      expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('pro')
+      resolveA(answerA)
+      await flushPromises()
+      return w
+    }
+
+    it('revoke: A\'s re-read returns changed → nothing applied to B, no error, no DELETE', async () => {
+      const w = await switchWhileRevokeGetPending(view({ listing: listing({ version: 4, plan: 'ultra' }) }))
+      expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('pro')
+      expect(w.find('[data-testid=market-error]').exists()).toBe(false)
+      expect(market.revokeListing).not.toHaveBeenCalled()
+    })
+
+    it('revoke: A\'s re-read returns unchanged → still no DELETE for A, nothing written into B', async () => {
+      const w = await switchWhileRevokeGetPending(viewA)
+      expect(market.revokeListing).not.toHaveBeenCalled()
+      expect(w.get('[data-testid=market-status-badge]').text()).toBe('market.status.unlisted')
+      expect(w.get('[data-testid=market-version]').text()).toContain('"v":7')
+    })
+
+    it('revoke: A\'s DELETE answers after the switch → B\'s form untouched, no success toast', async () => {
+      let resolveDelete!: (v: unknown) => void
+      market.getListing.mockResolvedValueOnce(viewA).mockResolvedValueOnce(viewA).mockResolvedValueOnce(viewB)
+      market.revokeListing.mockReturnValueOnce(new Promise((r) => (resolveDelete = r)))
+      const w = await mountModal()
+      await w.get('[data-testid=market-revoke]').trigger('click')
+      await w.get('[data-testid=confirm-yes]').trigger('click')
+      await flushPromises()
+      expect(market.revokeListing).toHaveBeenCalledWith(11)
+      await w.setProps({ account: B })
+      await flushPromises()
+      resolveDelete(view({ listing: listing({ status: 'revoked', version: 4 }) }))
+      await flushPromises()
+      expect(w.get('[data-testid=market-status-badge]').text()).toBe('market.status.unlisted')
+      expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('pro')
+      expect(store.showSuccess).not.toHaveBeenCalled()
+      expect(w.emitted('updated')).toBeUndefined()
+    })
+
+    it('save: A\'s PUT answers after the switch → B\'s form untouched', async () => {
+      let resolvePut!: (v: unknown) => void
+      market.getListing.mockResolvedValueOnce(viewA).mockResolvedValueOnce(viewA).mockResolvedValueOnce(viewB)
+      market.putListing.mockReturnValueOnce(new Promise((r) => (resolvePut = r)))
+      const w = await mountModal()
+      await w.get('form').trigger('submit')
+      await flushPromises()
+      expect(market.putListing).toHaveBeenCalledWith(11, { plan: 'max' })
+      await w.setProps({ account: B })
+      await flushPromises()
+      resolvePut(view({ listing: listing({ version: 4, plan: 'max' }) }))
+      await flushPromises()
+      expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('pro')
+      expect(store.showSuccess).not.toHaveBeenCalled()
+    })
+  })
+
   it('a failed group read: an error with a retry; the stored plan stays selectable', async () => {
     groups.getAll.mockRejectedValueOnce({ status: 500 })
     market.getListing.mockResolvedValue(view({ listing: listing() }))

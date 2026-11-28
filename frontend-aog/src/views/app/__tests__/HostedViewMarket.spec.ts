@@ -454,6 +454,36 @@ describe('HostedView sharing market', () => {
     }
   })
 
+  it('same-time views arriving before a retry fires keep it pending: the 3 retries all happen', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-28T10:00:00Z'))
+      const stuck = { ...SHARED, can_unlist: false, next_switch_at: '2026-11-28T09:59:00Z' }
+      await mountView({ views: { 11: stuck } })
+      market.getListing.mockImplementation(async () => ({ ...stuck }))
+      // Three more views with the same time land before the first retry fires (other re-reads).
+      for (let i = 0; i < 3; i++) {
+        useHostedStore().notifyListingChanged(11)
+        await flushPromises()
+        vi.advanceTimersByTime(1_000)
+      }
+      const start = market.getListing.mock.calls.length
+      vi.advanceTimersByTime(2_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(start + 1)
+      vi.advanceTimersByTime(15_000)
+      await flushPromises()
+      vi.advanceTimersByTime(60_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(start + 3)
+      vi.advanceTimersByTime(10 * 60_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(start + 3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('after the end-of-cooldown read returns the same (passed) time and a closed switch, it retries with the same backoff', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     try {
@@ -633,6 +663,28 @@ describe('HostedView sharing market', () => {
     await flushPromises()
     expect(again.get('[data-testid=market-self-use]').attributes('disabled')).toBeUndefined()
     expect(again.get('[data-testid=hosted-pause]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('a switch answered after leaving the page: the left card neither applies nor announces it; the new page re-reads', async () => {
+    const opts = { global: { plugins: [i18n] }, attachTo: document.body }
+    const w = await mountView({ views: { 11: view({ version: 2 }) } })
+    const notify = vi.spyOn((await import('@/stores/app')).useAppStore(), 'notify')
+    let resolve!: (v: unknown) => void
+    market.setListing.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    await w.get('[data-testid=market-share]').trigger('click')
+    await w.get('[data-testid=market-11] dialog .btn-primary').trigger('click')
+    w.unmount()
+    // The new page reads a newer 自用 view (v4).
+    market.getListing.mockResolvedValue(view({ version: 4 }))
+    const again = mount(HostedView, opts)
+    await flushPromises()
+    const before = market.getListing.mock.calls.length
+    resolve({ ...SHARED, version: 3 })
+    await flushPromises()
+    expect(notify).not.toHaveBeenCalledWith('ok', expect.anything())
+    expect(market.getListing.mock.calls.length).toBeGreaterThan(before)
+    expect(again.get('[data-testid=market-state]').text()).toBe('自用')
+    again.unmount()
   })
 
   it('a listing action answered after the page was re-entered: the new page shows the result', async () => {

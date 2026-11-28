@@ -49,12 +49,21 @@ let mounted = true
 let cooldownTimer: ReturnType<typeof setTimeout> | null = null
 /** Re-reads after the cooldown time passed but the switch is still closed: per next_switch_at, at most 3. */
 const COOLDOWN_RETRY_MS = [5_000, 15_000, 60_000]
+/** The next_switch_at the pending timer is for. */
+let timerFor: string | null = null
 let retryFor: string | null = null
+/** Retries that actually fired for retryFor. */
 let retries = 0
 onUnmounted(() => {
   mounted = false
-  if (cooldownTimer) clearTimeout(cooldownTimer)
+  clearCooldownTimer()
 })
+
+function clearCooldownTimer(): void {
+  if (cooldownTimer) clearTimeout(cooldownTimer)
+  cooldownTimer = null
+  timerFor = null
+}
 const { t, te } = useI18n()
 const app = useAppStore()
 
@@ -137,10 +146,14 @@ const sellTier = computed<MarketTierOption | null>(() => {
   return tiers.value.length === 1 ? tiers.value[0] : null
 })
 
-function reloadLater(ms: number): void {
-  if (cooldownTimer) clearTimeout(cooldownTimer)
+/** Read the view again after `ms`, for next_switch_at `at`; `retry`: counts as one of the 3 retries when it fires. */
+function reloadLater(at: string, ms: number, retry: boolean): void {
+  clearCooldownTimer()
+  timerFor = at
   cooldownTimer = setTimeout(() => {
     cooldownTimer = null
+    timerFor = null
+    if (retry && retryFor === at) retries++
     if (mounted) emit('reload')
   }, ms)
 }
@@ -148,14 +161,13 @@ function reloadLater(ms: number): void {
 /**
  * Every new view: when the cooldown ends, read it again (the server decides whether the switch is
  * open). If the time already passed and the switch is still closed (clock skew, a late write), read
- * again after 5 s, 15 s, 60 s, then stop until the time changes. A view that opens the switch also
- * clears a cooldown refusal shown earlier.
+ * again after 5 s, 15 s, 60 s (counted when they fire), then stop until the time changes. A timer
+ * already pending for the same time is kept. A view that opens the switch also clears a cooldown
+ * refusal shown earlier.
  */
 watch(
   () => props.view,
   (v) => {
-    if (cooldownTimer) clearTimeout(cooldownTimer)
-    cooldownTimer = null
     if (cooldownHit.value && (!v.next_switch_at || switchOpen.value)) {
       cooldownHit.value = false
       cooldownAt.value = null
@@ -163,6 +175,7 @@ watch(
     const at = v.next_switch_at
     const ms = at ? Date.parse(at) - Date.now() : NaN
     if (!at || !Number.isFinite(ms)) {
+      clearCooldownTimer()
       retryFor = null
       return
     }
@@ -170,13 +183,19 @@ watch(
       retryFor = at
       retries = 0
     }
-    // A second late (clock skew); beyond the longest cooldown (168 h) a reload of the page will do.
-    if (ms > 0) {
-      if (ms <= 169 * 3600_000) reloadLater(ms + 1000)
+    if (ms <= 0 && (switchOpen.value || state.value === 'notGranted')) {
+      clearCooldownTimer()
       return
     }
-    if (switchOpen.value || state.value === 'notGranted' || retries >= COOLDOWN_RETRY_MS.length) return
-    reloadLater(COOLDOWN_RETRY_MS[retries++])
+    // Same time, timer already waiting: keep it (do not restart or re-count it).
+    if (cooldownTimer && timerFor === at) return
+    clearCooldownTimer()
+    // A second late (clock skew); beyond the longest cooldown (168 h) a reload of the page will do.
+    if (ms > 0) {
+      if (ms <= 169 * 3600_000) reloadLater(at, ms + 1000, false)
+      return
+    }
+    if (retries < COOLDOWN_RETRY_MS.length) reloadLater(at, COOLDOWN_RETRY_MS[retries], true)
   },
   { immediate: true }
 )
@@ -284,13 +303,14 @@ async function send(toShared: boolean, body: OwnerMarketUpdate): Promise<void> {
   const session = hosted.session()
   try {
     const view = await marketApi.setListing(props.view.account_id, body)
-    // Signed out / another user meanwhile: this answer is not theirs to see.
-    if (hosted.session() !== session) return
+    // Signed out / another user meanwhile: this answer is not theirs to see. Page left: the page on
+    // screen re-reads the account instead (finally below); this card neither applies nor announces it.
+    if (hosted.session() !== session || !mounted) return
     tierRequired.value = false
     // Announced only when the page took this answer (an older one is replaced by a fresh read).
     if (props.apply(view)) app.notify('ok', t(toShared ? 'market.sharedDone' : 'market.selfUseDone'))
   } catch (e) {
-    if (hosted.session() !== session) return
+    if (hosted.session() !== session || !mounted) return
     if (isCooldownError(e)) {
       cooldownHit.value = true
       cooldownAt.value = errorNextSwitchAt(e)
