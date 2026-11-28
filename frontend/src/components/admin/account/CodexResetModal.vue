@@ -4,7 +4,7 @@
     <p v-if="loading">{{ t('common.loading') }}</p>
     <p v-if="error" role="alert" class="mb-3 text-sm text-red-600">{{ error }}</p>
     <p v-if="result" role="status" class="mb-3 text-sm">{{ t(`admin.accounts.codexReset.${result.outcome}`) }}</p>
-    <p v-if="result && result.outcome !== 'no_credit' && !result.quota_synced" class="mb-3 text-sm text-amber-600">{{ t('admin.accounts.codexReset.syncFailed') }}</p>
+    <p v-if="result && result.outcome !== 'no_credit' && !result.quota_synced" class="mb-3 text-sm text-amber-600">{{ t('admin.accounts.codexReset.syncFailed') }}<span v-if="result.sync_error"> ({{ result.sync_error }})</span></p>
     <button v-if="pending" class="btn btn-primary mb-4" :disabled="busy" @click="consume(pending.creditId)">{{ t('admin.accounts.codexReset.retry') }}</button>
     <template v-if="!loading && loaded">
       <p class="mb-3 text-sm font-medium">{{ t('admin.accounts.codexReset.available', { count: availableCount }) }}</p>

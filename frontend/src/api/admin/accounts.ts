@@ -800,6 +800,7 @@ export interface CodexResetResult {
   outcome: 'reset' | 'nothing_to_reset' | 'no_credit' | 'already_redeemed'
   windows_reset: number
   quota_synced: boolean
+  sync_error?: string
 }
 
 export async function listCodexResetCredits(id: number): Promise<{ available_count: number; credits: CodexResetCredit[] }> {

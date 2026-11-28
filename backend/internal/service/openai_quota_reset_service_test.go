@@ -140,6 +140,8 @@ func TestCodexResetOutcomesAndRefreshFailures(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.code, result.Outcome)
 			require.Equal(t, tc.synced, result.QuotaSynced)
+			require.Equal(t, !tc.synced && tc.code != "no_credit", result.SyncError != "")
+			require.NotContains(t, result.SyncError, "sensitive")
 			require.Equal(t, tc.cleared, repo.clears > 0)
 			if tc.code == "no_credit" {
 				require.Zero(t, usageCalls)
