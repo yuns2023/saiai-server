@@ -225,7 +225,7 @@
           </template>
           <template v-else>
             <button type="button" class="btn btn-secondary" :disabled="busy" @click="closeApprove">{{ t('common.cancel') }}</button>
-            <button type="submit" form="approve-form" class="btn btn-primary" :disabled="busy || planBlocked" data-testid="approve-confirm">
+            <button type="submit" form="approve-form" class="btn btn-primary" :disabled="busy || planBlocked || planGone" data-testid="approve-confirm">
               {{ busy ? t('admin.hostedApplications.approving') : t('admin.hostedApplications.approve') }}
             </button>
           </template>

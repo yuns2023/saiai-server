@@ -107,6 +107,15 @@ describe('AccountMarketModal', () => {
     expect(w.get('[data-testid=market-error]').text()).toBe('market.errors.MARKET_PLAN_UNKNOWN')
   })
 
+  it('MARKET_PLAN_INVALID from the server is shown in plain words', async () => {
+    market.getListing.mockResolvedValue(view({ listing: listing() }))
+    const w = await mountModal()
+    market.putListing.mockRejectedValue({ status: 400, reason: 'MARKET_PLAN_INVALID', message: 'the plan must match …' })
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(w.get('[data-testid=market-error]').text()).toBe('market.errors.MARKET_PLAN_INVALID')
+  })
+
   it('a plan with no live tier in the preview says so', async () => {
     market.getListing.mockResolvedValue(view({ listing: listing({ plan: 'legacy' }) }))
     const w = await mountModal()

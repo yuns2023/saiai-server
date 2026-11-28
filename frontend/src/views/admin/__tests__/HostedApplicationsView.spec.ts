@@ -314,6 +314,17 @@ describe('Hosting applications (admin)', () => {
       expect(w.find('[data-testid=approve-dialog]').exists()).toBe(true)
     })
 
+    it('MARKET_PLAN_INVALID (bad format) has its own message and also reads the tiers again', async () => {
+      approve.mockRejectedValue({ status: 400, reason: 'MARKET_PLAN_INVALID', message: 'the plan must match …' })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      await planSelect(w).setValue('max')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(showError).toHaveBeenCalledWith('admin.hostedApplications.errors.MARKET_PLAN_INVALID')
+      expect(groupsGetAll).toHaveBeenCalledTimes(2)
+    })
+
     it('a chosen plan that disappeared on the re-read is not sent again: the admin picks again (不开通共享 still works)', async () => {
       approve.mockRejectedValueOnce({ status: 400, reason: 'MARKET_PLAN_UNKNOWN', message: 'x' })
       const w = await mountView()
@@ -324,11 +335,13 @@ describe('Hosting applications (admin)', () => {
       await w.get('[data-testid=approve-dialog]').trigger('submit')
       await flushPromises()
       expect(w.get('[data-testid=plan-gone]').text()).toContain('admin.hostedApplications.marketPlanGone')
+      expect(w.get('[data-testid=approve-confirm]').attributes('disabled')).toBeDefined()
       await w.get('[data-testid=approve-dialog]').trigger('submit')
       await flushPromises()
       expect(approve).toHaveBeenCalledTimes(1)
       approve.mockResolvedValueOnce({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
       await planSelect(w).setValue('')
+      expect(w.get('[data-testid=approve-confirm]').attributes('disabled')).toBeUndefined()
       await w.get('[data-testid=approve-dialog]').trigger('submit')
       await flushPromises()
       expect(approve).toHaveBeenCalledTimes(2)
