@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,14 +284,14 @@ func TestMarketOwnerAttemptRefusedWhileListingRuns(t *testing.T) {
 		}
 		return listedFacts(unlisted)(req)
 	}
-	require.True(t, env.svc.marketOwnerResendRefused(func() context.Context {
+	require.Error(t, env.svc.marketOwnerResendErr(func() context.Context {
 		c2, _, _ := claudeCodeCacheSafeRetryContext(t)
 		x, _ := ownerForwardCtx(c2.Request.Context(), ownerKey(mktOwner, mktHosted))
 		calls = 2
 		return x
 	}(), acc), "the resend re-check reads the database and refuses")
 	plainCtx, _ := WithMarketAttempt(context.Background(), nil)
-	require.False(t, env.svc.marketOwnerResendRefused(plainCtx, acc), "non-owner attempts keep their admission")
+	require.NoError(t, env.svc.marketOwnerResendErr(plainCtx, acc), "non-owner attempts keep their admission")
 }
 
 func TestMarketRefusalInvalidationSet(t *testing.T) {
@@ -298,7 +299,9 @@ func TestMarketRefusalInvalidationSet(t *testing.T) {
 		"plan_mismatch", "owner_changed", "owner_version", "market_disabled"} {
 		require.True(t, marketRefusalInvalidatesListing(r), r)
 	}
-	for _, r := range []string{"account_inactive", "account_missing", "group_inactive", "not_priced", "not_allowed", "owner_inactive",
+	require.True(t, marketRefusalInvalidatesListing("not_priced"), "lost eligibility: never cache-read billing")
+	require.True(t, marketRefusalInvalidatesListing("group_inactive"), "tier gone")
+	for _, r := range []string{"account_inactive", "account_missing", "not_allowed", "owner_inactive",
 		"capacity_changed", "device_policy_changed", "not_owner", "not_owner_group", "ineligible_max_sessions_enabled", "rejected"} {
 		require.False(t, marketRefusalInvalidatesListing(r), r)
 	}
@@ -335,37 +338,82 @@ func TestMarketBuyerRefusalAfterOwnerTakeBackIsInvalidated(t *testing.T) {
 
 func TestMarketHostedAccountSharedBlocked(t *testing.T) {
 	env := newMarketEnv(t, []Account{mktListedAccount(1)})
+	env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{1}, ListedAdminGroupIDs: []int64{mktHosted}})
 	hosted := mktHosted
 	key := &APIKey{ID: 6, UserID: mktOwner, GroupID: &hosted, Group: mktGroups()[mktHosted], User: &User{ID: mktOwner}}
 	ctx := context.Background()
 
 	env.store.sharedTotal, env.store.shared = 1, []int64{1}
-	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key))
-	reads := env.store.sharedReads
+	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, false), "early check: the registry saw a listed account in the group")
+	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, true))
 
 	// Not every account is shared (another self-use account, e.g. rate
-	// limited or device full): the existing error stays.
+	// limited or device full): the existing path stays.
 	env.store.sharedTotal = 2
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key))
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key, true))
 	env.store.sharedTotal, env.store.shared = 0, nil
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key), "no account at all")
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key, true), "no account at all / not an owner group any more")
 	// Database failure: never reported as shared.
 	env.store.sharedTotal, env.store.shared, env.store.sharedErr = 1, []int64{1}, errors.New("db down")
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key))
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key, true))
 	env.store.sharedErr = nil
 	// Not an owner hosted group: no read at all.
-	reads = env.store.sharedReads
+	reads := env.store.sharedReads
 	tier := mktTier
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner, GroupID: &tier, Group: mktGroups()[mktTier]}))
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner, GroupID: &tier, Group: mktGroups()[mktTier]}, true))
 	plain := mktPlain
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner, GroupID: &plain, Group: mktGroups()[mktPlain]}))
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner}))
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner, GroupID: &plain, Group: mktGroups()[mktPlain]}, true))
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner}, true))
 	require.Equal(t, reads, env.store.sharedReads)
-	// Nothing listed anywhere (saiai.top with the market off): no read.
-	env.rt.SetState(&MarketDispatchState{})
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key))
+	// Early check with nothing listed in this group (saiai.top with the
+	// market off, or another owner's listing): no read.
+	env.rt.SetState(&MarketDispatchState{ListedAccountIDs: []int64{9}, ListedAdminGroupIDs: []int64{mktPlain}})
+	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key, false))
 	require.Equal(t, reads, env.store.sharedReads)
-	require.False(t, (&GatewayService{}).HostedAccountSharedBlocked(ctx, key), "no market runtime")
+	// Listed evidence of this request reads even when the registry lags.
+	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, true))
+	require.Equal(t, reads+1, env.store.sharedReads)
+	require.False(t, (&GatewayService{}).HostedAccountSharedBlocked(ctx, key, true), "no market runtime")
+}
+
+// A plain attempt that meets the listed view only after the dispatch gate
+// (registry updated during the device registration): in the owner's group
+// it becomes an owner attempt checked in the database, never a permanent
+// "mode changed" refusal.
+func TestMarketListedAfterGateUpgradesOwnerAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dbListed bool
+	}{{"database unlisted: served", false}, {"database listed: refused", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, upstream, acc, _ := ownerForwardEnv(t, true)
+			acc.MarketGroupIDs, acc.MarketListing = nil, nil
+			env.rt.SetState(&MarketDispatchState{Enabled: true})
+			if tc.dbListed {
+				env.store.facts = listedFacts(env.store.facts)
+			}
+			env.svc.identityService = NewIdentityService(&listingDuringRegistrationStub{onRegister: func() {
+				env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{acc.ID}})
+			}}, strings.Repeat("x", 32))
+			c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+			hosted := mktGroups()[mktHosted]
+			key := ownerKey(mktOwner, mktHosted)
+			key.Group = hosted
+			ctx := WithMarketDispatch(WithAccountUserID(c.Request.Context(), mktOwner), key)
+			ctx, attempt := WithMarketAttempt(ctx, nil)
+			_, err := env.svc.Forward(ctx, c, acc, parsed)
+			require.NotNil(t, attempt.Selection, "upgraded")
+			require.Equal(t, MarketClassOwner, attempt.Selection.Class)
+			require.NotEmpty(t, env.store.requests, "the database decided")
+			if tc.dbListed {
+				requireMarketInvalidated(t, err, true)
+				require.Zero(t, upstream.calls)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, 1, upstream.calls)
+		})
+	}
 }
 
 func TestMarketHostedSharedLogThrottle(t *testing.T) {

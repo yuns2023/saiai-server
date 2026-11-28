@@ -166,9 +166,8 @@ func (s *MarketListingService) planTierOptions(ctx context.Context, account *Acc
 // listing is re-granted. If the selected tier no longer matches the plan,
 // the account is unlisted like a deleted tier, in the same transaction.
 func (s *MarketListingService) AdminConfigure(ctx context.Context, adminUserID, accountID int64, plan string) (*AdminMarketListingView, error) {
-	plan = NormalizeMarketPlanInput(plan)
 	if !ValidMarketPlan(plan) {
-		return nil, ErrMarketPlanUnknown
+		return nil, ErrMarketPlanInvalid
 	}
 	listing, err := s.repo.AdminConfigure(ctx, MarketAdminConfigureParams{
 		AccountID:   accountID,
@@ -322,7 +321,9 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 		if err != nil {
 			return nil, err
 		}
-		if next != nil {
+		// With the market off a shared account can be taken back now: one
+		// decision, no cooldown shown.
+		if next != nil && !(listing.Status == MarketListingStatusListed && !cfg.Enabled) {
 			at := ceilToSecond(*next)
 			view.NextSwitchAt = &at
 		}

@@ -63,7 +63,7 @@ func (h *MarketListingHandler) Put(c *gin.Context) {
 		return
 	}
 	var req marketListingRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Plan == nil || service.NormalizeMarketPlanInput(*req.Plan) == "" {
+	if err := c.ShouldBindJSON(&req); err != nil || req.Plan == nil || *req.Plan == "" {
 		response.BadRequest(c, "plan is required")
 		return
 	}

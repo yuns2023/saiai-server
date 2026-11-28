@@ -940,13 +940,24 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 		return nil, err
 	}
 	groupID := p.GroupID
-	switch {
-	case len(locked) == 0:
+	if len(locked) == 0 {
 		return nil, service.ErrMarketGroupNotAllowed
-	case groupID <= 0 && len(locked) > 1:
-		return nil, service.ErrMarketTierRequired
-	case groupID <= 0:
-		groupID = locked[0]
+	}
+	if groupID <= 0 {
+		// Only tiers the account can be listed in count (an admin member of
+		// a tier cannot sell there); an explicit choice keeps its own error.
+		listable, err := marketListableTiersTx(ctx, tx, p.AccountID, locked)
+		if err != nil {
+			return nil, err
+		}
+		switch len(listable) {
+		case 0:
+			return nil, service.ErrMarketAdminMembershipConflict
+		case 1:
+			groupID = listable[0]
+		default:
+			return nil, service.ErrMarketTierRequired
+		}
 	}
 	// Re-read after the group lock: a concurrent re-plan or removal of the
 	// selected tier may have changed the row.
@@ -1002,6 +1013,35 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 	return r.ownerListWrite(ctx, tx, p, current, func() (*service.MarketListing, error) {
 		return r.commitListing(ctx, tx, p.AccountID)
 	})
+}
+
+// marketListableTiersTx: the given tiers minus those the account is an
+// admin member of.
+func marketListableTiersTx(ctx context.Context, q sqlQueryer, accountID int64, tiers []int64) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, `SELECT group_id FROM account_groups
+		WHERE account_id = $1 AND group_id = ANY($2) AND source = 'admin'`, accountID, pq.Array(tiers))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	members := map[int64]struct{}{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		members[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, len(tiers))
+	for _, id := range tiers {
+		if _, member := members[id]; !member {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // checkOwnerSwitchCooldownTx refuses an owner switch inside the cooldown

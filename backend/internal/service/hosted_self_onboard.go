@@ -686,9 +686,9 @@ func (s *HostedSelfOnboardService) Approve(ctx context.Context, adminUserID, id 
 		return nil, err
 	}
 	params := HostedApproveParams{ApplicationID: id, AdminUserID: adminUserID}
-	if plan := NormalizeMarketPlanInput(req.MarketPlan); plan != "" {
+	if plan := req.MarketPlan; plan != "" {
 		if !ValidMarketPlan(plan) {
-			return nil, ErrMarketPlanUnknown
+			return nil, ErrMarketPlanInvalid
 		}
 		params.MarketPlan = plan
 	}

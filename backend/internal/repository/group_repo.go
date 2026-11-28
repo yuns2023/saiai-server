@@ -323,10 +323,17 @@ func (r *groupRepository) updateOnce(ctx context.Context, groupIn *service.Group
 		builder = builder.ClearImagePrice4k()
 	}
 
-	if groupIn.MarketPlan != nil {
-		builder = builder.SetMarketPlan(*groupIn.MarketPlan)
-	} else {
-		builder = builder.ClearMarketPlan()
+	// The plan is written only when the save carried it (or a demotion
+	// cleared it): the rest of groupIn may come from a read before another
+	// admin changed the plan.
+	newPlan := nullStringPtr(oldPlan)
+	if groupIn.MarketPlanWrite {
+		newPlan = groupIn.MarketPlan
+		if newPlan != nil {
+			builder = builder.SetMarketPlan(*newPlan)
+		} else {
+			builder = builder.ClearMarketPlan()
+		}
 	}
 
 	// 处理 FallbackGroupID：nil 时清除，否则设置
@@ -367,13 +374,14 @@ func (r *groupRepository) updateOnce(ctx context.Context, groupIn *service.Group
 		if err := marketRemoveGroupTx(ctx, client, groupIn.ID, service.MarketListingActionGroupDemoted); err != nil {
 			return ownTx, err
 		}
-	case groupIn.MarketTier && !equalNullableString(oldPlan, groupIn.MarketPlan):
+	case groupIn.MarketTier && !equalNullableString(oldPlan, newPlan):
 		// Re-classified: listings selected here whose plan no longer matches
 		// are unlisted like a demotion (same transaction, group row locked).
-		if err := marketReplanGroupTx(ctx, client, groupIn.ID, groupIn.MarketPlan); err != nil {
+		if err := marketReplanGroupTx(ctx, client, groupIn.ID, newPlan); err != nil {
 			return ownTx, err
 		}
 	}
+	groupIn.MarketPlan = newPlan
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return ownTx, err

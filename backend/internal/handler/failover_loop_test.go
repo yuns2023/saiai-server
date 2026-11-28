@@ -784,6 +784,16 @@ func TestFailoverMarketInvalidated(t *testing.T) {
 	require.False(t, fs.OnlyMarketInvalidated())
 	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(ctx))
 	require.Equal(t, map[int64]struct{}{1: {}}, fs.FailedAccountIDs)
+	// B became unschedulable: the next selection is empty again with no new
+	// attempt. The request ends with B's real error instead of backing off
+	// every 2 s until the client gives up.
+	last := fs.LastFailoverErr
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(ctx))
+	require.Same(t, last, fs.LastFailoverErr)
+	require.False(t, fs.LastFailoverErr.MarketInvalidated)
+	// A new attempt re-arms the backoff (old behavior for real 503s).
+	fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, newTestFailoverErr(503, false, false))
+	require.Equal(t, FailoverContinue, fs.HandleSelectionExhausted(ctx))
 
 	// A generic 503 keeps the old behavior.
 	generic := NewFailoverState(3, true)

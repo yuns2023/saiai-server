@@ -400,14 +400,14 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	requireMarketReason(t, err, "HOSTED_ACCOUNT_NOT_FOUND")
 
 	// Admin: the plan is the only input (slug checked before the repository).
-	admin, err := svc.AdminConfigure(ctx, 1, 11, " max ")
+	admin, err := svc.AdminConfigure(ctx, 1, 11, "max")
 	require.NoError(t, err)
-	require.Equal(t, "max", repo.lastCfg.Plan, "trimmed")
+	require.Equal(t, "max", repo.lastCfg.Plan)
 	require.Equal(t, "max", *admin.Listing.Plan)
-	for _, bad := range []string{"", "Max", "max plan"} {
+	for _, bad := range []string{"", " max ", "  ", "Max", "max plan"} {
 		repo.lastCfg = nil
 		_, err = svc.AdminConfigure(ctx, 1, 11, bad)
-		requireMarketReason(t, err, "MARKET_PLAN_UNKNOWN")
+		requireMarketReason(t, err, "MARKET_PLAN_INVALID")
 		require.Nil(t, repo.lastCfg, "refused before the repository")
 	}
 	noOwner := &fakeMarketRepo{account: &Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}}
@@ -473,6 +473,8 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	view, err = svc.OwnerGet(ctx, 7, 11)
 	require.NoError(t, err)
 	require.True(t, view.CanUnlist, "market off: take-back regardless of the cooldown")
+	require.Nil(t, view.NextSwitchAt, "one decision: the take-back is allowed now")
+	require.NotContains(t, view.UnavailableReasons, MarketReasonSwitchCooldown)
 	settings.values[SettingKeyMarketEnabled] = "true"
 	repo.nextSwitch = nil
 	view, err = svc.OwnerGet(ctx, 7, 11)
@@ -524,7 +526,7 @@ func TestUpdateGroupMarketPlanPresence(t *testing.T) {
 		_, err := svc.UpdateGroup(ctx, 1, in)
 		return groups, err
 	}
-	max, pro, bad := "max", " pro ", "Max"
+	max, pro, bad, spaces, padded := "max", "pro", "Max", "  ", " pro "
 	withPlan := func(g *marketTierGroupRepo) { g.groups[1].MarketPlan = &max }
 
 	// Absent: kept.
@@ -535,18 +537,32 @@ func TestUpdateGroupMarketPlanPresence(t *testing.T) {
 	groups, err = update(withPlan, &UpdateGroupInput{MarketPlanSet: true})
 	require.NoError(t, err)
 	require.Nil(t, groups.updated.MarketPlan)
-	// Present string: trimmed and set.
+	empty := ""
+	groups, err = update(withPlan, &UpdateGroupInput{MarketPlan: &empty, MarketPlanSet: true})
+	require.NoError(t, err)
+	require.Nil(t, groups.updated.MarketPlan, `"" clears`)
+	require.True(t, groups.updated.MarketPlanWrite)
+	// Present string: set as sent.
 	groups, err = update(nil, &UpdateGroupInput{MarketPlan: &pro, MarketPlanSet: true})
 	require.NoError(t, err)
 	require.Equal(t, "pro", *groups.updated.MarketPlan)
-	// Invalid slug.
-	_, err = update(nil, &UpdateGroupInput{MarketPlan: &bad, MarketPlanSet: true})
-	requireMarketReason(t, err, "MARKET_PLAN_INVALID")
+	require.True(t, groups.updated.MarketPlanWrite)
+	// Invalid slug, whitespace included (never trimmed).
+	for _, v := range []*string{&bad, &spaces, &padded} {
+		_, err = update(nil, &UpdateGroupInput{MarketPlan: v, MarketPlanSet: true})
+		requireMarketReason(t, err, "MARKET_PLAN_INVALID")
+	}
+	// Absent: the stored plan is not written back (another admin may have
+	// changed it since this save read the group).
+	groups, err = update(withPlan, &UpdateGroupInput{Name: "renamed"})
+	require.NoError(t, err)
+	require.False(t, groups.updated.MarketPlanWrite)
 	// Demotion clears the stored plan, also with an explicit null.
 	off := false
 	groups, err = update(withPlan, &UpdateGroupInput{MarketTier: &off})
 	require.NoError(t, err)
 	require.Nil(t, groups.updated.MarketPlan)
+	require.True(t, groups.updated.MarketPlanWrite, "the demotion clears it in the write")
 	groups, err = update(withPlan, &UpdateGroupInput{MarketTier: &off, MarketPlanSet: true})
 	require.NoError(t, err)
 	require.Nil(t, groups.updated.MarketPlan)

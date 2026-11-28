@@ -658,6 +658,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 获取订阅信息（可能为nil）- 提前获取用于后续检查
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
+	// Owner's hosted Key whose accounts are all shared: answer 403 before
+	// any wait can flush an SSE ping (the database is read only when the
+	// last registry poll saw a listed account in the Key's group).
+	if h.writeHostedAccountShared(c, apiKey, streamStarted, false) {
+		return
+	}
+
 	// 0. 检查wait队列是否已满
 	maxWait := service.CalculateMaxWait(subject.Concurrency)
 	canWait, err := h.concurrencyHelper.IncrementWaitCount(c.Request.Context(), subject.UserID, maxWait)
@@ -1020,7 +1027,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					continue
 				}
 				if len(fs.FailedAccountIDs) == 0 {
-					if errors.Is(err, service.ErrNoAvailableAccounts) && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+					// Exhausted because a candidate is being shared (pending
+					// listing seen in this request), and no other failure:
+					// confirm all-shared in the database.
+					if errors.Is(err, service.ErrNoAvailableAccounts) && (fs.LastFailoverErr == nil || fs.OnlyMarketInvalidated()) &&
+						service.MarketSharedEvidence(c.Request.Context()) && h.writeHostedAccountShared(c, currentAPIKey, streamStarted, true) {
 						return
 					}
 					// No upstream attempt yet (a reselect after a cleared
@@ -1044,7 +1055,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				default: // FailoverExhausted
 					if fs.OnlyMarketInvalidated() && errors.Is(err, service.ErrNoAvailableAccounts) &&
-						h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+						h.writeHostedAccountShared(c, currentAPIKey, streamStarted, true) {
 						return
 					}
 					if fs.LastFailoverErr != nil {
@@ -1370,9 +1381,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					case FailoverContinue:
 						continue
 					case FailoverExhausted:
-						if fs.OnlyMarketInvalidated() && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
-							return
-						}
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
 						return
 					case FailoverCanceled:
@@ -2294,17 +2302,18 @@ func (h *GatewayHandler) writeAllAccountsRateLimited(c *gin.Context, apiKey *ser
 	return true
 }
 
-// writeHostedAccountShared answers 403 HOSTED_ACCOUNT_SHARED where a
-// Messages selection is exhausted and the service confirmed (database read)
-// that every account of the owner's hosted Key is shared: x-should-retry:
-// false, no Retry-After (the account does not come back by itself; the owner
-// must switch to 自用). Logged by Ops as a client-side business limit. False
-// (nothing written) on any doubt: the caller keeps its existing error.
-func (h *GatewayHandler) writeHostedAccountShared(c *gin.Context, apiKey *service.APIKey, streamStarted bool) bool {
+// writeHostedAccountShared answers 403 HOSTED_ACCOUNT_SHARED once the
+// service confirmed (database read) that every account of the owner's
+// hosted Key is shared: x-should-retry: false, no Retry-After (the account
+// does not come back by itself; the owner must switch to 自用). Normally
+// called before the request waits for anything (nothing flushed yet); the
+// exhaustion-time calls cover races. Logged by Ops as a client-side business
+// limit. False (nothing written) on any doubt: the caller keeps its path.
+func (h *GatewayHandler) writeHostedAccountShared(c *gin.Context, apiKey *service.APIKey, streamStarted, evidence bool) bool {
 	if h == nil || h.gatewayService == nil || apiKey == nil || (!streamStarted && c.Writer.Written()) {
 		return false
 	}
-	if !h.gatewayService.HostedAccountSharedBlocked(c.Request.Context(), apiKey) {
+	if !h.gatewayService.HostedAccountSharedBlocked(c.Request.Context(), apiKey, evidence) {
 		return false
 	}
 	if !streamStarted {

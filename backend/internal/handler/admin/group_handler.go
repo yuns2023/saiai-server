@@ -62,8 +62,8 @@ func (f *optionalLimitField) UnmarshalJSON(data []byte) error {
 }
 
 // optionalPlanField is market_plan on a group update with presence
-// semantics: absent = keep, null or "" = clear, a string = set (validated by
-// the service).
+// semantics: absent = keep, null or "" = clear, any other string = set as
+// sent (validated by the service; whitespace is invalid).
 type optionalPlanField struct {
 	set   bool
 	value *string
@@ -80,7 +80,7 @@ func (f *optionalPlanField) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(trimmed, &text); err != nil {
 		return fmt.Errorf("invalid market_plan value: %s", string(trimmed))
 	}
-	if strings.TrimSpace(text) == "" {
+	if text == "" {
 		f.value = nil
 		return nil
 	}

@@ -234,6 +234,9 @@ func TestMarketAdmitPlatformAndOwnerPaths(t *testing.T) {
 	require.NoError(t, err)
 	// 共享 and 自用 are exclusive: listed in the database = refused as shared.
 	require.Equal(t, "shared", admit(t, f, ownerSel, ownerReq).Reason)
+	state, err := f.market.LoadMarketDispatchState(ctx)
+	require.NoError(t, err)
+	require.Contains(t, state.ListedAdminGroupIDs, hosted, "the registry knows the owner group of a listed account")
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM user_allowed_groups WHERE group_id = $1", hosted)
 	})

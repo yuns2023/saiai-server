@@ -1488,10 +1488,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.MarketPlanSet {
 		group.MarketPlan = normalizeGroupMarketPlan(input.MarketPlan)
-	} else if !group.MarketTier {
+		group.MarketPlanWrite = true
+	} else if !group.MarketTier && group.MarketPlan != nil {
 		// A stored plan does not survive a demotion (it would block every
 		// later save of the group).
 		group.MarketPlan = nil
+		group.MarketPlanWrite = true
 	}
 	if err := group.ValidateMarketTier(); err != nil && (errors.Is(err, ErrMarketPlanInvalid) || errors.Is(err, ErrMarketPlanRequiresTier)) {
 		return nil, err

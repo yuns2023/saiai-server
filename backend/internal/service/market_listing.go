@@ -5,7 +5,6 @@ import (
 	"math"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -116,11 +115,12 @@ var (
 	// ErrMarketTierRequired: the owner omitted group_id while several tiers
 	// match the plan.
 	ErrMarketTierRequired = infraerrors.BadRequest("MARKET_TIER_REQUIRED", "several tiers match the account's plan; group_id is required")
-	// ErrMarketPlanUnknown: the plan is not a valid slug or no live, active
-	// market tier has it (approval and admin sharing settings).
+	// ErrMarketPlanUnknown: a well-formed plan that no live, active market
+	// tier has (approval and admin sharing settings).
 	ErrMarketPlanUnknown = infraerrors.BadRequest("MARKET_PLAN_UNKNOWN", "no live, active market tier has this plan")
-	// ErrMarketPlanInvalid: a group plan that is not a valid slug.
-	ErrMarketPlanInvalid = infraerrors.BadRequest("MARKET_PLAN_INVALID", "market_plan must match ^[a-z0-9][a-z0-9_-]{0,31}$")
+	// ErrMarketPlanInvalid: a plan that is not a slug (no trimming:
+	// whitespace is invalid too).
+	ErrMarketPlanInvalid = infraerrors.BadRequest("MARKET_PLAN_INVALID", "the plan must match ^[a-z0-9][a-z0-9_-]{0,31}$")
 	// ErrMarketPlanRequiresTier: a plan on a group that is not a market tier.
 	ErrMarketPlanRequiresTier = infraerrors.BadRequest("MARKET_PLAN_REQUIRES_TIER", "market_plan can only be set on a market tier")
 	// ErrMarketAdminMembershipConflict: the owner tries to list into a tier
@@ -166,11 +166,6 @@ var marketPlanPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // ValidMarketPlan reports a plan slug (migration 138 CHECK).
 func ValidMarketPlan(plan string) bool {
 	return marketPlanPattern.MatchString(plan)
-}
-
-// NormalizeMarketPlanInput trims an API plan value; "" = no plan.
-func NormalizeMarketPlanInput(plan string) string {
-	return strings.TrimSpace(plan)
 }
 
 // MarketListing is one account_market_listings row. AllowedGroupIDs is not

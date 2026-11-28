@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -21,6 +22,7 @@ import (
 type sharedMarketStore struct {
 	mu       sync.Mutex
 	account  service.Account
+	groups   []int64 // admin groups of the listed account in the registry poll
 	listed   bool
 	total    int
 	shared   []int64
@@ -30,7 +32,7 @@ type sharedMarketStore struct {
 }
 
 func (s *sharedMarketStore) LoadMarketDispatchState(context.Context) (*service.MarketDispatchState, error) {
-	return &service.MarketDispatchState{ListedAccountIDs: []int64{s.account.ID}}, nil
+	return &service.MarketDispatchState{ListedAccountIDs: []int64{s.account.ID}, ListedAdminGroupIDs: s.groups}, nil
 }
 
 func (s *sharedMarketStore) AdmitMarketCandidate(_ context.Context, req *service.MarketAdmissionRequest, evaluate func(*service.MarketAuthoritativeFacts) string) (*service.MarketAdmissionVerdict, error) {
@@ -66,6 +68,13 @@ func (s *sharedMarketStore) HostedGroupSharedAccounts(context.Context, int64, in
 }
 
 func newHostedSharedHarness(t *testing.T) (*entrypointHarness, *sharedMarketStore, *service.APIKey) {
+	return newHostedSharedHarnessWith(t, nil)
+}
+
+// newHostedSharedHarnessWith: registryGroups = the admin groups the registry
+// poll reports for the listed account (nil: the registry does not know the
+// group yet, so only the selection-time checks can see the listing).
+func newHostedSharedHarnessWith(t *testing.T, registryGroups []int64) (*entrypointHarness, *sharedMarketStore, *service.APIKey) {
 	t.Helper()
 	group := anthropicGroup(entrypointGroupA, service.ClaudeEntrypointPolicyOff)
 	group.HostedUsageEnabled, group.IsExclusive, group.RateMultiplier = true, true, 0.1
@@ -73,7 +82,7 @@ func newHostedSharedHarness(t *testing.T) (*entrypointHarness, *sharedMarketStor
 	owner := h.user.ID
 	h.lab.accounts[0].OwnerUserID = &owner
 	h.lab.accounts[0].AccountGroups = []service.AccountGroup{{AccountID: entrypointAccountID, GroupID: entrypointGroupA, Group: group}}
-	store := &sharedMarketStore{account: h.lab.accounts[0], listed: true, total: 1, shared: []int64{entrypointAccountID}}
+	store := &sharedMarketStore{account: h.lab.accounts[0], groups: registryGroups, listed: true, total: 1, shared: []int64{entrypointAccountID}}
 	rt := service.NewMarketRuntime(store)
 	require.True(t, rt.Refresh(context.Background()))
 	h.handler.gatewayService.SetMarketRuntime(rt)
@@ -142,4 +151,29 @@ func TestMessagesHostedAccountSharedOnlyWhenConfirmed(t *testing.T) {
 	rec = serveOwner(t, h, key, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, 1, h.lab.upstreamCalls())
+}
+
+// The registry already knows the shared account: the 403 is answered before
+// the request waits for anything, so even a streaming request gets the HTTP
+// status and header first (nothing flushed before).
+func TestMessagesHostedAccountSharedEarlyForStreaming(t *testing.T) {
+	h, store, key := newHostedSharedHarnessWith(t, []int64{entrypointGroupA})
+	body := strings.Replace(entrypointBody("cli"), `"max_tokens":16`, `"max_tokens":16,"stream":true`, 1)
+	rec := h.serve(t, key, entrypointT3CodeUA, body, func(c *gin.Context) {
+		c.Request = c.Request.WithContext(service.WithAccountUserID(c.Request.Context(), h.user.ID))
+	})
+	res := rec.Result()
+	require.Equal(t, http.StatusForbidden, res.StatusCode, rec.Body.String())
+	require.Equal(t, "false", res.Header.Get("x-should-retry"))
+	require.Empty(t, res.Header.Get("Retry-After"))
+	require.NotContains(t, res.Header.Get("Content-Type"), "event-stream", "no SSE started")
+	require.Contains(t, rec.Body.String(), `"type":"HOSTED_ACCOUNT_SHARED"`)
+	require.Zero(t, store.checks, "answered before any selection or admission")
+	require.Zero(t, h.lab.upstreamCalls())
+
+	// Not all shared: the early check lets the request through.
+	h, store, key = newHostedSharedHarnessWith(t, []int64{entrypointGroupA})
+	store.total, store.listed = 2, false
+	rec = serveOwner(t, h, key, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

@@ -20,7 +20,7 @@ func TestGroupHandlerMarketPlanPresence(t *testing.T) {
 	require.False(t, svc.updated.MarketPlanSet, "absent keeps the stored plan")
 	require.Nil(t, svc.updated.MarketPlan)
 
-	for _, body := range []string{`{"market_plan":null}`, `{"market_plan":""}`, `{"market_plan":"  "}`, `{"market_tier":false,"market_plan":null}`} {
+	for _, body := range []string{`{"market_plan":null}`, `{"market_plan":""}`, `{"market_tier":false,"market_plan":null}`} {
 		rec = doJSON(router, http.MethodPut, "/groups/1", body)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.True(t, svc.updated.MarketPlanSet, body)
@@ -31,6 +31,11 @@ func TestGroupHandlerMarketPlanPresence(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.True(t, svc.updated.MarketPlanSet)
 	require.Equal(t, "max", *svc.updated.MarketPlan)
+
+	rec = doJSON(router, http.MethodPut, "/groups/1", `{"market_plan":"  "}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.True(t, svc.updated.MarketPlanSet)
+	require.Equal(t, "  ", *svc.updated.MarketPlan, "passed as sent: the service rejects it (MARKET_PLAN_INVALID)")
 
 	rec = doJSON(router, http.MethodPut, "/groups/1", `{"market_plan":7}`)
 	require.Equal(t, http.StatusBadRequest, rec.Code, "not a string")

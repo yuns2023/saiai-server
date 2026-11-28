@@ -21,21 +21,34 @@ func NewMarketDispatchStore(sqlDB *sql.DB) service.MarketDispatchStore {
 }
 
 // LoadMarketDispatchState reads the listed account ids (account_market_listings
-// is small; status 'listed' ⇔ the account has a market membership) and the
-// market switch.
+// is small; status 'listed' ⇔ the account has a market membership), the
+// admin groups of those accounts and the market switch.
 func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (*service.MarketDispatchState, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT account_id FROM account_market_listings WHERE status = 'listed'`)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT l.account_id,
+		       ARRAY(SELECT ag.group_id FROM account_groups ag WHERE ag.account_id = l.account_id AND ag.source = 'admin')
+		FROM account_market_listings l WHERE l.status = 'listed'`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	state := &service.MarketDispatchState{}
+	groups := map[int64]struct{}{}
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var (
+			id       int64
+			adminIDs pq.Int64Array
+		)
+		if err := rows.Scan(&id, &adminIDs); err != nil {
 			return nil, err
 		}
 		state.ListedAccountIDs = append(state.ListedAccountIDs, id)
+		for _, g := range adminIDs {
+			if _, seen := groups[g]; !seen {
+				groups[g] = struct{}{}
+				state.ListedAdminGroupIDs = append(state.ListedAdminGroupIDs, g)
+			}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

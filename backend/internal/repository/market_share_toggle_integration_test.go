@@ -516,12 +516,64 @@ func TestMarketGroupPlanRoundTrip(t *testing.T) {
 	got, err := f.groups.GetByID(ctx, g.ID)
 	require.NoError(t, err)
 	require.Equal(t, plan, *got.MarketPlan)
-	got.MarketPlan = nil
+	got.MarketPlan, got.MarketPlanWrite = nil, true
 	require.NoError(t, f.groups.Update(ctx, got))
 	got, err = f.groups.GetByID(ctx, g.ID)
 	require.NoError(t, err)
 	require.Nil(t, got.MarketPlan, "cleared")
 	bad := "Bad Plan"
-	got.MarketPlan = &bad
+	got.MarketPlan, got.MarketPlanWrite = &bad, true
 	require.Error(t, f.groups.Update(ctx, got), "the format CHECK backs the service validation")
+}
+
+// Two admins save the same tier: A changes the plan, B (who read the group
+// before A's save) renames it without sending market_plan. B's save must
+// not write A's change back (it would also unlist A's accounts).
+func TestMarketGroupStaleSaveKeepsPlan(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	owner := f.user(t)
+	tier := f.group(t, true)
+	stale, err := f.groups.GetByID(ctx, tier) // admin B reads
+	require.NoError(t, err)
+	acc := f.account(t, owner)
+	newPlan := marketTestPlan()
+	fresh, err := f.groups.GetByID(ctx, tier) // admin A changes the plan
+	require.NoError(t, err)
+	fresh.MarketPlan, fresh.MarketPlanWrite = &newPlan, true
+	require.NoError(t, f.groups.Update(ctx, fresh))
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO account_market_listings (account_id, owner_user_id, plan) VALUES ($1, $2, $3)
+		ON CONFLICT (account_id) DO UPDATE SET plan = EXCLUDED.plan`, acc, owner, newPlan)
+	require.NoError(t, err)
+	_, err = f.list(acc, owner, tier)
+	require.NoError(t, err)
+
+	stale.Description = "renamed by B" // MarketPlanWrite false: the field was not sent
+	require.NoError(t, f.groups.Update(ctx, stale))
+	require.Equal(t, newPlan, marketGroupPlan(t, tier), "B's save kept A's plan")
+	require.Equal(t, service.MarketListingStatusListed, marketListingState(t, f, acc).Status, "no re-plan unlist")
+	require.Equal(t, newPlan, *stale.MarketPlan, "the saved object reports the stored plan")
+}
+
+// PUT without group_id: only tiers the account can be listed in count.
+func TestMarketOwnerImplicitTierSkipsAdminMemberTiers(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	owner := f.user(t)
+	tierA := f.group(t, true)
+	tierB := f.group(t, true)
+	acc := f.account(t, owner)
+	f.configure(t, acc, tierA, tierB)
+	require.NoError(t, f.accounts.BindGroups(ctx, acc, []int64{tierA})) // admin member of A
+	svc := service.NewMarketListingService(f.market, NewSettingRepository(integrationEntClient))
+	_, err := svc.OwnerSet(ctx, owner, acc, 0, true)
+	require.NoError(t, err, "only B is listable: implied")
+	require.Equal(t, tierB, *marketListingState(t, f, acc).SelectedGroupID)
+	_, err = svc.OwnerSet(ctx, owner, acc, 0, false)
+	require.NoError(t, err)
+	_, err = svc.OwnerSet(ctx, owner, acc, tierA, true)
+	requireReason(t, err, "MARKET_ADMIN_MEMBERSHIP_CONFLICT")
+	require.NoError(t, f.accounts.BindGroups(ctx, acc, []int64{tierA, tierB}))
+	_, err = svc.OwnerSet(ctx, owner, acc, 0, true)
+	requireReason(t, err, "MARKET_ADMIN_MEMBERSHIP_CONFLICT")
 }

@@ -150,16 +150,17 @@ func TestAdminMarketListingHandlerJSON(t *testing.T) {
 	require.Len(t, view.AllowedTiers, 1)
 	require.NotContains(t, w.Body.String(), "protection")
 
-	for _, raw := range []string{`{}`, `{"plan":""}`, `{"plan":"  "}`, `{"allowed_group_ids":[3]}`, `nope`} {
+	for _, raw := range []string{`{}`, `{"plan":""}`, `{"plan":null}`, `{"allowed_group_ids":[3]}`, `nope`} {
 		w = httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing", bytes.NewBufferString(raw)))
 		require.Equal(t, http.StatusBadRequest, w.Code, raw)
 	}
-	for _, raw := range []string{`{"plan":"Max"}`, `{"plan":"unknown"}`} {
+	for raw, reason := range map[string]string{`{"plan":"Max"}`: "MARKET_PLAN_INVALID", `{"plan":"  "}`: "MARKET_PLAN_INVALID",
+		`{"plan":" max "}`: "MARKET_PLAN_INVALID", `{"plan":"unknown"}`: "MARKET_PLAN_UNKNOWN"} {
 		w = httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing", bytes.NewBufferString(raw)))
 		require.Equal(t, http.StatusBadRequest, w.Code, raw)
-		require.Contains(t, w.Body.String(), "MARKET_PLAN_UNKNOWN", raw)
+		require.Contains(t, w.Body.String(), reason, raw)
 	}
 
 	w = httptest.NewRecorder()

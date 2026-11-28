@@ -1004,7 +1004,7 @@ func TestMarketListingGroupDeleteAndDemote(t *testing.T) {
 	require.NoError(t, err)
 	g3, err = f.groups.GetByID(ctx, tier3)
 	require.NoError(t, err)
-	g3.MarketPlan = &newPlan
+	g3.MarketPlan, g3.MarketPlanWrite = &newPlan, true
 	require.NoError(t, f.groups.Update(ctx, g3))
 	l = marketListingState(t, f, acc)
 	require.Equal(t, service.MarketListingStatusUnlisted, l.Status)
@@ -1017,7 +1017,7 @@ func TestMarketListingGroupDeleteAndDemote(t *testing.T) {
 	require.NoError(t, err)
 	g3, err = f.groups.GetByID(ctx, tier3)
 	require.NoError(t, err)
-	g3.MarketPlan = nil // a tier without a plan sells nothing
+	g3.MarketPlan, g3.MarketPlanWrite = nil, true // a tier without a plan sells nothing
 	require.NoError(t, f.groups.Update(ctx, g3))
 	require.Equal(t, service.MarketListingStatusUnlisted, marketListingState(t, f, accSame).Status)
 }

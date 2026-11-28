@@ -88,8 +88,11 @@ and the P2b settlement events (migration 131).
    Tiers may be exclusive or public, like any group; buyers bind keys to
    them as usual.
    `market_plan` is a slug `^[a-z0-9][a-z0-9_-]{0,31}$` (`MARKET_PLAN_INVALID`
-   otherwise), only on a tier (`MARKET_PLAN_REQUIRES_TIER`). On update the
-   field is optional: absent keeps the stored plan, `null` or `""` clears it.
+   otherwise; never trimmed, whitespace is invalid), only on a tier
+   (`MARKET_PLAN_REQUIRES_TIER`). On update the field is optional: absent
+   keeps the stored plan (the save does not write the column at all, so a
+   save from a stale form never reverts another admin's plan change),
+   `null` or `""` clears it.
    Demoting a tier clears its plan (and unlists, see below). A tier without a
    plan sells nothing. Changing a tier's plan unlists every listing selected
    there whose plan no longer matches (event `group_replanned`, same
@@ -98,8 +101,9 @@ and the P2b settlement events (migration 131).
    application (`market_plan` on `POST /api/v1/admin/hosted-applications/:id/approve`;
    the approval transaction then creates the listing in 自用 state) or later
    with 共享设置 (`PUT /api/v1/admin/accounts/:id/market-listing`
-   `{"plan":"max"}`). The plan must name at least one live, active tier
-   (`MARKET_PLAN_UNKNOWN`). The account needs an owner
+   `{"plan":"max"}`). The plan must be a slug (`MARKET_PLAN_INVALID`) that
+   names at least one live, active tier (`MARKET_PLAN_UNKNOWN`). The account
+   needs an owner
    (`MARKET_ACCOUNT_NO_OWNER`) and must be eligible: anthropic setup-token,
    carpool mode with a finite device limit, no account-level `max_sessions`
    (and, to be listed, a finite concurrency and for a self-onboarded account
@@ -142,14 +146,19 @@ never lists. Deleting the account revokes.
   status listed, else `self_use`), `plan`, the tiers of the plan
   (name, rate, `plan`, `available`, `admin_member`), `cooldown_hours`,
   `next_switch_at` (database time, rounded up to the second; null = may switch
-  now), `upstream_windows` (the account's upstream 5h / 7d windows, the same
-  objects as the owned-accounts list; empty without a sample),
+  now; also null while the market is off and the account is shared, because
+  the take-back is allowed then), `upstream_windows` (the account's upstream
+  windows, the same objects as the owned-accounts list: `five_hour`,
+  `seven_day` and, when sampled, the per-model weekly windows, which the UI
+  ignores; empty without a sample),
   `unavailable_reasons`, `can_list` (may switch to 共享 now) and `can_unlist`
   (may switch back to 自用 now). Only the current owner of a live account sees
   it; anyone else gets 404 `HOSTED_ACCOUNT_NOT_FOUND`.
-- `PUT … {"listed": true}` switches to 共享 (the plan's only tier is used;
-  with several tiers `group_id` is required, else 400 `MARKET_TIER_REQUIRED`),
-  `{"listed": false}` back to 自用. Listing needs the switch on.
+- `PUT … {"listed": true}` switches to 共享 (without `group_id` the plan's
+  only listable tier is used — tiers the account is an admin member of do
+  not count; with several, 400 `MARKET_TIER_REQUIRED`; with none,
+  `MARKET_ADMIN_MEMBERSHIP_CONFLICT`), `{"listed": false}` back to 自用.
+  Listing needs the switch on.
 - **Cooldown.** At most one effective switch per
   `market_mode_switch_cooldown_hours` (default 24), measured in database
   time from the last `owner_list` / `owner_unlist` / `owner_switch` event.
@@ -159,8 +168,9 @@ never lists. Deleting the account revokes.
   smaller setting (or 0) applies at once (it is read after the account
   lock); reaching the boundary exactly is allowed. A request for the state
   the account is already shared in is answered 200 before any other check
-  (also with the switch off or the tier inactive). While `market_enabled` is off, switching back to 自用 is always
-  allowed (it still counts as a switch). Inside the cooldown:
+  (also with the switch off or the tier inactive). While `market_enabled` is
+  off, switching back to 自用 is always allowed (it still counts as a
+  switch). Inside the cooldown:
   429 `MARKET_SWITCH_COOLDOWN`, `Retry-After: <seconds>`,
   `metadata.next_switch_at` (RFC3339).
 - Reason codes: `market_disabled`, `not_configured`, `no_plan`,
@@ -171,18 +181,23 @@ never lists. Deleting the account revokes.
   `account_inactive`. The UI maps each to plain text, with a generic text for
   unknown codes.
 - **Using a shared account through the owner's hosted Key.** When every
-  failure of the request was such a market refusal and every account of the
-  Key's own exclusive hosted group is shared by that user (confirmed in one
-  database read where the selection is exhausted, first selection and
-  reselect alike; the read also re-checks that the group still is an owner
-  group of that user), the gateway answers
-  **403 `HOSTED_ACCOUNT_SHARED`** with `x-should-retry: false` and no
-  `Retry-After`: 该托管号正在共享中，请在托管页切回「自用」后再使用。 Ops
-  records it as a client-side business limit; one WARN line
-  `gateway.hosted_account_shared` per account per hour. Device-full,
-  quota exhaustion and database errors keep their existing errors. If an SSE
-  ping was already flushed (a long wait for a user slot), the same error is
-  sent as an SSE `error` event instead (status and headers are committed).
+  account of the Key's own exclusive hosted group is shared by that user, the
+  gateway answers **403 `HOSTED_ACCOUNT_SHARED`** with `x-should-retry:
+  false` and no `Retry-After`: 该托管号正在共享中，请在托管页切回「自用」后再使用。
+  Normally this is decided before the request waits for anything (user slot,
+  queue, account slot), so the HTTP status and header come first even for a
+  streaming request: when the last registry poll saw a listed account in the
+  Key's group, one database read confirms that every live admin account of
+  the group is listed by this user and that the group still is an owner group
+  of this user. The same read runs again for races where the selection is
+  exhausted — only when every failure of the request was a market refusal
+  (or, with no failure yet, the request saw a listing in progress), also if
+  the local registry has not caught up. Ops records it as a client-side
+  business limit; one WARN line `gateway.hosted_account_shared` per account
+  per hour. Device-full, quota exhaustion and database errors keep their
+  existing errors. Only in the rare race where an SSE ping was already flushed
+  (the account got shared while the request waited) the same error arrives as
+  an SSE `error` event (status and headers are committed by then).
 - Earnings: summary (`frozen`, `available`, `converted_total`, `min_convert`,
   `as_of`), a keyset-paged ledger and 转入余额. Amounts are exact decimal
   strings (up to 10 decimals); the UI never converts them to floats. The cut
@@ -237,9 +252,15 @@ for the rest of the request, also across the 503 same-account backoff), and
 never replaces an earlier real failure as the error the client gets. The
 invalidating reasons are `shared`, `listing_pending`, `not_listed`,
 `not_market_member`, `listing_changed`, `plan_mismatch`, `owner_changed`,
-`owner_version` and `market_disabled`; every other refusal (account health,
-price, allowlists, capacity, device policy) and database errors keep the
-generic failover.
+`owner_version`, `market_disabled`, `not_priced` (also the repricing just
+before the admission) and `group_inactive` (tier gone or inactive); every
+other refusal (account health, allowlists, capacity, device policy) and
+database errors keep the generic failover. After a 503 backoff, a second
+exhausted selection without any new attempt ends the request with the last
+real error. A plain attempt that sees a listed view later in Forward (at the
+identity step or right before a send) gets the same treatment as at the
+gate: an owner attempt checked in the database in the owner's group, a
+reselect elsewhere.
 
 **Final admission.** After the device check and pricing, before the first
 upstream send, a buyer attempt runs one REPEATABLE READ transaction that
@@ -382,8 +403,8 @@ purged by retention; the event columns are always present.
 | `MARKET_GROUP_NOT_ALLOWED` | 400 | Owner picked a tier that is not a live, active tier of the account's plan |
 | `MARKET_TIER_REQUIRED` | 400 | Owner omitted `group_id` while several tiers match the plan |
 | `MARKET_SWITCH_COOLDOWN` | 429 | Owner switch inside the cooldown; `Retry-After`, `metadata.next_switch_at` |
-| `MARKET_PLAN_UNKNOWN` | 400 | Approval / admin sharing settings: not a slug, or no live, active tier has the plan |
-| `MARKET_PLAN_INVALID` | 400 | Group save: `market_plan` is not a slug |
+| `MARKET_PLAN_UNKNOWN` | 400 | Approval / admin sharing settings: a well-formed plan no live, active tier has |
+| `MARKET_PLAN_INVALID` | 400 | Group save, approval, admin sharing settings: the plan is not a slug (whitespace included) |
 | `MARKET_PLAN_REQUIRES_TIER` | 400 | Group save: a plan on a group that is not a tier |
 | `HOSTED_ACCOUNT_SHARED` | 403 | Gateway (Anthropic error `type`): every account of the owner's hosted Key is shared; `x-should-retry: false` |
 | `MARKET_ADMIN_MEMBERSHIP_CONFLICT` | 409 | Account is already an admin member of that tier |
@@ -640,8 +661,22 @@ Listing and tiers
 - A listed row without a plan (rows from before migration 138) sells
   nothing (`plan_mismatch` at the final admission) until an admin sets the
   plan; the owner can still switch it back to 自用.
-- An owner's request on a shared account costs one database check before
-  it is refused (the owner class is re-checked for every request).
+- An owner's request on a shared account costs one database read before it
+  is answered (the early all-shared check, or the owner check); a group
+  with both shared and self-use accounts of the owner pays the early read on
+  every request of that owner.
+- 单副本：账号保持共享期间，上架事务提交后才开始最终准入判定的号主请求不得转发；提交前已按自用状态通过最终判定的请求视为在途，可以完成。
+  (Single replica: while the account stays shared, an owner request whose
+  final admission check starts after the listing transaction committed is
+  never forwarded; a request that passed the final check as self-use before
+  the commit is in flight and may complete.)
+- 多副本：挂牌状态最终一致。其他副本通常在后续成功刷新注册表后识别新挂牌（轮询间隔约 2 秒），没有硬性传播上限；收敛前，持有旧状态的副本可能继续按原分组放行请求（不会产生市场成交）。扩容到多副本前需要跨进程互斥。
+  (Several replicas: the listing state is eventually consistent. Other
+  replicas usually see a new listing after their next successful registry
+  refresh (poll interval about 2 s); there is no hard propagation bound.
+  Until they converge, a replica with the old state may keep admitting
+  requests through the original group (no market sale results). Scaling to
+  several replicas needs a cross-process exclusion first.)
 
 Dispatch
 - Cold-start registry window (user decision): if the listing registry never
