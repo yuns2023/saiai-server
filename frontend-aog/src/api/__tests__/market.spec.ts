@@ -12,20 +12,37 @@ describe('marketApi (owner side)', () => {
     http.post.mockReset()
   })
 
-  it('GET /hosted/owned-accounts/:id/market normalises nullable lists', async () => {
+  it('GET /hosted/owned-accounts/:id/market normalises nullable fields', async () => {
     http.get.mockResolvedValue({
-      data: { account_id: 11, market_enabled: true, status: 'not_configured', version: 0, allowed_tiers: null, unavailable_reasons: null, protection: null, can_list: false }
+      data: {
+        account_id: 11, market_enabled: true, status: 'not_configured', version: 0, plan: null, mode: 'self_use', cooldown_hours: 24, next_switch_at: null,
+        allowed_tiers: null, unavailable_reasons: null, can_list: false, can_unlist: false, upstream_windows: null
+      }
     })
     const v = await marketApi.getListing(11)
     expect(http.get).toHaveBeenCalledWith('/hosted/owned-accounts/11/market')
     expect(v.allowed_tiers).toEqual([])
     expect(v.unavailable_reasons).toEqual([])
+    expect(v.upstream_windows).toEqual([])
     expect(v.selected_group_id).toBeNull()
+    expect(v.plan).toBeNull()
+    expect(v.cooldown_hours).toBe(24)
     expect(v.can_list).toBe(false)
+    expect(v.can_unlist).toBe(false)
   })
 
-  it('PUT sends {group_id, listed:true} to list and {listed:false} to stop', async () => {
+  it('a view without mode / cooldown (older server) derives the mode from the status and shows no cooldown', async () => {
+    http.get.mockResolvedValue({ data: { account_id: 11, market_enabled: true, status: 'listed', version: 3, allowed_tiers: [], unavailable_reasons: [], can_list: false } })
+    const v = await marketApi.getListing(11)
+    expect(v.mode).toBe('shared')
+    expect(v.cooldown_hours).toBe(0)
+    expect(v.next_switch_at).toBeNull()
+  })
+
+  it('PUT sends {listed:true} (group_id only when picked) and {listed:false}', async () => {
     http.put.mockResolvedValue({ data: { account_id: 11, status: 'listed', allowed_tiers: [], unavailable_reasons: [], can_list: true } })
+    await marketApi.setListing(11, { listed: true })
+    expect(http.put).toHaveBeenLastCalledWith('/hosted/owned-accounts/11/market', { listed: true })
     await marketApi.setListing(11, { listed: true, group_id: 3 })
     expect(http.put).toHaveBeenLastCalledWith('/hosted/owned-accounts/11/market', { listed: true, group_id: 3 })
     await marketApi.setListing(11, { listed: false })

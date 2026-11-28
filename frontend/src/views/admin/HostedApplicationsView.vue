@@ -191,6 +191,31 @@
         <p v-if="tried && numberProblems.length" class="text-xs text-red-600 dark:text-red-400" data-testid="number-error">
           {{ t('admin.hostedApplications.numbersInvalid') }}
         </p>
+
+        <div>
+          <label class="input-label">{{ t('admin.hostedApplications.marketPlan') }}</label>
+          <Select
+            v-model="approveForm.market_plan"
+            :options="planOptions"
+            class="w-full sm:w-64"
+            data-testid="market-plan-select"
+            @change="planPicked = true"
+          />
+          <p class="input-hint">{{ t('admin.hostedApplications.marketPlanHint') }}</p>
+          <p v-if="planState === 'loading'" class="mt-1 text-xs text-gray-500 dark:text-dark-400" data-testid="plan-groups-loading">
+            {{ t('admin.hostedApplications.marketPlanLoading') }}
+          </p>
+          <p v-else-if="planState === 'failed'" class="mt-1 flex flex-wrap items-center gap-2 text-xs text-red-600 dark:text-red-400" data-testid="plan-groups-failed">
+            {{ planPicked && !approveForm.market_plan ? t('admin.hostedApplications.groupsLoadFailedNone') : t('admin.hostedApplications.groupsLoadFailed') }}
+            <button type="button" class="btn btn-secondary btn-sm" @click.prevent="loadPlanGroups">{{ t('admin.hostedApplications.retry') }}</button>
+          </p>
+          <p v-if="planGone" class="mt-1 text-xs text-red-600 dark:text-red-400" data-testid="plan-gone">
+            {{ t('admin.hostedApplications.marketPlanGone') }}
+          </p>
+          <p v-else-if="planState === 'loaded' && planOptions.length === 1" class="mt-1 text-xs text-gray-500 dark:text-dark-400" data-testid="plan-none-available">
+            {{ t('admin.hostedApplications.marketPlanEmpty') }}
+          </p>
+        </div>
         <p class="input-hint">{{ t('admin.hostedApplications.approveHint') }}</p>
       </form>
       <template #footer>
@@ -200,7 +225,7 @@
           </template>
           <template v-else>
             <button type="button" class="btn btn-secondary" :disabled="busy" @click="closeApprove">{{ t('common.cancel') }}</button>
-            <button type="submit" form="approve-form" class="btn btn-primary" :disabled="busy" data-testid="approve-confirm">
+            <button type="submit" form="approve-form" class="btn btn-primary" :disabled="busy || planBlocked || planGone" data-testid="approve-confirm">
               {{ busy ? t('admin.hostedApplications.approving') : t('admin.hostedApplications.approve') }}
             </button>
           </template>
@@ -253,7 +278,8 @@ import {
   type ApproveHostedApplicationResult,
   type HostedApplicationStatus
 } from '@/api/admin/hostedApplications'
-import type { Proxy } from '@/types'
+import type { AdminGroup, Proxy } from '@/types'
+import { marketPlanOptions } from '@/utils/market'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import type { Column } from '@/components/common/types'
@@ -380,9 +406,45 @@ const approveResult = ref<ApproveHostedApplicationResult | null>(null)
 const approveForm = reactive<ApproveForm>({
   proxy_mode: 'existing',
   proxy_id: null,
-  ...defaults
+  ...defaults,
+  market_plan: ''
 })
 const tried = ref(false)
+
+/** Groups behind the 共享套餐 choices; a failed read leaves only 不开通共享 (approving still works). */
+const planGroups = ref<AdminGroup[]>([])
+/** The 套餐 choices: reading, read (maybe none), or the read failed (only 不开通共享, and only when picked). */
+const planState = ref<'loading' | 'loaded' | 'failed'>('loading')
+/** The admin picked an option in this dialog (with a failed read, 不开通共享 must be a choice, not the default). */
+const planPicked = ref(false)
+let planSeq = 0
+/** 不开通共享 (default) plus the distinct 套餐 of live Claude market tiers. */
+const planOptions = computed(() => [
+  { value: '', label: t('admin.hostedApplications.marketPlanNone') },
+  ...marketPlanOptions(planGroups.value, 'anthropic').map((p) => ({ value: p, label: p }))
+])
+
+async function loadPlanGroups() {
+  const mine = ++planSeq
+  planState.value = 'loading'
+  try {
+    const groups = (await adminAPI.groups.getAll()) ?? []
+    if (mine !== planSeq) return
+    planGroups.value = groups
+    planState.value = 'loaded'
+  } catch {
+    if (mine !== planSeq) return
+    // Unknown tiers: offer only 不开通共享 rather than possibly stale plans.
+    planGroups.value = []
+    planState.value = 'failed'
+  }
+}
+
+/** Why approving waits on the 套餐 choice: still reading, or the read failed and 不开通共享 was not picked. */
+const planBlocked = computed(() => planState.value === 'loading' || (planState.value === 'failed' && !(planPicked.value && !approveForm.market_plan)))
+
+/** The chosen 套餐 is no longer offered (tiers changed, or the group read failed): the admin picks again. */
+const planGone = computed(() => !!approveForm.market_plan && !planOptions.value.some((o) => o.value === approveForm.market_plan))
 
 const proxyOptions = computed(() => proxies.value.map((p) => ({ value: p.id, label: `${p.name} · ${p.protocol}://${p.host}:${p.port}` })))
 
@@ -407,8 +469,10 @@ function openApprove(row: AdminHostedApplication) {
   Object.assign(approveForm, {
     proxy_mode: hasSubmittedProxy(row) ? 'submitted' : 'existing',
     proxy_id: null,
-    ...defaults
+    ...defaults,
+    market_plan: ''
   })
+  planPicked.value = false
   tried.value = false
   approveResult.value = null
   approveTarget.value = row
@@ -425,6 +489,7 @@ async function confirmApprove() {
   if (!target || busy.value) return
   tried.value = true
   if (problems.value.length) return
+  if (planGone.value || planBlocked.value) return
   if (!contextReady.value || !switchOn.value) {
     appStore.showError(t('admin.hostedApplications.errors.SELF_ONBOARD_DISABLED'))
     return
@@ -437,6 +502,9 @@ async function confirmApprove() {
     appStore.showSuccess(t('admin.hostedApplications.approveSuccess', { account: result.account_id }))
   } catch (err) {
     appStore.showError(errorMessage(err, t('admin.hostedApplications.approveFailed')))
+    // The tiers behind the 套餐 choices changed meanwhile: offer the current ones.
+    const code = (err as { reason?: unknown } | null)?.reason
+    if (code === 'MARKET_PLAN_UNKNOWN' || code === 'MARKET_PLAN_INVALID') void loadPlanGroups()
   } finally {
     busy.value = false
   }
@@ -497,6 +565,7 @@ function refreshAll() {
   void load()
   if (proxiesFailed.value) void loadProxies()
   if (!contextReady.value) void loadApproveContext()
+  void loadPlanGroups()
 }
 
 async function loadApproveContext() {
@@ -521,5 +590,6 @@ async function loadApproveContext() {
 onMounted(() => {
   void load()
   void loadApproveContext()
+  void loadPlanGroups()
 })
 </script>

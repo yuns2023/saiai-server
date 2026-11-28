@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { firstBadProtection, isMarketTierEligible, marketErrorCode, marketErrorText, validCutRate, validIntIn, validMinConvert } from '../market'
+import { isMarketTierEligible, marketErrorCode, marketErrorText, marketPlanOptions, planTiers, validCutRate, validIntIn, validMarketPlan, validMinConvert } from '../market'
 
 const t = (key: string) => key
 
@@ -52,10 +52,30 @@ describe('market utils', () => {
     expect(marketErrorText(null, t, 'f')).toBe('f')
   })
 
-  it('protection: first field out of range', () => {
-    const p = { reserved_concurrency: 0, reserved_devices: 0, reserved_admissions: 0 }
-    expect(firstBadProtection(p)).toBeNull()
-    expect(firstBadProtection({ ...p, reserved_devices: 33 })).toBe('reserved_devices')
-    expect(firstBadProtection({ ...p, reserved_admissions: '' })).toBe('reserved_admissions')
+  it('plan slug: the server rule ^[a-z0-9][a-z0-9_-]{0,31}$', () => {
+    for (const ok of ['pro', 'max', 'ultra', 'max-2', 'a_b', '0', 'a'.repeat(32)]) expect(validMarketPlan(ok), ok).toBe(true)
+    for (const bad of ['', 'Max', '-max', '_max', 'max plan', 'a'.repeat(33), ' max', null, 3]) expect(validMarketPlan(bad), String(bad)).toBe(false)
+  })
+
+  it('plan choices: distinct plans of active market tiers (per platform), sorted', () => {
+    const g = (id: number, over: Record<string, unknown>) => ({ id, name: `g${id}`, platform: 'anthropic', status: 'active', rate_multiplier: 1, market_tier: true, market_plan: 'max', ...over }) as never
+    const groups = [
+      g(1, {}),
+      g(2, { market_plan: 'pro' }),
+      g(3, {}),
+      g(4, { status: 'inactive', market_plan: 'ultra' }),
+      g(5, { market_plan: null }),
+      g(6, { market_tier: false, market_plan: 'stale' }),
+      g(7, { platform: 'openai', market_plan: 'oai' })
+    ]
+    expect(marketPlanOptions(groups, 'anthropic')).toEqual(['max', 'pro'])
+    expect(marketPlanOptions(groups)).toEqual(['max', 'oai', 'pro'])
+    expect(planTiers(groups, 'anthropic').map((x: { id: number }) => x.id)).toEqual([1, 2, 3])
+  })
+
+  it('maps the plan errors', () => {
+    expect(marketErrorText({ reason: 'MARKET_PLAN_REQUIRES_TIER', message: 'x' }, t, 'f')).toBe('market.errors.MARKET_PLAN_REQUIRES_TIER')
+    expect(marketErrorText({ reason: 'MARKET_PLAN_UNKNOWN', message: 'x' }, t, 'f')).toBe('market.errors.MARKET_PLAN_UNKNOWN')
+    expect(marketErrorText({ reason: 'MARKET_PLAN_INVALID', message: 'x' }, t, 'f')).toBe('market.errors.MARKET_PLAN_INVALID')
   })
 })

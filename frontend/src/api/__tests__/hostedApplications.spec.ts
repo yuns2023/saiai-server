@@ -14,6 +14,7 @@ function form(over: Partial<ApproveForm> = {}): ApproveForm {
     carpool_device_limit: 5,
     carpool_admissions_per_cycle: 1,
     carpool_interval_hours: 24,
+    market_plan: '',
     ...over
   }
 }
@@ -64,6 +65,11 @@ describe('approvePayload', () => {
       carpool_interval_hours: 24
     })
     expect(approvePayload(form({ proxy_mode: 'submitted' }))).not.toHaveProperty('proxy_id')
+  })
+
+  it('sends market_plan only when a 套餐 was chosen', () => {
+    expect(approvePayload(form())).not.toHaveProperty('market_plan')
+    expect(approvePayload(form({ market_plan: 'max' }))).toMatchObject({ market_plan: 'max' })
   })
 })
 

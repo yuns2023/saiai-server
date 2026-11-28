@@ -77,6 +77,8 @@
           <template #cell-name="{ value, row }">
             <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
             <span v-if="row.market_tier" class="badge badge-success ml-2" data-testid="market-tier-badge">{{ t('market.groupTier.badge') }}</span>
+            <span v-if="row.market_tier && row.market_plan" class="badge badge-primary ml-1" data-testid="market-plan-badge">{{ t('market.groupTier.planBadge', { plan: row.market_plan }) }}</span>
+            <span v-else-if="row.market_tier" class="badge badge-warning ml-1" data-testid="market-no-plan-badge">{{ t('market.groupTier.noPlanBadge') }}</span>
           </template>
 
           <template #cell-platform="{ value }">
@@ -481,6 +483,28 @@
           >
             {{ t('market.groupTier.blocked') }}
           </p>
+          <div v-if="createForm.market_tier" class="mt-3">
+            <label class="input-label" :for="`createForm-market-plan`">{{ t('market.groupTier.plan') }}</label>
+            <input
+              :id="`createForm-market-plan`"
+              v-model.trim="createForm.market_plan"
+              type="text"
+              maxlength="32"
+              autocomplete="off"
+              spellcheck="false"
+              :placeholder="t('market.groupTier.planPlaceholder')"
+              :class="['input', createForm.market_plan && !validMarketPlan(createForm.market_plan) && 'input-error']"
+              data-testid="market-plan-input"
+            />
+            <p class="input-hint">{{ t('market.groupTier.planHint') }}</p>
+            <p
+              v-if="createForm.market_plan && !validMarketPlan(createForm.market_plan)"
+              class="mt-1 text-xs text-red-600 dark:text-red-400"
+              data-testid="market-plan-invalid"
+            >
+              {{ t('market.groupTier.planInvalid') }}
+            </p>
+          </div>
         </div>
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -1323,6 +1347,28 @@
           >
             {{ t('market.groupTier.blocked') }}
           </p>
+          <div v-if="editForm.market_tier" class="mt-3">
+            <label class="input-label" :for="`editForm-market-plan`">{{ t('market.groupTier.plan') }}</label>
+            <input
+              :id="`editForm-market-plan`"
+              v-model.trim="editForm.market_plan"
+              type="text"
+              maxlength="32"
+              autocomplete="off"
+              spellcheck="false"
+              :placeholder="t('market.groupTier.planPlaceholder')"
+              :class="['input', editForm.market_plan && !validMarketPlan(editForm.market_plan) && 'input-error']"
+              data-testid="market-plan-input"
+            />
+            <p class="input-hint">{{ t('market.groupTier.planHint') }}</p>
+            <p
+              v-if="editForm.market_plan && !validMarketPlan(editForm.market_plan)"
+              class="mt-1 text-xs text-red-600 dark:text-red-400"
+              data-testid="market-plan-invalid"
+            >
+              {{ t('market.groupTier.planInvalid') }}
+            </p>
+          </div>
         </div>
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <label class="flex items-center gap-3 text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -2089,7 +2135,7 @@ import GroupCapacityBadge from '@/components/common/GroupCapacityBadge.vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { isHostedUsageEligible, supportsHostedUsage } from '@/utils/hostedUsage'
-import { isMarketTierEligible, marketErrorCode, marketErrorText } from '@/utils/market'
+import { isMarketTierEligible, marketErrorCode, marketErrorText, validMarketPlan } from '@/utils/market'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
@@ -2298,6 +2344,8 @@ const createForm = reactive({
   show_account_quota: false,
   hosted_usage_enabled: false,
   market_tier: false,
+  /** 套餐 as typed ('' = none); sent only for a tier. */
+  market_plan: '',
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
   daily_limit_usd: null as number | null,
@@ -2567,6 +2615,8 @@ const editForm = reactive({
   show_account_quota: false,
   hosted_usage_enabled: false,
   market_tier: false,
+  /** 套餐 as typed ('' = none). */
+  market_plan: '',
   status: 'active' as 'active' | 'inactive',
   subscription_type: 'standard' as SubscriptionType,
   five_hour_limit_usd: null as number | null,
@@ -2734,6 +2784,7 @@ const closeCreateModal = () => {
   createForm.is_exclusive = false
   createForm.hosted_usage_enabled = false
   createForm.market_tier = false
+  createForm.market_plan = ''
   createForm.show_account_quota = false
   createForm.subscription_type = 'standard'
   createForm.five_hour_limit_usd = null
@@ -2791,17 +2842,34 @@ const normalizeOptionalLimit = (value: number | string | null | undefined): numb
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
+/** The 套餐 a form would save: the typed slug on a tier, else none. */
+function formMarketPlan(form: { market_tier: boolean; market_plan: string }): string | null {
+  return form.market_tier && form.market_plan.trim() ? form.market_plan.trim() : null
+}
+
+/** A 套餐 that does not match the slug rule blocks the save (the field shows why). */
+function marketPlanBlocked(form: { market_tier: boolean; market_plan: string }): boolean {
+  const plan = formMarketPlan(form)
+  if (plan === null || validMarketPlan(plan)) return false
+  appStore.showError(t('market.groupTier.planInvalid'))
+  return true
+}
+
 const handleCreateGroup = async () => {
   if (!createForm.name.trim()) {
     appStore.showError(t('admin.groups.nameRequired'))
     return
   }
+  if (marketPlanBlocked(createForm)) return
   submitting.value = true
   try {
     // 构建请求数据，包含模型路由配置
-    const { blocked_model_patterns_text, model_rate_multipliers_text, ...createRest } = createForm
+    const { blocked_model_patterns_text, model_rate_multipliers_text, market_plan: _plan, ...createRest } = createForm
+    const createPlan = formMarketPlan(createForm)
     const requestData = {
       ...createRest,
+      // 套餐 only on a tier that has one: the server refuses a plan on a non-tier group.
+      ...(createPlan ? { market_plan: createPlan } : {}),
       hosted_usage_enabled: createForm.hosted_usage_enabled,
       show_account_quota: createForm.is_exclusive && createForm.show_account_quota,
       five_hour_limit_usd: normalizeOptionalLimit(createForm.five_hour_limit_usd as number | string | null),
@@ -2847,6 +2915,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.hosted_usage_enabled = group.hosted_usage_enabled || false
   editForm.market_tier = group.market_tier || false
   editMarketTierLoaded = editForm.market_tier
+  editForm.market_plan = group.market_plan || ''
+  editMarketPlanLoaded = group.market_plan || null
   editForm.show_account_quota = group.show_account_quota || false
   editForm.status = group.status
   editForm.subscription_type = group.subscription_type || 'standard'
@@ -2908,6 +2978,8 @@ const closeEditModal = () => {
 
 /** market_tier as loaded into the edit form. */
 let editMarketTierLoaded = false
+/** market_plan as loaded into the edit form (null = none). */
+let editMarketPlanLoaded: string | null = null
 
 const handleUpdateGroup = async () => {
   if (!editingGroup.value) return
@@ -2915,11 +2987,12 @@ const handleUpdateGroup = async () => {
     appStore.showError(t('admin.groups.nameRequired'))
     return
   }
+  if (marketPlanBlocked(editForm)) return
 
   submitting.value = true
   try {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
-    const { blocked_model_patterns_text, model_rate_multipliers_text, ...editRest } = editForm
+    const { blocked_model_patterns_text, model_rate_multipliers_text, market_plan: _plan, ...editRest } = editForm
     const payload = {
       ...editRest,
       hosted_usage_enabled: editForm.hosted_usage_enabled,
@@ -2947,7 +3020,12 @@ const handleUpdateGroup = async () => {
     payload.subscription_revenue_rate = emptyToNull(payload.subscription_revenue_rate)
     // market_tier only when toggled here: a stale form must not promote or demote a tier (server keeps an omitted value).
     const { market_tier: marketTier, ...withoutTier } = payload
-    await adminAPI.groups.update(editingGroup.value.id, marketTier === editMarketTierLoaded ? withoutTier : payload)
+    // market_plan likewise only when changed here (null clears it); demoting a tier always clears it,
+    // even when none was loaded (another admin may have set one since).
+    const editPlan = formMarketPlan(editForm)
+    const demoted = editMarketTierLoaded && !editForm.market_tier
+    const planChange = demoted || editPlan !== editMarketPlanLoaded ? { market_plan: editPlan } : {}
+    await adminAPI.groups.update(editingGroup.value.id, { ...(marketTier === editMarketTierLoaded ? withoutTier : payload), ...planChange })
     appStore.showSuccess(t('admin.groups.groupUpdated'))
     closeEditModal()
     loadGroups()

@@ -26,51 +26,41 @@
         </p>
       </div>
 
-      <!-- Allowed tiers -->
-      <fieldset>
-        <legend class="input-label">{{ t('market.account.allowedTiers') }}</legend>
-        <p class="input-hint mb-2">{{ t('market.account.allowedTiersHint') }}</p>
+      <!-- 套餐: decides the tiers; the owner switches between 自用 and 共享 -->
+      <div>
+        <label class="input-label" for="market-plan">{{ t('market.account.plan') }}</label>
+        <p class="input-hint mb-2">{{ t('market.account.planHint') }}</p>
         <p v-if="tiersFailed" class="mb-2 flex items-center gap-2 text-xs text-red-600" data-testid="market-tiers-failed">
           {{ t('market.account.tiersLoadFailed') }}
           <button type="button" class="btn btn-secondary btn-sm" @click="loadTiers">{{ t('market.retry') }}</button>
         </p>
-        <p v-else-if="!tierOptions.length" class="text-xs text-gray-500" data-testid="market-no-tiers">{{ t('market.account.noTiers') }}</p>
-        <div v-else class="grid gap-2 sm:grid-cols-2">
-          <label
-            v-for="opt in tierOptions"
-            :key="opt.id"
-            class="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 dark:border-dark-600"
-            :data-testid="`market-allow-${opt.id}`"
-          >
-            <input v-model="allowed" type="checkbox" :value="opt.id" :disabled="busy" />
-            <span class="flex-1 text-gray-900 dark:text-white">{{ opt.label }}</span>
-            <span v-if="opt.note" class="text-xs text-amber-600 dark:text-amber-400">{{ opt.note }}</span>
-          </label>
-        </div>
-      </fieldset>
+        <p v-else-if="!planOptions.length" class="mb-2 text-xs text-gray-500" data-testid="market-no-plans">{{ t('market.account.noPlans') }}</p>
+        <select
+          id="market-plan"
+          v-model="plan"
+          :class="['input', tried && !validMarketPlan(plan) && 'input-error']"
+          :disabled="busy"
+          data-testid="market-plan"
+        >
+          <option value="" disabled>{{ t('market.account.choosePlan') }}</option>
+          <option v-for="opt in planOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
+        <p v-if="view.listing?.status === 'revoked'" class="mt-1 text-xs text-amber-600 dark:text-amber-400" data-testid="market-regrant-hint">{{ t('market.account.regrantHint') }}</p>
+      </div>
 
-      <!-- Protection -->
-      <fieldset>
-        <legend class="input-label">{{ t('market.account.protection') }}</legend>
-        <p class="input-hint mb-2">{{ t('market.account.protectionHint') }}</p>
-        <div class="grid gap-3 sm:grid-cols-3">
-          <div v-for="key in PROTECTION_KEYS" :key="key">
-            <label class="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300" :for="`market-${key}`">{{ t(`market.protection.${key}`) }}</label>
-            <input
-              :id="`market-${key}`"
-              v-model.number="protection[key]"
-              type="number"
-              step="1"
-              :min="MARKET_PROTECTION_BOUNDS[key].min"
-              :max="upperBound(key)"
-              :class="['input', tried && !protectionValueOk(key, protection[key]) && 'input-error']"
-              :disabled="busy"
-              :data-testid="`market-${key}`"
-            />
-            <p class="mt-1 text-xs text-gray-500">{{ boundHint(key) }}</p>
-          </div>
-        </div>
-      </fieldset>
+      <!-- Tiers of the plan (read-only) -->
+      <div data-testid="market-derived-tiers">
+        <div class="input-label">{{ t('market.account.derivedTiers') }}</div>
+        <p v-if="!plan" class="text-xs text-gray-500">{{ t('market.account.derivedTiersNone') }}</p>
+        <p v-else-if="!derivedTiers.length" class="text-xs text-amber-600 dark:text-amber-400" data-testid="market-derived-empty">{{ t('market.account.derivedTiersEmpty') }}</p>
+        <ul v-else class="space-y-1">
+          <li v-for="tier in derivedTiers" :key="tier.id" class="flex flex-wrap items-center gap-2 text-gray-900 dark:text-white" :data-testid="`market-tier-${tier.id}`">
+            <span>{{ tier.label }}</span>
+            <span v-if="tier.note" class="text-xs text-amber-600 dark:text-amber-400">{{ tier.note }}</span>
+          </li>
+        </ul>
+        <p v-if="plan && plan !== savedPlan" class="mt-1 text-xs text-gray-500" data-testid="market-plan-preview">{{ t('market.account.planPreview') }}</p>
+      </div>
 
       <p v-if="error" role="alert" class="text-sm text-red-600" data-testid="market-error">{{ error }}</p>
     </form>
@@ -84,7 +74,7 @@
           class="btn btn-danger"
           :disabled="busy"
           data-testid="market-revoke"
-          @click="confirmRevoke = true"
+          @click="askRevoke"
         >
           {{ t('market.account.revoke') }}
         </button>
@@ -102,20 +92,25 @@
     :confirm-text="t('market.account.revoke')"
     danger
     @confirm="revoke"
-    @cancel="confirmRevoke = false"
+    @cancel="cancelRevoke"
   />
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+/**
+ * 共享设置 of one owned account: its 套餐 (plan). The tiers it can be sold in
+ * are the live market tiers of that plan; the owner switches between 自用 and
+ * 共享 on the hosted page. 撤销共享 removes the permission (history kept).
+ */
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import { adminAPI } from '@/api/admin'
-import { MAX_MARKET_ALLOWED_GROUPS, type AdminMarketListingView, type MarketProtection } from '@/api/admin/market'
+import type { AdminMarketListingView } from '@/api/admin/market'
 import { useAppStore } from '@/stores/app'
 import type { Account, AdminGroup } from '@/types'
-import { firstBadProtection, MARKET_PROTECTION_BOUNDS, marketErrorText, PROTECTION_KEYS, protectionValueOk } from '@/utils/market'
+import { marketErrorText, marketPlanOptions, planTiers, validMarketPlan } from '@/utils/market'
 
 const props = defineProps<{ show: boolean; account: Account | null }>()
 const emit = defineEmits<{ close: []; updated: [view: AdminMarketListingView] }>()
@@ -129,9 +124,8 @@ const busy = ref(false)
 const error = ref('')
 const tried = ref(false)
 const confirmRevoke = ref(false)
-const allowed = ref<number[]>([])
-const protection = reactive({} as Record<keyof MarketProtection, number>)
-const tierGroups = ref<AdminGroup[]>([])
+const plan = ref('')
+const groups = ref<AdminGroup[]>([])
 const tiersFailed = ref(false)
 let seq = 0
 
@@ -162,77 +156,62 @@ const selectedTierName = computed(() => {
   return tier ? `${tier.name} ×${tier.rate_multiplier}` : `#${id}`
 })
 
-/**
- * Checkbox options: the platform's live market tiers, plus any tier still
- * allowed on the listing that no longer shows up (deleted / demoted), so the
- * admin can see and remove it.
- */
-const tierOptions = computed(() => {
-  const opts: Array<{ id: number; label: string; note: string }> = []
-  const listed = view.value?.allowed_tiers ?? []
-  for (const g of tierGroups.value) {
-    const fromView = listed.find((x) => x.group_id === g.id)
-    opts.push({
-      id: g.id,
-      label: `${g.name} ×${g.rate_multiplier}`,
-      note: g.status !== 'active' ? t('market.account.tierInactive') : fromView?.admin_member ? t('market.account.tierAdminMember') : ''
-    })
-  }
-  for (const id of allowed.value) {
-    if (opts.some((o) => o.id === id)) continue
-    const tier = listed.find((x) => x.group_id === id)
-    opts.push({ id, label: tier ? `${tier.name} ×${tier.rate_multiplier}` : `#${id}`, note: t('market.account.tierGone') })
+/** The plan stored on the listing ('' when none). */
+const savedPlan = computed(() => view.value?.listing?.plan ?? '')
+const platform = computed(() => props.account?.platform)
+
+/** Plans of the platform's live tiers, plus the stored one if no live tier carries it any more. */
+const planOptions = computed(() => {
+  const opts = marketPlanOptions(groups.value, platform.value).map((p) => ({ value: p, label: p }))
+  if (savedPlan.value && !opts.some((o) => o.value === savedPlan.value)) {
+    // "no live tier" only when the group list was read; after a failed read it is just unknown.
+    opts.push({ value: savedPlan.value, label: tiersFailed.value ? savedPlan.value : `${savedPlan.value}（${t('market.account.planNoTier')}）` })
   }
   return opts
+})
+
+/**
+ * Tiers of the chosen plan: the server's own list for the stored plan (with
+ * its notes), a preview from the group list for a plan not saved yet.
+ */
+const derivedTiers = computed(() => {
+  if (!plan.value) return []
+  if (plan.value === savedPlan.value && view.value) {
+    return view.value.allowed_tiers.map((x) => ({
+      id: x.group_id,
+      label: `${x.name} ×${x.rate_multiplier}`,
+      note: !x.available ? t('market.account.tierInactive') : x.admin_member ? t('market.account.tierAdminMember') : ''
+    }))
+  }
+  return planTiers(groups.value, platform.value)
+    .filter((g) => g.market_plan === plan.value)
+    .map((g) => ({ id: g.id, label: `${g.name} ×${g.rate_multiplier}`, note: '' }))
 })
 
 function reasonText(code: string): string {
   return te(`market.reasons.${code}`) ? t(`market.reasons.${code}`) : t('market.reasons.other', { code })
 }
 
-/** Per-account upper bound where the account config is known (C − 1, device limit − 1); the static bound otherwise. */
-function upperBound(key: keyof MarketProtection): number {
-  const max = MARKET_PROTECTION_BOUNDS[key].max
-  const a = props.account
-  if (key === 'reserved_concurrency' && a && a.concurrency > 0) return Math.min(max, a.concurrency - 1)
-  const devices = a?.claude_oauth_carpool_device_limit
-  if (key === 'reserved_devices' && typeof devices === 'number' && devices > 0) return Math.min(max, devices - 1)
-  return max
-}
-
-function boundHint(key: keyof MarketProtection): string {
-  const min = MARKET_PROTECTION_BOUNDS[key].min
-  const max = upperBound(key)
-  const base = t('market.account.range', { min, max })
-  if (key === 'reserved_concurrency' && max < MARKET_PROTECTION_BOUNDS[key].max) return `${base} · ${t('market.account.leaveOneSlot')}`
-  if (key === 'reserved_devices' && max < MARKET_PROTECTION_BOUNDS[key].max) return `${base} · ${t('market.account.leaveOneDevice')}`
-  return base
-}
-
-/** Whether the owner or the listing (version, status, created/removed) changed since the form was loaded. */
+/** Whether the owner or the listing (version, status, plan, created/removed) changed since the form was loaded. */
 function changedSince(loaded: AdminMarketListingView | null, latest: AdminMarketListingView): boolean {
   if ((loaded?.owner_user_id ?? null) !== (latest.owner_user_id ?? null)) return true
   const a = loaded?.listing ?? null
   const b = latest.listing
   if (!a || !b) return a !== b
-  return a.version !== b.version || a.status !== b.status
+  return a.version !== b.version || a.status !== b.status || (a.plan ?? null) !== (b.plan ?? null)
 }
 
 function applyView(v: AdminMarketListingView): void {
   view.value = v
-  allowed.value = [...(v.listing?.allowed_group_ids ?? [])]
-  const p = v.listing?.protection ?? v.default_protection
-  for (const key of PROTECTION_KEYS) protection[key] = p[key]
+  plan.value = v.listing?.plan ?? ''
 }
 
 async function loadTiers(): Promise<void> {
-  const platform = props.account?.platform
   tiersFailed.value = false
   try {
-    const groups = await adminAPI.groups.getAll()
-    tierGroups.value = (groups ?? []).filter((g) => g.market_tier === true && (!platform || g.platform === platform))
+    groups.value = (await adminAPI.groups.getAll()) ?? []
   } catch {
-    tierGroups.value = []
+    groups.value = []
     tiersFailed.value = true
   }
 }
@@ -258,18 +237,18 @@ async function load(): Promise<void> {
   }
 }
 
+/** The dialog still shows the account (and the load) this request started from. */
+function stillOn(accountId: number, loadSeq: number): boolean {
+  return loadSeq === seq && props.show && props.account?.id === accountId
+}
+
 async function save(): Promise<void> {
   const a = props.account
   if (!a || !view.value || busy.value) return
+  const mine = seq
   tried.value = true
-  // Static bounds first, then the per-account ones shown next to the fields (C − 1, device limit − 1).
-  const bad = firstBadProtection(protection) ?? PROTECTION_KEYS.find((k) => protection[k] > upperBound(k)) ?? null
-  if (bad) {
-    error.value = t('market.account.invalidField', { field: t(`market.protection.${bad}`) })
-    return
-  }
-  if (allowed.value.length > MAX_MARKET_ALLOWED_GROUPS) {
-    error.value = t('market.account.tooManyTiers', { max: MAX_MARKET_ALLOWED_GROUPS })
+  if (!validMarketPlan(plan.value)) {
+    error.value = t('market.account.planRequired')
     return
   }
   busy.value = true
@@ -278,35 +257,64 @@ async function save(): Promise<void> {
     // A form loaded before someone else changed the listing (e.g. revoked it) must not write it back.
     // Read it again right before saving; the server has no version check (remaining window accepted).
     const latest = await adminAPI.market.getListing(a.id)
+    // Another account (or a reload) meanwhile: this answer belongs to a form no longer on screen.
+    if (!stillOn(a.id, mine)) return
     if (changedSince(view.value, latest)) {
       applyView(latest)
       error.value = t('market.account.staleReload')
       return
     }
-    const v = await adminAPI.market.putListing(a.id, { allowed_group_ids: [...allowed.value].sort((x, y) => x - y), ...protection })
+    const v = await adminAPI.market.putListing(a.id, { plan: plan.value })
+    if (!stillOn(a.id, mine)) return
     applyView(v)
     appStore.showSuccess(t('market.account.saved'))
     emit('updated', v)
   } catch (e) {
-    error.value = marketErrorText(e, t, t('market.account.saveFailed'))
+    if (stillOn(a.id, mine)) error.value = marketErrorText(e, t, t('market.account.saveFailed'))
   } finally {
     busy.value = false
   }
 }
+/** The account and listing the open revoke confirmation is about. */
+let revokePin: { accountId: number; view: AdminMarketListingView } | null = null
+
+function askRevoke(): void {
+  if (!props.account || !view.value || busy.value) return
+  revokePin = { accountId: props.account.id, view: view.value }
+  confirmRevoke.value = true
+}
+
+function cancelRevoke(): void {
+  confirmRevoke.value = false
+  revokePin = null
+}
 
 async function revoke(): Promise<void> {
   confirmRevoke.value = false
+  const pin = revokePin
+  revokePin = null
   const a = props.account
-  if (!a || busy.value) return
+  if (!a || !pin || pin.accountId !== a.id || busy.value) return
+  const mine = seq
   busy.value = true
   error.value = ''
   try {
+    // Like saving: the listing (or its owner) changed since the confirmation opened → show it, revoke nothing.
+    const latest = await adminAPI.market.getListing(a.id)
+    // The dialog moved to another account meanwhile: revoke nothing, write nothing into its form.
+    if (!stillOn(a.id, mine)) return
+    if (changedSince(pin.view, latest)) {
+      applyView(latest)
+      error.value = t('market.account.staleReload')
+      return
+    }
     const v = await adminAPI.market.revokeListing(a.id)
+    if (!stillOn(a.id, mine)) return
     applyView(v)
     appStore.showSuccess(t('market.account.revoked'))
     emit('updated', v)
   } catch (e) {
-    error.value = marketErrorText(e, t, t('market.account.saveFailed'))
+    if (stillOn(a.id, mine)) error.value = marketErrorText(e, t, t('market.account.saveFailed'))
   } finally {
     busy.value = false
   }
@@ -319,6 +327,8 @@ function close(): void {
 watch(
   () => [props.show, props.account?.id] as const,
   ([show]) => {
+    // Another account (or the dialog closed): an open revoke confirmation is not about it.
+    cancelRevoke()
     if (show) void load()
     else seq++
   },

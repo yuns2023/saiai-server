@@ -7,13 +7,23 @@ import type { OwnerEarnings, OwnerMarketView } from '@/api/market'
 
 /* ---------- Status and reasons ---------- */
 
-/** What the owner sees for one account: 未获准 / 可上架 / 已上架 / 暂不可售. */
-export type MarketState = 'notAllowed' | 'canList' | 'listed' | 'unavailable'
+/**
+ * What the owner sees for one account: 未开通 (no 套餐 / revoked / never
+ * set up), 自用 (not on the market) or 共享中. A shared account is always
+ * 共享中, so it can be switched back even if its 套餐 went away meanwhile.
+ */
+export type ShareState = 'notGranted' | 'selfUse' | 'shared'
 
-/** Reason codes with their own message (under market.reason_<code>); others fall back to a generic text. */
+/**
+ * Reason codes with their own message (under market.reason_<code>); others fall back to a generic text.
+ * Account-configuration reasons (device / session limits, protection) say only that the configuration
+ * does not support sharing: owners never see device limits, concurrency or reservations.
+ */
 export const KNOWN_REASONS = [
   'market_disabled',
   'not_configured',
+  'no_plan',
+  'switch_cooldown',
   'no_allowed_tier',
   'protection_invalid',
   'platform_not_anthropic',
@@ -33,29 +43,33 @@ export function reasonKey(code: string): string {
   return (KNOWN_REASONS as readonly string[]).includes(code) ? `market.reason_${code}` : 'market.reason_other'
 }
 
-/**
- * The account is (still) on the market or an administrator allows it into at
- * least one tier now. A configuration with every tier removed counts as none.
- */
-export function hasPermission(v: OwnerMarketView | null | undefined): boolean {
+export function shareState(v: OwnerMarketView): ShareState {
+  if (v.mode === 'shared' || v.status === 'listed') return 'shared'
+  if (v.status !== 'unlisted' || !v.plan || v.unavailable_reasons.includes('no_plan') || v.unavailable_reasons.includes('not_configured')) return 'notGranted'
+  return 'selfUse'
+}
+
+/** The site-wide market switch is off (said on a line of its own, apart from 未开通). */
+export function marketClosed(v: OwnerMarketView): boolean {
+  return !v.market_enabled || v.unavailable_reasons.includes('market_disabled')
+}
+
+/** The account is shared now or may be shared right away: the 共享收益 section is relevant. */
+export function sharesOrCanShare(v: OwnerMarketView | null | undefined): boolean {
   if (!v) return false
-  if (v.status === 'listed') return true
-  return v.status === 'unlisted' && v.allowed_tiers.length > 0
-}
-
-export function marketState(v: OwnerMarketView): MarketState {
-  if (v.status === 'listed') return v.unavailable_reasons.length ? 'unavailable' : 'listed'
-  if (!hasPermission(v)) return 'notAllowed'
-  return v.can_list ? 'canList' : 'unavailable'
+  const s = shareState(v)
+  return s === 'shared' || (s === 'selfUse' && v.can_list)
 }
 
 /**
- * Reasons worth showing: "not configured" is already said by the 未获准 label,
- * and duplicates are dropped.
+ * Reasons worth listing: those already said by a line of their own (未开通,
+ * market closed, the next-switch time) are dropped, and duplicates.
  */
 export function visibleReasons(v: OwnerMarketView): string[] {
+  const own = ['not_configured', 'no_plan', 'market_disabled']
+  if (v.next_switch_at) own.push('switch_cooldown')
   const out: string[] = []
-  for (const r of v.unavailable_reasons) if (r !== 'not_configured' && !out.includes(r)) out.push(r)
+  for (const r of v.unavailable_reasons) if (!own.includes(r) && !out.includes(r)) out.push(r)
   return out
 }
 
@@ -64,10 +78,21 @@ export function pickableTiers(v: OwnerMarketView) {
   return v.allowed_tiers.filter((t) => t.available && !t.admin_member)
 }
 
+/** Upstream 5h / 7d utilization in percent; null = unknown (no sample). */
+export function upstreamUsage(v: OwnerMarketView): { fiveHour: number | null; sevenDay: number | null } {
+  const pick = (key: string) => {
+    const u = v.upstream_windows.find((w) => w.key === key)?.utilization
+    return typeof u === 'number' && Number.isFinite(u) ? u : null
+  }
+  return { fiveHour: pick('five_hour'), sevenDay: pick('seven_day') }
+}
+
 /* ---------- Errors ---------- */
 
 export const MARKET_ERROR_CODES = [
   'MARKET_DISABLED',
+  'MARKET_SWITCH_COOLDOWN',
+  'MARKET_TIER_REQUIRED',
   'MARKET_GROUP_NOT_ALLOWED',
   'MARKET_ADMIN_MEMBERSHIP_CONFLICT',
   'MARKET_LISTING_REVOKED',
@@ -106,6 +131,28 @@ export function marketErrorKey(err: unknown): string {
 export function errorReason(err: unknown): string {
   const r = ((err ?? {}) as ErrLike).metadata?.reason
   return typeof r === 'string' && /^[a-z_]{1,64}$/.test(r) ? r : ''
+}
+
+function errorCode(err: unknown): string {
+  const e = (err ?? {}) as ErrLike
+  for (const v of [e.reason, e.code]) if (typeof v === 'string' && v) return v
+  return ''
+}
+
+/** A switch refused by the cooldown (429 MARKET_SWITCH_COOLDOWN; a bare 429 from elsewhere is not one). */
+export function isCooldownError(err: unknown): boolean {
+  return errorCode(err) === 'MARKET_SWITCH_COOLDOWN'
+}
+
+/** 400 MARKET_TIER_REQUIRED: the 套餐 has several tiers, one must be picked. */
+export function isTierRequiredError(err: unknown): boolean {
+  return errorCode(err) === 'MARKET_TIER_REQUIRED'
+}
+
+/** metadata.next_switch_at of a cooldown error, when it is a readable time. */
+export function errorNextSwitchAt(err: unknown): string | null {
+  const at = ((err ?? {}) as ErrLike).metadata?.next_switch_at
+  return typeof at === 'string' && at && !Number.isNaN(Date.parse(at)) ? at : null
 }
 
 /* ---------- Exact decimals (10 places) ---------- */

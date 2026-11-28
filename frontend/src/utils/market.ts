@@ -1,16 +1,10 @@
 /**
- * Sharing market (P3a) helpers for the admin console: tier eligibility of a
- * group form, error-code → message keys, and exact checks of the market
- * settings the server validates (so 0 is a value, never "empty").
+ * Sharing market helpers for the admin console: tier eligibility of a group
+ * form, the 套餐 (plan) of tiers and accounts, error-code → message keys, and
+ * exact checks of the market settings the server validates (so 0 is a value,
+ * never "empty").
  */
-import type { MarketProtection } from '@/api/admin/market'
-
-/** Static bounds (service.MarketProtectionParams.ValidRange / migration 134 CHECK). */
-export const MARKET_PROTECTION_BOUNDS: Record<keyof MarketProtection, { min: number; max: number }> = {
-  reserved_concurrency: { min: 0, max: 100 },
-  reserved_devices: { min: 0, max: 32 },
-  reserved_admissions: { min: 0, max: 32 }
-}
+import type { AdminGroup } from '@/types'
 
 /* ---------- Group tier ---------- */
 
@@ -40,6 +34,27 @@ export function isMarketTierEligible(form: MarketTierForm): boolean {
   )
 }
 
+/* ---------- 套餐 (plan) ---------- */
+
+/** Server slug rule for a 套餐 (groups.market_plan, approval and listing plan). */
+export const MARKET_PLAN_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/
+
+export function validMarketPlan(v: unknown): v is string {
+  return typeof v === 'string' && MARKET_PLAN_RE.test(v)
+}
+
+type PlanGroup = Pick<AdminGroup, 'id' | 'name' | 'platform' | 'status' | 'rate_multiplier' | 'market_tier' | 'market_plan'>
+
+/** Active market tiers that carry a 套餐 (optionally of one platform): the tiers an account can be sold in. */
+export function planTiers<G extends PlanGroup>(groups: readonly G[], platform?: string): G[] {
+  return groups.filter((g) => g.market_tier === true && g.status === 'active' && !!g.market_plan && (!platform || g.platform === platform))
+}
+
+/** Distinct 套餐 of those tiers, sorted: the choices offered to an administrator. */
+export function marketPlanOptions(groups: readonly PlanGroup[], platform?: string): string[] {
+  return [...new Set(planTiers(groups, platform).map((g) => g.market_plan as string))].sort()
+}
+
 /* ---------- Errors ---------- */
 
 /** Server error codes with their own message under market.errors. */
@@ -54,6 +69,9 @@ export const MARKET_ADMIN_ERROR_CODES = [
   'MARKET_INVALID_TIER',
   'MARKET_INVALID_PARAMS',
   'MARKET_ACCOUNT_NOT_ELIGIBLE',
+  'MARKET_PLAN_REQUIRES_TIER',
+  'MARKET_PLAN_UNKNOWN',
+  'MARKET_PLAN_INVALID',
   'MARKET_EARNING_REVERSE_SCOPE_REQUIRED',
   'MARKET_EARNING_REVERSE_AS_OF_INVALID',
   'MARKET_EARNING_NOTE_TOO_LONG',
@@ -72,9 +90,9 @@ export function marketErrorCode(err: unknown): string {
 
 /**
  * Message for a failed market-related admin call: a known code gets its
- * plain-language text plus the server's own wording (it carries the exact
- * bound, e.g. "reserved_concurrency must be at most …"); anything else gets
- * the server message, or the fallback.
+ * plain-language text, plus the server's own wording for the codes whose
+ * detail is only there (which parameter, why not eligible); anything else
+ * gets the server message, or the fallback.
  */
 export function marketErrorText(err: unknown, t: (key: string) => string, fallback: string): string {
   const code = marketErrorCode(err)
@@ -86,21 +104,6 @@ export function marketErrorText(err: unknown, t: (key: string) => string, fallba
     return server && (code === 'MARKET_INVALID_PARAMS' || code === 'MARKET_ACCOUNT_NOT_ELIGIBLE') ? `${text}（${server}）` : text
   }
   return server || fallback
-}
-
-/* ---------- Protection parameters ---------- */
-
-export const PROTECTION_KEYS = Object.keys(MARKET_PROTECTION_BOUNDS) as Array<keyof MarketProtection>
-
-/** Integer within the static bound. */
-export function protectionValueOk(key: keyof MarketProtection, v: unknown): boolean {
-  const b = MARKET_PROTECTION_BOUNDS[key]
-  return typeof v === 'number' && Number.isInteger(v) && v >= b.min && v <= b.max
-}
-
-/** First protection key that is not a valid integer in range, or null. */
-export function firstBadProtection(p: Record<keyof MarketProtection, unknown>): keyof MarketProtection | null {
-  return PROTECTION_KEYS.find((k) => !protectionValueOk(k, p[k])) ?? null
 }
 
 /* ---------- Settings ---------- */
@@ -130,3 +133,5 @@ export function validIntIn(v: unknown, min: number, max: number): boolean {
 }
 
 export const MARKET_FREEZE_DAYS_MAX = 90
+/** Owner 自用 / 共享 switch cooldown, hours (0 = no limit). */
+export const MARKET_SWITCH_COOLDOWN_MAX = 168

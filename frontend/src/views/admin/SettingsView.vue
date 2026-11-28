@@ -954,7 +954,7 @@
             </div>
           </div>
         </div>
-        <!-- Sharing market (P3a): owners list accounts into admin-made price tiers; earnings convert into balance -->
+        <!-- Sharing market: owners switch accounts between 自用 and 共享 (sold in the tiers of their plan); earnings convert into balance -->
         <div class="card" data-testid="market-settings">
           <div class="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <div>
@@ -971,7 +971,7 @@
               </div>
               <Toggle v-model="form.market_enabled" data-testid="market-enabled" />
             </div>
-            <div class="grid gap-4 md:grid-cols-3">
+            <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div>
                 <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('market.settings.cutRate') }}</label>
                 <input v-model.number="form.market_platform_cut_rate" type="number" min="0" max="1" step="0.0001" class="input" data-testid="market-cut-rate" />
@@ -987,23 +987,18 @@
                 <input v-model.number="form.market_min_convert_usd" type="number" min="0.01" max="10000" step="0.01" class="input" data-testid="market-min-convert" />
                 <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.minConvertHint') }}</p>
               </div>
-            </div>
-            <div>
-              <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('market.settings.defaultsTitle') }}</h3>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.defaultsHint') }}</p>
-              <div class="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div v-for="field in marketDefaultFields" :key="field.key">
-                  <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ field.label }}</label>
-                  <input
-                    v-model.number="form[field.key]"
-                    type="number"
-                    :min="field.min"
-                    :max="field.max"
-                    step="1"
-                    class="input"
-                    :data-testid="`market-default-${field.key}`"
-                  />
-                </div>
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('market.settings.switchCooldown') }}</label>
+                <input
+                  v-model.number="form.market_mode_switch_cooldown_hours"
+                  type="number"
+                  min="0"
+                  :max="MARKET_SWITCH_COOLDOWN_MAX"
+                  step="1"
+                  class="input"
+                  data-testid="market-switch-cooldown"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ t('market.settings.switchCooldownHint', { max: MARKET_SWITCH_COOLDOWN_MAX }) }}</p>
               </div>
             </div>
           </div>
@@ -1812,7 +1807,7 @@ import type {
 } from '@/api/admin/settings'
 import type { AdminGroup, Proxy } from '@/types'
 import { APPROVE_LIMITS, HOSTED_FEE_RATE_MAX, validHostedFeeRate } from '@/api/admin/hostedApplications'
-import { MARKET_FREEZE_DAYS_MAX, MARKET_PROTECTION_BOUNDS, validCutRate, validIntIn, validMinConvert } from '@/utils/market'
+import { MARKET_FREEZE_DAYS_MAX, MARKET_SWITCH_COOLDOWN_MAX, validCutRate, validIntIn, validMinConvert } from '@/utils/market'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
@@ -2008,38 +2003,15 @@ const form = reactive<SettingsForm>({
   market_platform_cut_rate: 0.2,
   market_earning_freeze_days: 7,
   market_min_convert_usd: 1,
-  market_default_reserved_concurrency: 1,
-  market_default_reserved_devices: 2,
-  market_default_reserved_admissions: 1
+  market_mode_switch_cooldown_hours: 24
 })
 
 /* ---------- Sharing market ---------- */
-type MarketDefaultKey =
-  | 'market_default_reserved_concurrency'
-  | 'market_default_reserved_devices'
-  | 'market_default_reserved_admissions'
-
-const MARKET_DEFAULT_PARAMS = [
-  'reserved_concurrency',
-  'reserved_devices',
-  'reserved_admissions'
-] as const
-
-const marketDefaultFields = computed<Array<{ key: MarketDefaultKey; label: string; min: number; max: number }>>(() =>
-  MARKET_DEFAULT_PARAMS.map((param) => ({
-    key: `market_default_${param}` as MarketDefaultKey,
-    label: t(`market.protection.${param}`),
-    ...MARKET_PROTECTION_BOUNDS[param]
-  }))
-)
-
 const MARKET_NUMBER_KEYS = [
   'market_platform_cut_rate',
   'market_earning_freeze_days',
   'market_min_convert_usd',
-  'market_default_reserved_concurrency',
-  'market_default_reserved_devices',
-  'market_default_reserved_admissions'
+  'market_mode_switch_cooldown_hours'
 ] as const
 type MarketNumberKey = (typeof MARKET_NUMBER_KEYS)[number]
 /** Market values as last read from (or saved to) the server. */
@@ -2065,7 +2037,11 @@ function marketFieldChecks(): Array<{ key: MarketNumberKey; label: string; ok: b
     { key: 'market_platform_cut_rate', label: t('market.settings.cutRate'), ok: validCutRate(form.market_platform_cut_rate) },
     { key: 'market_earning_freeze_days', label: t('market.settings.freezeDays'), ok: validIntIn(form.market_earning_freeze_days, 0, MARKET_FREEZE_DAYS_MAX) },
     { key: 'market_min_convert_usd', label: t('market.settings.minConvert'), ok: validMinConvert(form.market_min_convert_usd) },
-    ...marketDefaultFields.value.map((f) => ({ key: f.key, label: f.label, ok: validIntIn(form[f.key], f.min, f.max) }))
+    {
+      key: 'market_mode_switch_cooldown_hours',
+      label: t('market.settings.switchCooldown'),
+      ok: validIntIn(form.market_mode_switch_cooldown_hours, 0, MARKET_SWITCH_COOLDOWN_MAX)
+    }
   ]
 }
 

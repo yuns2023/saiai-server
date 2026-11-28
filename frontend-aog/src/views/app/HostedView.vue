@@ -7,9 +7,10 @@
  * for it to be taken down. While self-onboarding is open, the page also lists
  * my applications and offers the form to submit my own Claude account.
  *
- * Sharing market: when an administrator allowed any of my accounts into a
- * price tier, or I have earnings, each current account gets a 共享出售 block
- * and the page a 共享收益 section. Otherwise none of it shows.
+ * Sharing market: every current account gets a 共享出售 block (自用 / 共享中,
+ * or 未开通 until an administrator assigns a 套餐). The page shows a 共享收益
+ * section when I have earnings or ledger history, or one of my current
+ * accounts is shared or may be shared right now.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -24,7 +25,7 @@ import HostedOnboard from '@/components/HostedOnboard.vue'
 import { intlLocale } from '@/i18n'
 import { cost, count, dateTime, daysAgo, shortTime, ymd } from '@/lib/format'
 import { localMidnight, MAX_SPAN_DAYS, rangeProblem, utcWindow } from '@/lib/hosted'
-import { hasEarnings, hasPermission } from '@/lib/market'
+import { hasEarnings, sharesOrCanShare } from '@/lib/market'
 import { onboardErrorKey } from '@/lib/selfOnboard'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -161,8 +162,9 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
       app.notify('ok', t(`hosted.owner_${action}_done`))
       // Status and badges then come from the server, read after this write.
       void loadAccounts(true)
-      // Pausing or asking for take-down also stops sharing.
-      void loadMarketView(a.account_id)
+      // The sharing block shows these states too (paused, take-down requested). Through the store, so a
+      // page re-entered before this answer (not this one) re-reads the account too.
+      hosted.notifyListingChanged(a.account_id)
     }
   } catch (e) {
     if (hosted.session() !== session) return
@@ -192,38 +194,52 @@ const hasLedger = ref(false)
 const marketSeq = new Map<number, number>()
 let earningsSeq = 0
 
-/** Shown only when one of my current accounts may be shared (or is still listed), or there are earnings. */
-const showMarket = computed(
+/**
+ * 共享收益: its own condition, apart from the per-account blocks — earnings or ledger
+ * history, or one of my current accounts is shared or may be shared right now.
+ */
+const showEarnings = computed(
   () =>
-    hosted.accounts.some((a) => a.current && hasPermission(marketViews.value[a.account_id])) ||
+    hosted.accounts.some((a) => a.current && sharesOrCanShare(marketViews.value[a.account_id])) ||
     hasEarnings(earnings.value) ||
     (earnings.value !== null && hasLedger.value)
 )
 /** A failed earnings read is reported to owners (and whoever already saw earnings), never to everyone else. */
-const showEarningsError = computed(() => earningsFailed.value && (showMarket.value || earnings.value !== null || hosted.accounts.length > 0))
+const showEarningsError = computed(() => earningsFailed.value && (showEarnings.value || earnings.value !== null || hosted.accounts.length > 0))
 
 function isNotFound(e: unknown): boolean {
   return (e as Partial<ApiError> | undefined)?.status === 404
 }
 
-function setMarketView(v: OwnerMarketView): void {
+/** A switch answer: adopted (true) unless older than the view on screen, which is then read again. */
+function setMarketView(v: OwnerMarketView): boolean {
   const shown = marketViews.value[v.account_id]
   if (shown && v.version < shown.version) {
     // An answer older than what is on screen: read the current state instead.
     void loadMarketView(v.account_id)
-    return
+    return false
   }
   marketSeq.set(v.account_id, (marketSeq.get(v.account_id) ?? 0) + 1)
   marketViews.value = { ...marketViews.value, [v.account_id]: v }
   marketFailed.value = { ...marketFailed.value, [v.account_id]: false }
+  return true
 }
 
-async function loadMarketView(id: number): Promise<void> {
+/**
+ * Reads one account's view. A read older than the view on screen (lower listing version) never
+ * replaces it: it is read once more, and if that is still older the screen keeps its view.
+ */
+async function loadMarketView(id: number, retried = false): Promise<void> {
   const mine = (marketSeq.get(id) ?? 0) + 1
   marketSeq.set(id, mine)
   try {
     const v = await marketApi.getListing(id)
     if (marketSeq.get(id) !== mine) return
+    const shown = marketViews.value[id]
+    if (shown && v.version < shown.version) {
+      if (!retried) void loadMarketView(id, true)
+      return
+    }
     marketViews.value = { ...marketViews.value, [id]: v }
     marketFailed.value = { ...marketFailed.value, [id]: false }
   } catch (e) {
@@ -591,11 +607,11 @@ onUnmounted(() => {
                   <span class="text-xs text-ink-3">{{ a.owner_paused ? t('hosted.pausedHint') : t('hosted.pauseHint') }}</span>
                 </template>
               </div>
-              <template v-if="a.current && (showMarket || marketFailed[a.account_id])">
+              <template v-if="a.current">
                 <HostedMarket
-                  v-if="showMarket && marketViews[a.account_id]"
+                  v-if="marketViews[a.account_id]"
                   :view="marketViews[a.account_id]"
-                  @updated="setMarketView"
+                  :apply="setMarketView"
                   @reload="loadMarketView(a.account_id)"
                 />
                 <p v-else-if="marketFailed[a.account_id]" class="mb-4 ml-10 text-sm text-seal" role="alert" :data-testid="`market-error-${a.account_id}`">
@@ -613,7 +629,7 @@ onUnmounted(() => {
       {{ earnings ? t('earnings.refreshFailed') : t('earnings.loadFailed') }}
       <button type="button" class="btn btn-quiet btn-sm" @click="loadEarnings">{{ t('common.retry') }}</button>
     </p>
-    <HostedEarnings v-if="showMarket && earnings" :earnings="earnings" />
+    <HostedEarnings v-if="showEarnings && earnings" :earnings="earnings" />
 
     <p v-if="appsFailed" class="mt-8 text-sm text-seal" role="alert" data-testid="apps-error">
       {{ t('onboard.apps.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadApplications">{{ t('common.retry') }}</button>
