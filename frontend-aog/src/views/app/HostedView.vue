@@ -162,8 +162,9 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
       app.notify('ok', t(`hosted.owner_${action}_done`))
       // Status and badges then come from the server, read after this write.
       void loadAccounts(true)
-      // The sharing block shows these states too (paused, take-down requested).
-      void loadMarketView(a.account_id)
+      // The sharing block shows these states too (paused, take-down requested). Through the store, so a
+      // page re-entered before this answer (not this one) re-reads the account too.
+      hosted.notifyListingChanged(a.account_id)
     }
   } catch (e) {
     if (hosted.session() !== session) return
@@ -210,24 +211,35 @@ function isNotFound(e: unknown): boolean {
   return (e as Partial<ApiError> | undefined)?.status === 404
 }
 
-function setMarketView(v: OwnerMarketView): void {
+/** A switch answer: adopted (true) unless older than the view on screen, which is then read again. */
+function setMarketView(v: OwnerMarketView): boolean {
   const shown = marketViews.value[v.account_id]
   if (shown && v.version < shown.version) {
     // An answer older than what is on screen: read the current state instead.
     void loadMarketView(v.account_id)
-    return
+    return false
   }
   marketSeq.set(v.account_id, (marketSeq.get(v.account_id) ?? 0) + 1)
   marketViews.value = { ...marketViews.value, [v.account_id]: v }
   marketFailed.value = { ...marketFailed.value, [v.account_id]: false }
+  return true
 }
 
-async function loadMarketView(id: number): Promise<void> {
+/**
+ * Reads one account's view. A read older than the view on screen (lower listing version) never
+ * replaces it: it is read once more, and if that is still older the screen keeps its view.
+ */
+async function loadMarketView(id: number, retried = false): Promise<void> {
   const mine = (marketSeq.get(id) ?? 0) + 1
   marketSeq.set(id, mine)
   try {
     const v = await marketApi.getListing(id)
     if (marketSeq.get(id) !== mine) return
+    const shown = marketViews.value[id]
+    if (shown && v.version < shown.version) {
+      if (!retried) void loadMarketView(id, true)
+      return
+    }
     marketViews.value = { ...marketViews.value, [id]: v }
     marketFailed.value = { ...marketFailed.value, [id]: false }
   } catch (e) {
@@ -599,7 +611,7 @@ onUnmounted(() => {
                 <HostedMarket
                   v-if="marketViews[a.account_id]"
                   :view="marketViews[a.account_id]"
-                  @updated="setMarketView"
+                  :apply="setMarketView"
                   @reload="loadMarketView(a.account_id)"
                 />
                 <p v-else-if="marketFailed[a.account_id]" class="mb-4 ml-10 text-sm text-seal" role="alert" :data-testid="`market-error-${a.account_id}`">

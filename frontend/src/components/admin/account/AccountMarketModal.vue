@@ -74,7 +74,7 @@
           class="btn btn-danger"
           :disabled="busy"
           data-testid="market-revoke"
-          @click="confirmRevoke = true"
+          @click="askRevoke"
         >
           {{ t('market.account.revoke') }}
         </button>
@@ -92,7 +92,7 @@
     :confirm-text="t('market.account.revoke')"
     danger
     @confirm="revoke"
-    @cancel="confirmRevoke = false"
+    @cancel="cancelRevoke"
   />
 </template>
 
@@ -266,13 +266,36 @@ async function save(): Promise<void> {
     busy.value = false
   }
 }
+/** The account and listing the open revoke confirmation is about. */
+let revokePin: { accountId: number; view: AdminMarketListingView } | null = null
+
+function askRevoke(): void {
+  if (!props.account || !view.value || busy.value) return
+  revokePin = { accountId: props.account.id, view: view.value }
+  confirmRevoke.value = true
+}
+
+function cancelRevoke(): void {
+  confirmRevoke.value = false
+  revokePin = null
+}
+
 async function revoke(): Promise<void> {
   confirmRevoke.value = false
+  const pin = revokePin
+  revokePin = null
   const a = props.account
-  if (!a || busy.value) return
+  if (!a || !pin || pin.accountId !== a.id || busy.value) return
   busy.value = true
   error.value = ''
   try {
+    // Like saving: the listing (or its owner) changed since the confirmation opened → show it, revoke nothing.
+    const latest = await adminAPI.market.getListing(a.id)
+    if (changedSince(pin.view, latest)) {
+      applyView(latest)
+      error.value = t('market.account.staleReload')
+      return
+    }
     const v = await adminAPI.market.revokeListing(a.id)
     applyView(v)
     appStore.showSuccess(t('market.account.revoked'))
@@ -291,6 +314,8 @@ function close(): void {
 watch(
   () => [props.show, props.account?.id] as const,
   ([show]) => {
+    // Another account (or the dialog closed): an open revoke confirmation is not about it.
+    cancelRevoke()
     if (show) void load()
     else seq++
   },

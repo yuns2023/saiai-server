@@ -179,6 +179,28 @@ describe('AccountMarketModal', () => {
     expect(w.find('[data-testid=market-revoke]').exists()).toBe(false)
   })
 
+  it('revoke re-reads first: a listing changed since the confirmation opened is shown, nothing is revoked', async () => {
+    market.getListing.mockResolvedValueOnce(view({ listing: listing({ version: 3 }) })).mockResolvedValueOnce(view({ listing: listing({ version: 4, plan: 'pro' }) }))
+    const w = await mountModal()
+    await w.get('[data-testid=market-revoke]').trigger('click')
+    await w.get('[data-testid=confirm-yes]').trigger('click')
+    await flushPromises()
+    expect(market.revokeListing).not.toHaveBeenCalled()
+    expect(w.get('[data-testid=market-error]').text()).toBe('market.account.staleReload')
+    expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('pro')
+  })
+
+  it('the target account changes while the revoke confirmation is open: it closes and revokes nothing', async () => {
+    market.getListing.mockResolvedValue(view({ listing: listing() }))
+    const w = await mountModal()
+    await w.get('[data-testid=market-revoke]').trigger('click')
+    expect(w.find('[data-testid=confirm]').exists()).toBe(true)
+    await w.setProps({ account: { id: 12, name: 'other', platform: 'anthropic', type: 'setup-token', concurrency: 4, owner_user_id: 7 } as Account })
+    await flushPromises()
+    expect(w.find('[data-testid=confirm]').exists()).toBe(false)
+    expect(market.revokeListing).not.toHaveBeenCalled()
+  })
+
   it('a failed group read: an error with a retry; the stored plan stays selectable', async () => {
     groups.getAll.mockRejectedValueOnce({ status: 500 })
     market.getListing.mockResolvedValue(view({ listing: listing() }))

@@ -365,6 +365,61 @@ describe('Hosting applications (admin)', () => {
       expect(approve).toHaveBeenCalledTimes(1)
     })
 
+    it('while the plans are being read: "正在读取套餐…" and approving waits', async () => {
+      let resolveGroups!: (v: unknown) => void
+      groupsGetAll.mockReturnValueOnce(new Promise((r) => (resolveGroups = r)))
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      expect(w.get('[data-testid=plan-groups-loading]').text()).toContain('admin.hostedApplications.marketPlanLoading')
+      expect(w.get('[data-testid=approve-confirm]').attributes('disabled')).toBeDefined()
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).not.toHaveBeenCalled()
+      resolveGroups(structuredClone(planGroups))
+      await flushPromises()
+      expect(w.find('[data-testid=plan-groups-loading]').exists()).toBe(false)
+      expect(w.get('[data-testid=approve-confirm]').attributes('disabled')).toBeUndefined()
+    })
+
+    it('a failed read: approving needs an explicit 不开通共享 (the default is not a choice)', async () => {
+      groupsGetAll.mockRejectedValueOnce({ status: 500, message: 'boom' })
+      approve.mockResolvedValue({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).not.toHaveBeenCalled()
+      expect(w.get('[data-testid=plan-groups-failed]').text()).toContain('admin.hostedApplications.groupsLoadFailed')
+      await planSelect(w).setValue('')
+      expect(w.get('[data-testid=plan-groups-failed]').text()).toContain('admin.hostedApplications.groupsLoadFailedNone')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).toHaveBeenCalledTimes(1)
+      expect(approve.mock.calls[0][1]).not.toHaveProperty('market_plan')
+      // The next dialog starts unpicked again.
+      approve.mockClear()
+      await w.get('.dialog button.btn-primary').trigger('click')
+      await row(w, 2).get('[data-testid=approve]').trigger('click')
+      await w.get('[data-testid=proxy-select]').setValue('8')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).not.toHaveBeenCalled()
+    })
+
+    it('an older group read answering last is dropped', async () => {
+      let resolveFirst!: (v: unknown) => void
+      groupsGetAll.mockReturnValueOnce(new Promise((r) => (resolveFirst = r)))
+      const w = await mountView()
+      // A refresh starts a second read that answers first.
+      await w.get('[data-testid=refresh]').trigger('click')
+      await flushPromises()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      expect(planSelect(w).findAll('option')).toHaveLength(4)
+      resolveFirst([])
+      await flushPromises()
+      expect(planSelect(w).findAll('option')).toHaveLength(4)
+    })
+
     it('no market tier with a plan: says so; only 不开通共享', async () => {
       groupsGetAll.mockResolvedValue([planGroups[4], planGroups[5]])
       const w = await mountView()

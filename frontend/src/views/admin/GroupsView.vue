@@ -3020,9 +3020,11 @@ const handleUpdateGroup = async () => {
     payload.subscription_revenue_rate = emptyToNull(payload.subscription_revenue_rate)
     // market_tier only when toggled here: a stale form must not promote or demote a tier (server keeps an omitted value).
     const { market_tier: marketTier, ...withoutTier } = payload
-    // market_plan likewise only when changed here (null clears it, also when the tier is switched off).
+    // market_plan likewise only when changed here (null clears it); demoting a tier always clears it,
+    // even when none was loaded (another admin may have set one since).
     const editPlan = formMarketPlan(editForm)
-    const planChange = editPlan !== editMarketPlanLoaded ? { market_plan: editPlan } : {}
+    const demoted = editMarketTierLoaded && !editForm.market_tier
+    const planChange = demoted || editPlan !== editMarketPlanLoaded ? { market_plan: editPlan } : {}
     await adminAPI.groups.update(editingGroup.value.id, { ...(marketTier === editMarketTierLoaded ? withoutTier : payload), ...planChange })
     appStore.showSuccess(t('admin.groups.groupUpdated'))
     closeEditModal()

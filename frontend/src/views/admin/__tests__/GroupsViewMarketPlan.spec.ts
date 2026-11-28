@@ -141,6 +141,15 @@ describe('GroupsView: 套餐 of a market tier', () => {
     expect(groupsApi.update.mock.calls[1][1]).toMatchObject({ market_tier: false, market_plan: null })
   })
 
+  it('edit: demoting a tier that had no plan still sends market_plan: null', async () => {
+    const w = await mountView()
+    await openEdit(w, 22)
+    await w.get('#edit-group-form [data-testid=market-tier-checkbox]').setValue(false)
+    await w.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+    expect(groupsApi.update.mock.calls[0][1]).toMatchObject({ market_tier: false, market_plan: null })
+  })
+
   it('edit: an invalid slug blocks the save with a message', async () => {
     const w = await mountView()
     await openEdit(w, 21)

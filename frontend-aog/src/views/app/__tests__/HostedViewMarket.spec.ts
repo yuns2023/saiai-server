@@ -236,13 +236,15 @@ describe('HostedView sharing market', () => {
     expect(block.get('[data-testid=market-upstream-7d]').text()).toBe('7 天 未知')
     expect(block.get('[data-testid=market-cooldown-rule]').text()).toBe('每 24 小时只能切换一次')
     expect(block.find('[data-testid=market-next-switch]').exists()).toBe(false)
-    // One tier: no picker, and no reservation wording anywhere.
+    // One tier: no picker, but the tier and its rate show before sharing; no reservation wording anywhere.
     expect(block.find('[data-testid=market-tier-4]').exists()).toBe(false)
+    expect(block.get('[data-testid=market-sell-tier]').text()).toBe('出售档位：T2-Max ×1.6')
     expect(block.text()).not.toContain('预留')
 
     await block.get('[data-testid=market-share]').trigger('click')
     expect(dialogOpen()).toBe(true)
     expect(block.get('dialog').text()).toContain('共享期间你的托管 Key 不能使用这个号；切换后 24 小时内不能切回。')
+    expect(block.get('dialog [data-testid=market-confirm-tier]').text()).toBe('出售档位：T2-Max ×1.6')
     // Cancel: nothing is sent.
     await block.get('dialog .btn-line').trigger('click')
     expect(dialogOpen()).toBe(false)
@@ -281,7 +283,9 @@ describe('HostedView sharing market', () => {
     expect(block.get('[data-testid=market-mode-hint]').text()).toContain('你的托管 Key 不能使用这个号')
     expect(block.find('[data-testid=market-share]').exists()).toBe(false)
     await block.get('[data-testid=market-self-use]').trigger('click')
-    expect(block.get('dialog').text()).toContain('正在使用这个号的买家会被换到其他号。切换后 24 小时内不能再共享。')
+    expect(block.get('dialog').text()).toContain('切回后，这个号不再接新的市场请求；进行中的请求会正常完成。切换后 24 小时内不能再共享。')
+    expect(block.get('dialog').text()).not.toContain('买家会被换到')
+    expect(block.find('dialog [data-testid=market-confirm-tier]').exists()).toBe(false)
     market.setListing.mockResolvedValue(view({ version: 4, next_switch_at: NEXT, can_list: false, unavailable_reasons: ['switch_cooldown'] }))
     await block.get('dialog .btn-primary').trigger('click')
     await flushPromises()
@@ -393,7 +397,118 @@ describe('HostedView sharing market', () => {
     await flushPromises()
     expect(market.setListing).not.toHaveBeenCalled()
     expect(dialogOpen()).toBe(false)
-    expect(card(w).get('[data-testid=market-error]').text()).toBe('共享状态刚有变化，请看清后重新操作。')
+    expect(card(w).get('[data-testid=market-error]').text()).toBe('档位已变化，请重新确认。')
+  })
+
+  it('the single tier is swapped while the confirmation is open (same version): nothing is sent, "档位已变化"', async () => {
+    const w = await mountView({ views: { 11: view() } })
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    expect(card(w).get('dialog [data-testid=market-confirm-tier]').text()).toBe('出售档位：T2-Max ×1.6')
+    market.getListing.mockResolvedValueOnce(view({ allowed_tiers: [{ group_id: 5, name: 'T2-Max-B', rate_multiplier: 1.9, available: true, admin_member: false }] }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    // The dialog still names what the owner was shown.
+    expect(card(w).get('dialog [data-testid=market-confirm-tier]').text()).toBe('出售档位：T2-Max ×1.6')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(market.setListing).not.toHaveBeenCalled()
+    expect(dialogOpen()).toBe(false)
+    expect(card(w).get('[data-testid=market-error]').text()).toBe('档位已变化，请重新确认。')
+  })
+
+  it('the single tier is repriced while the confirmation is open: nothing is sent', async () => {
+    const w = await mountView({ views: { 11: view() } })
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    market.getListing.mockResolvedValueOnce(view({ allowed_tiers: [{ group_id: 4, name: 'T2-Max', rate_multiplier: 2.2, available: true, admin_member: false }] }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(market.setListing).not.toHaveBeenCalled()
+    expect(card(w).get('[data-testid=market-error]').text()).toBe('档位已变化，请重新确认。')
+  })
+
+  it('cooldown time already passed but the switch is still closed: re-read after 5 s, 15 s, 60 s, then stop', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-28T10:00:00Z'))
+      const stuck = { ...SHARED, can_unlist: false, next_switch_at: '2026-11-28T09:59:00Z' }
+      await mountView({ views: { 11: stuck } })
+      // Every read is a new answer object (as the API layer returns).
+      market.getListing.mockImplementation(async () => ({ ...stuck }))
+      const calls = () => market.getListing.mock.calls.length
+      const start = calls()
+      for (const step of [5_000, 15_000, 60_000]) {
+        vi.advanceTimersByTime(step - 1)
+        await flushPromises()
+        expect(calls()).toBe(start + [5_000, 15_000, 60_000].indexOf(step))
+        vi.advanceTimersByTime(1)
+        await flushPromises()
+      }
+      expect(calls()).toBe(start + 3)
+      vi.advanceTimersByTime(10 * 60_000)
+      await flushPromises()
+      expect(calls()).toBe(start + 3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('after the end-of-cooldown read returns the same (passed) time and a closed switch, it retries with the same backoff', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-28T10:00:00Z'))
+      const at = '2026-11-28T10:00:10Z'
+      const w = await mountView({ views: { 11: { ...SHARED, can_unlist: false, next_switch_at: at } } })
+      market.getListing.mockImplementation(async () => ({ ...SHARED, can_unlist: false, next_switch_at: at }))
+      const start = market.getListing.mock.calls.length
+      vi.advanceTimersByTime(11_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(start + 1)
+      vi.advanceTimersByTime(5_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(start + 2)
+      // The server opens it now: no more reads, the button unlocks.
+      market.getListing.mockResolvedValue({ ...SHARED, version: 4, next_switch_at: null })
+      vi.advanceTimersByTime(15_000)
+      await flushPromises()
+      expect(card(w).get('[data-testid=market-self-use]').attributes('disabled')).toBeUndefined()
+      const settled = market.getListing.mock.calls.length
+      vi.advanceTimersByTime(120_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(settled)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a cooldown refusal clears once a newer view opens the switch', async () => {
+    const w = await mountView({ views: { 11: view() } })
+    market.setListing.mockRejectedValueOnce({ status: 429, reason: 'MARKET_SWITCH_COOLDOWN', metadata: { next_switch_at: NEXT }, message: 'x' })
+    market.getListing.mockResolvedValueOnce(view({ version: 3, can_list: false, next_switch_at: NEXT }))
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(card(w).find('[data-testid=market-error]').exists()).toBe(true)
+    market.getListing.mockResolvedValueOnce(view({ version: 3 }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    expect(card(w).find('[data-testid=market-error]').exists()).toBe(false)
+  })
+
+  it('shared on a closed market with switching back open: says it takes no orders and may switch back now; no cooldown line', async () => {
+    const w = await mountView({ views: { 11: { ...SHARED, market_enabled: false, next_switch_at: NEXT, unavailable_reasons: ['market_disabled'] } } })
+    expect(card(w).get('[data-testid=market-closed]').text()).toBe('共享市场已关闭，当前不接单；可立即切回自用（不受冷却限制）')
+    expect(card(w).get('[data-testid=market-mode-hint]').text()).not.toContain('其他用户按档位价格使用')
+    expect(card(w).find('[data-testid=market-cooldown-rule]').exists()).toBe(false)
+    expect(card(w).find('[data-testid=market-next-switch]').exists()).toBe(false)
+    expect(card(w).get('[data-testid=market-self-use]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('shared but paused: "已暂停，当前不接单" instead of "其他用户按档位价格使用这个号"', async () => {
+    const w = await mountView({ views: { 11: { ...SHARED, unavailable_reasons: ['owner_paused'] } } })
+    expect(card(w).get('[data-testid=market-mode-hint]').text()).toBe('共享中：已暂停，当前不接单；共享期间你的托管 Key 不能使用这个号。')
+    expect(card(w).find('[data-testid=market-reasons]').exists()).toBe(false)
   })
 
   it('permission lost while the confirmation is open (same version): nothing is sent', async () => {
@@ -545,14 +660,49 @@ describe('HostedView sharing market', () => {
     expect(w.find('[data-testid=earnings-error]').exists()).toBe(true)
   })
 
-  it('a listing answer older than the view on screen is dropped and the state read again', async () => {
+  it('a listing answer older than the view on screen is dropped, the state read again, and no success is announced', async () => {
     const w = await mountView({ views: { 11: view({ version: 5 }) } })
+    const notify = vi.spyOn((await import('@/stores/app')).useAppStore(), 'notify')
     market.setListing.mockResolvedValueOnce({ ...SHARED, version: 4 })
     await w.get('[data-testid=market-share]').trigger('click')
     await w.get('[data-testid=market-11] dialog .btn-primary').trigger('click')
     await flushPromises()
     expect(market.getListing).toHaveBeenCalledTimes(2)
     expect(w.get('[data-testid=market-state]').text()).toBe('自用')
+    expect(notify).not.toHaveBeenCalledWith('ok', expect.anything())
+  })
+
+  it('a GET older than the view on screen never rolls it back: read once more, then the screen keeps its view', async () => {
+    const w = await mountView({ views: { 11: { ...SHARED, version: 5 } } })
+    const before = market.getListing.mock.calls.length
+    market.getListing.mockResolvedValue(view({ version: 4 }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    expect(market.getListing.mock.calls.length).toBe(before + 2)
+    expect(card(w).get('[data-testid=market-state]').text()).toBe('共享中')
+    // A newer (or equal) version is taken.
+    market.getListing.mockResolvedValue(view({ version: 6 }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    expect(card(w).get('[data-testid=market-state]').text()).toBe('自用')
+  })
+
+  it('pause / resume answered after the page was re-entered: the new page re-reads that account\'s sharing card', async () => {
+    const opts = { global: { plugins: [i18n] }, attachTo: document.body }
+    const w = await mountView({ views: { 11: SHARED } })
+    let resolve!: (v: unknown) => void
+    hosted.setOwnerState.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    await w.get('[data-testid=hosted-pause]').trigger('click')
+    w.unmount()
+    const again = mount(HostedView, opts)
+    await flushPromises()
+    const before = market.getListing.mock.calls.length
+    market.getListing.mockResolvedValue({ ...SHARED, version: 4, unavailable_reasons: ['owner_paused'] })
+    resolve({ id: 11, owner_paused: true, withdraw_requested: false })
+    await flushPromises()
+    expect(market.getListing.mock.calls.length).toBeGreaterThan(before)
+    expect(again.get('[data-testid=market-mode-hint]').text()).toBe('共享中：已暂停，当前不接单；共享期间你的托管 Key 不能使用这个号。')
+    again.unmount()
   })
 
   it('reasons map to plain text with a generic one for unknown codes; the share button stays off', async () => {
