@@ -69,13 +69,14 @@ describe('Codex reset credits', () => {
   })
 
   it('keeps a safe retry after confirmed consumption with failed local sync', async () => {
-    api.consumeCodexResetCredit.mockResolvedValue({ outcome: 'reset', windows_reset: 2, quota_synced: false })
+    api.consumeCodexResetCredit.mockResolvedValue({ outcome: 'reset', windows_reset: 2, quota_synced: false, sync_error: 'CODEX_USAGE_MISSING' })
     const wrapper = makeModal()
     await flushPromises()
     await button(wrapper, 'use').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('codexReset.reset')
     expect(wrapper.text()).toContain('codexReset.syncFailed')
+    expect(wrapper.text()).toContain('CODEX_USAGE_MISSING')
     expect(button(wrapper, 'retry').exists()).toBe(true)
     expect(sessionStorage.getItem('codex-reset-pending:42')).not.toBeNull()
     wrapper.unmount()

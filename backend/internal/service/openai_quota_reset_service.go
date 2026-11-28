@@ -62,6 +62,9 @@ type OpenAIResetResult struct {
 	Outcome      string `json:"outcome"`
 	WindowsReset int    `json:"windows_reset"`
 	QuotaSynced  bool   `json:"quota_synced"`
+	// SyncError is a stable reason code (never a provider body) explaining why
+	// the local quota sync failed, so operators can tell causes apart.
+	SyncError string `json:"sync_error,omitempty"`
 }
 
 func resetError(status int, code, message string) error {
@@ -196,7 +199,11 @@ func (s *OpenAIQuotaResetService) Consume(ctx context.Context, id int64, input O
 		if err := s.syncUsage(operationCtx, account); err == nil {
 			result.QuotaSynced = true
 		} else {
-			slog.Warn("codex_reset_usage_sync_failed", "account_id", account.ID, "outcome", upstream.Code)
+			result.SyncError = infraerrors.Reason(err)
+			if result.SyncError == "" || result.SyncError == infraerrors.UnknownReason {
+				result.SyncError = "CODEX_RESET_SYNC_INTERNAL"
+			}
+			slog.Warn("codex_reset_usage_sync_failed", "account_id", account.ID, "outcome", upstream.Code, "reason", result.SyncError, "error", err.Error())
 		}
 	}
 	return result, nil
