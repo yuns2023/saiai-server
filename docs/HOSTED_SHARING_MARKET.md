@@ -186,18 +186,21 @@ never lists. Deleting the account revokes.
   false` and no `Retry-After`: 该托管号正在共享中，请在托管页切回「自用」后再使用。
   Normally this is decided before the request waits for anything (user slot,
   queue, account slot), so the HTTP status and header come first even for a
-  streaming request: when the last registry poll saw a listed account in the
-  Key's group, one database read confirms that every live admin account of
-  the group is listed by this user and that the group still is an owner group
-  of this user. The same read runs again for races where the selection is
-  exhausted — only when every failure of the request was a market refusal
-  (or, with no failure yet, the request saw a listing in progress), also if
-  the local registry has not caught up. Ops records it as a client-side
-  business limit; one WARN line `gateway.hosted_account_shared` per account
-  per hour. Device-full, quota exhaustion and database errors keep their
-  existing errors. Only in the rare race where an SSE ping was already flushed
-  (the account got shared while the request waited) the same error arrives as
-  an SSE `error` event (status and headers are committed by then).
+  streaming request: when the last registry poll found every live admin
+  account of the Key's group listed and owned by this user (local evidence,
+  refreshed with the registry every ~2 s), one database read confirms it and
+  that the group still is an owner group of this user. Without that local
+  evidence (a group with a self-use account, or a registry that has not
+  caught up) nothing is read early. The same read runs where the selection
+  is exhausted, only after this owner request saw a candidate refused as
+  shared or a listing in progress and no other failure, also if the local
+  registry has not caught up. Ops records it as a client-side business
+  limit; one WARN line `gateway.hosted_account_shared` per account per hour.
+  Device-full, quota exhaustion and database errors keep their existing
+  errors. Only when the listing committed while the request waited, or the
+  local index was not refreshed yet, and an SSE ping was already flushed,
+  the same error arrives as an SSE `error` event (status and headers are
+  committed by then).
 - Earnings: summary (`frozen`, `available`, `converted_total`, `min_convert`,
   `as_of`), a keyset-paged ledger and 转入余额. Amounts are exact decimal
   strings (up to 10 decimals); the UI never converts them to floats. The cut
@@ -662,9 +665,10 @@ Listing and tiers
   nothing (`plan_mismatch` at the final admission) until an admin sets the
   plan; the owner can still switch it back to 自用.
 - An owner's request on a shared account costs one database read before it
-  is answered (the early all-shared check, or the owner check); a group
-  with both shared and self-use accounts of the owner pays the early read on
-  every request of that owner.
+  is answered (the early all-shared check, or the owner check).
+- A buyer whose model price entry disappears while the request waits gets
+  the existing HTTP 400 of the generic price check before the send (every
+  account of the tier shares the model price, so reselecting cannot help).
 - 单副本：账号保持共享期间，上架事务提交后才开始最终准入判定的号主请求不得转发；提交前已按自用状态通过最终判定的请求视为在途，可以完成。
   (Single replica: while the account stays shared, an owner request whose
   final admission check starts after the listing transaction committed is

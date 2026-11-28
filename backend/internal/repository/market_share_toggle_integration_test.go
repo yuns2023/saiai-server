@@ -577,3 +577,34 @@ func TestMarketOwnerImplicitTierSkipsAdminMemberTiers(t *testing.T) {
 	_, err = svc.OwnerSet(ctx, owner, acc, 0, true)
 	requireReason(t, err, "MARKET_ADMIN_MEMBERSHIP_CONFLICT")
 }
+
+// Admin A demotes a tier from a form read while the plan was empty; admin B
+// sets a plan and commits first. A's locked write turns market_tier off and
+// must clear B's plan with it (no plan on a non-tier).
+func TestMarketConcurrentDemotionClearsPlan(t *testing.T) {
+	ctx := context.Background()
+	f := newMarketFixture(t)
+	tier := f.group(t, true)
+	_, err := integrationDB.ExecContext(ctx, "UPDATE groups SET market_plan = NULL WHERE id = $1", tier)
+	require.NoError(t, err)
+	staleA, err := f.groups.GetByID(ctx, tier) // A reads: tier, no plan
+	require.NoError(t, err)
+	require.Nil(t, staleA.MarketPlan)
+
+	b, err := f.groups.GetByID(ctx, tier) // B sets max and commits first
+	require.NoError(t, err)
+	plan := marketTestPlan()
+	b.MarketPlan, b.MarketPlanWrite = &plan, true
+	require.NoError(t, f.groups.Update(ctx, b))
+	require.Equal(t, plan, marketGroupPlan(t, tier))
+
+	staleA.MarketTier = false // A demotes (its form never carried a plan)
+	require.False(t, staleA.MarketPlanWrite)
+	require.NoError(t, f.groups.Update(ctx, staleA))
+	var tierNow bool
+	var planNow sql.NullString
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT market_tier, market_plan FROM groups WHERE id = $1", tier).Scan(&tierNow, &planNow))
+	require.False(t, tierNow)
+	require.False(t, planNow.Valid, "the demotion cleared the plan set meanwhile")
+	require.Nil(t, staleA.MarketPlan)
+}

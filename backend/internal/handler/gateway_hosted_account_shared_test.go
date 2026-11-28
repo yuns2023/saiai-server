@@ -22,17 +22,22 @@ import (
 type sharedMarketStore struct {
 	mu       sync.Mutex
 	account  service.Account
-	groups   []int64 // admin groups of the listed account in the registry poll
+	groups   []int64 // groups the registry poll reports as fully shared by the owner
 	listed   bool
 	total    int
 	shared   []int64
 	err      error
 	admitErr error
 	checks   int
+	reads    int // HostedGroupSharedAccounts calls
 }
 
 func (s *sharedMarketStore) LoadMarketDispatchState(context.Context) (*service.MarketDispatchState, error) {
-	return &service.MarketDispatchState{ListedAccountIDs: []int64{s.account.ID}, ListedAdminGroupIDs: s.groups}, nil
+	fully := map[int64]int64{}
+	for _, g := range s.groups {
+		fully[g] = *s.account.OwnerUserID
+	}
+	return &service.MarketDispatchState{ListedAccountIDs: []int64{s.account.ID}, FullySharedGroups: fully}, nil
 }
 
 func (s *sharedMarketStore) AdmitMarketCandidate(_ context.Context, req *service.MarketAdmissionRequest, evaluate func(*service.MarketAuthoritativeFacts) string) (*service.MarketAdmissionVerdict, error) {
@@ -64,6 +69,9 @@ func (s *sharedMarketStore) CountMarketTierPlatformMembers(context.Context, int6
 }
 
 func (s *sharedMarketStore) HostedGroupSharedAccounts(context.Context, int64, int64) (int, []int64, error) {
+	s.mu.Lock()
+	s.reads++
+	s.mu.Unlock()
 	return s.total, s.shared, s.err
 }
 
@@ -171,9 +179,18 @@ func TestMessagesHostedAccountSharedEarlyForStreaming(t *testing.T) {
 	require.Zero(t, store.checks, "answered before any selection or admission")
 	require.Zero(t, h.lab.upstreamCalls())
 
-	// Not all shared: the early check lets the request through.
-	h, store, key = newHostedSharedHarnessWith(t, []int64{entrypointGroupA})
-	store.total, store.listed = 2, false
-	rec = serveOwner(t, h, key, nil)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, 1, store.reads)
+}
+
+// A mixed group (one account shared, the request's account self-use): the
+// registry does not report the group as fully shared, so a normal request
+// never reads the whole group.
+func TestMessagesMixedOwnerGroupNoFullGroupRead(t *testing.T) {
+	h, store, key := newHostedSharedHarnessWith(t, nil)
+	store.listed = false // the account the request uses is self-use in the database
+	for i := 0; i < 3; i++ {
+		rec := serveOwner(t, h, key, nil)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	}
+	require.Zero(t, store.reads, "no full-group query on the normal path")
 }

@@ -323,7 +323,7 @@ func (s *MarketListingService) ownerView(ctx context.Context, account *Account) 
 		}
 		// With the market off a shared account can be taken back now: one
 		// decision, no cooldown shown.
-		if next != nil && !(listing.Status == MarketListingStatusListed && !cfg.Enabled) {
+		if next != nil && (listing.Status != MarketListingStatusListed || cfg.Enabled) {
 			at := ceilToSecond(*next)
 			view.NextSwitchAt = &at
 		}

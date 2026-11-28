@@ -338,13 +338,13 @@ func TestMarketBuyerRefusalAfterOwnerTakeBackIsInvalidated(t *testing.T) {
 
 func TestMarketHostedAccountSharedBlocked(t *testing.T) {
 	env := newMarketEnv(t, []Account{mktListedAccount(1)})
-	env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{1}, ListedAdminGroupIDs: []int64{mktHosted}})
+	env.rt.SetState(&MarketDispatchState{Enabled: true, ListedAccountIDs: []int64{1}, FullySharedGroups: map[int64]int64{mktHosted: mktOwner}})
 	hosted := mktHosted
 	key := &APIKey{ID: 6, UserID: mktOwner, GroupID: &hosted, Group: mktGroups()[mktHosted], User: &User{ID: mktOwner}}
 	ctx := context.Background()
 
 	env.store.sharedTotal, env.store.shared = 1, []int64{1}
-	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, false), "early check: the registry saw a listed account in the group")
+	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, false), "early check: the registry saw the whole group listed by this user")
 	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, true))
 
 	// Not every account is shared (another self-use account, e.g. rate
@@ -365,10 +365,18 @@ func TestMarketHostedAccountSharedBlocked(t *testing.T) {
 	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner, GroupID: &plain, Group: mktGroups()[mktPlain]}, true))
 	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, &APIKey{ID: 7, UserID: mktOwner}, true))
 	require.Equal(t, reads, env.store.sharedReads)
-	// Early check with nothing listed in this group (saiai.top with the
-	// market off, or another owner's listing): no read.
-	env.rt.SetState(&MarketDispatchState{ListedAccountIDs: []int64{9}, ListedAdminGroupIDs: []int64{mktPlain}})
-	require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key, false))
+	// Early check without local evidence of a fully shared group: no read
+	// (a mixed group with a self-use account, a group shared by another
+	// user, a registry that has not caught up, saiai.top with no listings).
+	for _, state := range []*MarketDispatchState{
+		{ListedAccountIDs: []int64{1}},
+		{ListedAccountIDs: []int64{1}, FullySharedGroups: map[int64]int64{mktHosted: 99}},
+		{ListedAccountIDs: []int64{9}, FullySharedGroups: map[int64]int64{mktPlain: mktOwner}},
+		{},
+	} {
+		env.rt.SetState(state)
+		require.False(t, env.svc.HostedAccountSharedBlocked(ctx, key, false))
+	}
 	require.Equal(t, reads, env.store.sharedReads)
 	// Listed evidence of this request reads even when the registry lags.
 	require.True(t, env.svc.HostedAccountSharedBlocked(ctx, key, true))
@@ -455,4 +463,36 @@ func TestMarketPausedListedAccountServesNobody(t *testing.T) {
 	f := &MarketAuthoritativeFacts{AccountFound: true, Account: &paused, OwnerPaused: true}
 	require.Equal(t, "account_inactive", EvaluateMarketAdmission(&MarketSelection{Class: MarketClassBuyer}, &MarketAdmissionRequest{}, f))
 	require.Equal(t, "account_inactive", EvaluateMarketAdmission(&MarketSelection{Class: MarketClassOwner}, &MarketAdmissionRequest{}, f))
+}
+
+type failingLiteGroupRepo struct {
+	*mockGroupRepoForGateway
+}
+
+func (failingLiteGroupRepo) GetByIDLite(context.Context, int64) (*Group, error) {
+	return nil, errors.New("db down")
+}
+
+// The buyer's repricing cannot read the tier (transient error): eligibility
+// is unknown, so the ordinary failover runs (not a permanent exclusion); a
+// group confirmed gone is lost eligibility.
+func TestMarketBuyerRepricingGroupReadErrorIsNotInvalidation(t *testing.T) {
+	env, upstream, acc := marketForwardEnv(t)
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx, _ := buyerForwardCtx(t, c.Request.Context())
+	ctx = context.WithValue(ctx, ctxkey.Group, nil) // not in the request context: read from the repository
+	mock, ok := env.svc.groupRepo.(*mockGroupRepoForGateway)
+	require.True(t, ok)
+	env.svc.groupRepo = failingLiteGroupRepo{mockGroupRepoForGateway: mock}
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	requireMarketInvalidated(t, err, false)
+	require.Zero(t, upstream.calls)
+
+	env.svc.groupRepo = &mockGroupRepoForGateway{groups: map[int64]*Group{}} // deleted
+	c, _, parsed = claudeCodeCacheSafeRetryContext(t)
+	ctx, _ = buyerForwardCtx(t, c.Request.Context())
+	ctx = context.WithValue(ctx, ctxkey.Group, nil)
+	_, err = env.svc.Forward(ctx, c, acc, parsed)
+	requireMarketInvalidated(t, err, true)
+	require.Zero(t, upstream.calls)
 }

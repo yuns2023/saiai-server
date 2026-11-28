@@ -327,7 +327,14 @@ func (r *groupRepository) updateOnce(ctx context.Context, groupIn *service.Group
 	// cleared it): the rest of groupIn may come from a read before another
 	// admin changed the plan.
 	newPlan := nullStringPtr(oldPlan)
-	if groupIn.MarketPlanWrite {
+	switch {
+	case wasMarketTier && !groupIn.MarketTier:
+		// This update demotes the tier (decided on the locked row): the plan
+		// goes with it, also one another admin set after this save read the
+		// group.
+		newPlan = nil
+		builder = builder.ClearMarketPlan()
+	case groupIn.MarketPlanWrite:
 		newPlan = groupIn.MarketPlan
 		if newPlan != nil {
 			builder = builder.SetMarketPlan(*newPlan)

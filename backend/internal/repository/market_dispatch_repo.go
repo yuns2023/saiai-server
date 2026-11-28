@@ -22,36 +22,30 @@ func NewMarketDispatchStore(sqlDB *sql.DB) service.MarketDispatchStore {
 
 // LoadMarketDispatchState reads the listed account ids (account_market_listings
 // is small; status 'listed' ⇔ the account has a market membership), the
-// admin groups of those accounts and the market switch.
+// admin groups that are fully shared by one user, and the market switch.
 func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (*service.MarketDispatchState, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT l.account_id,
-		       ARRAY(SELECT ag.group_id FROM account_groups ag WHERE ag.account_id = l.account_id AND ag.source = 'admin')
-		FROM account_market_listings l WHERE l.status = 'listed'`)
+	rows, err := r.db.QueryContext(ctx, `SELECT account_id FROM account_market_listings WHERE status = 'listed'`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	state := &service.MarketDispatchState{}
-	groups := map[int64]struct{}{}
 	for rows.Next() {
-		var (
-			id       int64
-			adminIDs pq.Int64Array
-		)
-		if err := rows.Scan(&id, &adminIDs); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
 		state.ListedAccountIDs = append(state.ListedAccountIDs, id)
-		for _, g := range adminIDs {
-			if _, seen := groups[g]; !seen {
-				groups[g] = struct{}{}
-				state.ListedAdminGroupIDs = append(state.ListedAdminGroupIDs, g)
-			}
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if len(state.ListedAccountIDs) > 0 {
+		// Only the early 403 check uses it: a failed read leaves it empty
+		// (that check is skipped), the listed set still refreshes.
+		if groups, groupsErr := r.loadFullySharedGroups(ctx); groupsErr == nil {
+			state.FullySharedGroups = groups
+		}
 	}
 	// The switch only gates new buyer admissions (re-read in the admission
 	// snapshot); a failed read must not drop the listed set: treat as off.
@@ -60,6 +54,40 @@ func (r *marketListingRepository) LoadMarketDispatchState(ctx context.Context) (
 		state.Enabled = enabled
 	}
 	return state, nil
+}
+
+// loadFullySharedGroups: the admin groups of listed accounts whose every
+// live admin member is listed and owned by one and the same user (only
+// groups with a listed member are scanned; nothing runs without listings).
+func (r *marketListingRepository) loadFullySharedGroups(ctx context.Context) (map[int64]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		WITH candidate AS (
+			SELECT DISTINCT ag.group_id
+			FROM account_market_listings l
+			JOIN account_groups ag ON ag.account_id = l.account_id AND ag.source = 'admin'
+			WHERE l.status = 'listed'
+		)
+		SELECT ag.group_id, min(a.owner_user_id)
+		FROM candidate c
+		JOIN account_groups ag ON ag.group_id = c.group_id AND ag.source = 'admin'
+		JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+		LEFT JOIN account_market_listings l ON l.account_id = a.id
+		GROUP BY ag.group_id
+		HAVING bool_and(COALESCE(l.status = 'listed', FALSE) AND a.owner_user_id IS NOT NULL)
+		   AND count(DISTINCT a.owner_user_id) = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var groupID, owner int64
+		if err := rows.Scan(&groupID, &owner); err != nil {
+			return nil, err
+		}
+		out[groupID] = owner
+	}
+	return out, rows.Err()
 }
 
 // AdmitMarketCandidate runs one candidate's final admission.

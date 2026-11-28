@@ -236,7 +236,15 @@ func TestMarketAdmitPlatformAndOwnerPaths(t *testing.T) {
 	require.Equal(t, "shared", admit(t, f, ownerSel, ownerReq).Reason)
 	state, err := f.market.LoadMarketDispatchState(ctx)
 	require.NoError(t, err)
-	require.Contains(t, state.ListedAdminGroupIDs, hosted, "the registry knows the owner group of a listed account")
+	require.Equal(t, owner, state.FullySharedGroups[hosted], "the registry knows the owner group is fully shared")
+	// A second, self-use member: no longer fully shared (no early read).
+	selfUse := f.account(t, owner)
+	require.NoError(t, f.accounts.BindGroups(ctx, selfUse, []int64{hosted}))
+	state, err = f.market.LoadMarketDispatchState(ctx)
+	require.NoError(t, err)
+	_, fully := state.FullySharedGroups[hosted]
+	require.False(t, fully, "mixed group")
+	require.NoError(t, f.accounts.BindGroups(ctx, selfUse, nil))
 	t.Cleanup(func() {
 		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM user_allowed_groups WHERE group_id = $1", hosted)
 	})

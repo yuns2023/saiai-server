@@ -158,10 +158,10 @@ func (m *MarketSelection) IsBuyer() bool { return m != nil && m.Class == MarketC
 type MarketDispatchState struct {
 	Enabled          bool
 	ListedAccountIDs []int64
-	// ListedAdminGroupIDs: the admin groups of the listed accounts (the
-	// owner groups that may have a shared account; a cheap guard for the
-	// early HOSTED_ACCOUNT_SHARED check).
-	ListedAdminGroupIDs []int64
+	// FullySharedGroups: admin groups whose every live admin member is
+	// listed and owned by one user (group → that user), per this poll: the
+	// local evidence for the early HOSTED_ACCOUNT_SHARED check.
+	FullySharedGroups map[int64]int64
 }
 
 // MarketSlotCache is the dual slot set (total + buyer) of listed accounts.
@@ -266,10 +266,10 @@ type MarketRuntime struct {
 	mu      sync.RWMutex
 	enabled bool
 	listed  map[int64]struct{}
-	// listedGroups: admin groups of the listed accounts.
-	listedGroups map[int64]struct{}
-	loaded       bool
-	lastWarn     time.Time
+	// fullyShared: FullySharedGroups of the last poll.
+	fullyShared map[int64]int64
+	loaded      bool
+	lastWarn    time.Time
 	// pending: listings started in this process and not yet confirmed by a
 	// poll that began after they ended (treated as listed meanwhile).
 	pending map[int64]map[uint64]*marketPendingListing
@@ -389,14 +389,14 @@ func (r *MarketRuntime) setState(state *MarketDispatchState, readStarted time.Ti
 	for _, id := range state.ListedAccountIDs {
 		listed[id] = struct{}{}
 	}
-	listedGroups := make(map[int64]struct{}, len(state.ListedAdminGroupIDs))
-	for _, id := range state.ListedAdminGroupIDs {
-		listedGroups[id] = struct{}{}
+	fullyShared := make(map[int64]int64, len(state.FullySharedGroups))
+	for groupID, owner := range state.FullySharedGroups {
+		fullyShared[groupID] = owner
 	}
 	r.mu.Lock()
 	r.enabled = state.Enabled
 	r.listed = listed
-	r.listedGroups = listedGroups
+	r.fullyShared = fullyShared
 	r.loaded = true
 	for id, entries := range r.pending {
 		for token, p := range entries {
@@ -480,18 +480,18 @@ func (r *MarketRuntime) marketListingPending(accountID int64) bool {
 	return false
 }
 
-// groupHasListedAccount: per the last registry poll, an account with an
-// admin membership in the group is listed (a cheap guard before the
-// authoritative all-shared read; a registry that never loaded knows none, so
-// a site without listings never reads).
-func (r *MarketRuntime) groupHasListedAccount(groupID int64) bool {
+// groupFullySharedBy: per the last registry poll, every live admin member
+// of the group is listed and owned by userID (local evidence only; a
+// registry that never loaded, or has not seen the latest change yet, says
+// no and the exhaustion-time check covers the request).
+func (r *MarketRuntime) groupFullySharedBy(groupID, userID int64) bool {
 	if r == nil {
 		return false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.listedGroups[groupID]
-	return ok
+	owner, ok := r.fullyShared[groupID]
+	return ok && owner == userID
 }
 
 // marketAccountListed: cached copy or registry.
@@ -1436,13 +1436,23 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		priceModel = claude.NormalizeModelID(strings.TrimSpace(mappedModel))
 		group := s.groupForMarket(ctx, &sel.GroupID)
 		if group == nil {
-			if g, err := s.resolveGroupByID(ctx, sel.GroupID); err == nil {
+			g, err := s.resolveGroupByID(ctx, sel.GroupID)
+			switch {
+			case err == nil:
 				group = g
+			case errors.Is(err, ErrGroupNotFound):
+				// Confirmed gone: lost eligibility (not_priced below).
+			default:
+				// Eligibility unknown (read failed): the ordinary failover.
+				logMarketAdmission(ctx, sel, "group_read_error", err)
+				return ErrMarketAdmissionRejected
 			}
 		}
 		// Re-evaluated now (not the selection-time cache): a price or rate
 		// that changed while waiting is caught here. The group rates are
-		// re-checked once more against the admission snapshot below.
+		// re-checked once more against the admission snapshot below. A
+		// missing group or a missing / zero price is confirmed lost
+		// eligibility.
 		var price *MarketPriceSnapshot
 		ok := group != nil
 		if ok {
@@ -1466,6 +1476,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		// A listing write of this process is in progress (the database
 		// still says unlisted until it commits): never the owner path.
 		logMarketAdmission(ctx, sel, marketRefusalPending, nil)
+		markMarketSharedEvidence(ctx)
 		return ErrMarketListingInvalidated
 	}
 
@@ -1510,6 +1521,7 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 	if sel.Class == MarketClassOwner && s.market.marketListingPending(account.ID) {
 		// A listing of this process started while the check ran.
 		logMarketAdmission(ctx, sel, marketRefusalPending, nil)
+		markMarketSharedEvidence(ctx)
 		return ErrMarketListingInvalidated
 	}
 	if ctx.Err() != nil {
@@ -1738,7 +1750,7 @@ func marketAdmissionFailoverError(cause error) error {
 // exclusive hosted group is shared by the Key's user, so the owner must
 // switch back to 自用. Called before the request waits for anything (early
 // check, evidence=false: the database is read only when the last registry
-// poll saw a listed account in the group) and where a selection is
+// poll saw the whole group listed by this user) and where a selection is
 // exhausted after market refusals (evidence=true: this request already saw
 // the listing, the local registry may lag). Any doubt (no market, not such a
 // group, read error) is false: the caller keeps its existing path. Logs one
@@ -1751,7 +1763,7 @@ func (s *GatewayService) HostedAccountSharedBlocked(ctx context.Context, apiKey 
 	if group == nil || group.ID != *apiKey.GroupID || group.MarketTier || !group.UsesHostedUsage() || !group.IsExclusive {
 		return false
 	}
-	if !evidence && !s.market.groupHasListedAccount(group.ID) {
+	if !evidence && !s.market.groupFullySharedBy(group.ID, apiKey.UserID) {
 		return false
 	}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)

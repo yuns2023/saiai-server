@@ -660,7 +660,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// Owner's hosted Key whose accounts are all shared: answer 403 before
 	// any wait can flush an SSE ping (the database is read only when the
-	// last registry poll saw a listed account in the Key's group).
+	// last registry poll saw the whole group listed by this user).
 	if h.writeHostedAccountShared(c, apiKey, streamStarted, false) {
 		return
 	}
@@ -1054,8 +1054,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				case FailoverCanceled:
 					return
 				default: // FailoverExhausted
-					if fs.OnlyMarketInvalidated() && errors.Is(err, service.ErrNoAvailableAccounts) &&
-						h.writeHostedAccountShared(c, currentAPIKey, streamStarted, true) {
+					// Only after this owner request saw a candidate refused as
+					// shared (or a listing in progress), with no other failure.
+					if fs.OnlyMarketInvalidated() && service.MarketSharedEvidence(c.Request.Context()) &&
+						errors.Is(err, service.ErrNoAvailableAccounts) && h.writeHostedAccountShared(c, currentAPIKey, streamStarted, true) {
 						return
 					}
 					if fs.LastFailoverErr != nil {
