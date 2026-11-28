@@ -212,11 +212,96 @@ func TestMarketSelectionChangedOwnerAndPlainAreSelfUse(t *testing.T) {
 	stale := plain
 	stale.MarketListing = &AccountMarketListing{GroupID: mktTier, OwnerUserID: mktOwner, Version: 3}
 	env.rt.SetState(&MarketDispatchState{Enabled: true})
-	require.False(t, env.svc.marketSelectionChanged(ctx, &stale, &plain), "listed copy → fresh unlisted copy: still self-use")
 	require.False(t, env.svc.marketSelectionChanged(ctx, &plain, &stale), "unlisted → stale listed fresh copy: decided at the boundary")
+	class, _ := env.svc.classifyMarketCandidate(ctx, &plain)
+	require.Equal(t, MarketClassNone, class)
+	require.False(t, env.svc.marketSelectionChanged(ctx, &stale, &plain), "listed copy → fresh unlisted copy: still self-use")
+	class, sel := env.svc.classifyMarketCandidate(ctx, &plain)
+	require.Equal(t, MarketClassOwner, class, "the listed evidence of the selected copy is kept: the owner check still runs")
+	require.Equal(t, MarketClassOwner, sel.Class)
 	token := env.rt.BeginListing(1)
-	require.True(t, env.svc.marketSelectionChanged(ctx, &plain, &plain), "a pending listing drops the candidate")
+	require.True(t, env.svc.marketSelectionChanged(ctx, &plain, &plain), "a listing write in progress drops the candidate")
 	env.rt.EndListing(1, token)
+	require.False(t, env.rt.marketListingPending(1), "ended: the database check decides from now on")
+	require.True(t, env.rt.IsListed(1), "but the account stays possibly listed until a later poll")
+}
+
+// The bucket copy says listed, the fresh copy (written back without the
+// market fields) and the registry say unlisted: the selection keeps the
+// owner class for the fresh copy, and the dispatch boundary refuses it when
+// the database says listed (and serves it when it says unlisted).
+func TestMarketOwnerToPlainFreshCopyKeepsDatabaseCheck(t *testing.T) {
+	env, upstream, acc, dev := ownerForwardEnv(t, true)
+	env.rt.SetState(&MarketDispatchState{Enabled: true})
+	bucket := *acc
+	fresh := *acc
+	fresh.MarketListing, fresh.MarketGroupIDs = nil, nil
+	env.store.facts = listedFacts(env.store.facts)
+
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	hosted := mktGroups()[mktHosted]
+	key := ownerKey(mktOwner, mktHosted)
+	key.Group = hosted
+	ctx := WithMarketDispatch(WithAccountUserID(c.Request.Context(), mktOwner), key)
+	sctx := withMarketRequestedModel(withMarketSelectionGroup(context.WithValue(ctx, ctxkey.Group, hosted), ptr64(mktHosted)), "claude-fable-5")
+	require.False(t, env.svc.marketSelectionChanged(sctx, &bucket, &fresh))
+	res, err := env.svc.attachMarketSelection(sctx, &AccountSelectionResult{Account: &fresh, Acquired: true, ReleaseFunc: func() {}})
+	require.NoError(t, err)
+	require.NotNil(t, res.Market)
+	require.Equal(t, MarketClassOwner, res.Market.Class)
+
+	fctx, _ := WithMarketAttempt(ctx, res.Market)
+	_, err = env.svc.Forward(fctx, c, &fresh, parsed)
+	requireMarketInvalidated(t, err, true)
+	require.Zero(t, upstream.calls)
+	require.Empty(t, dev.classes)
+	require.Len(t, env.store.requests, 1, "the database decided")
+}
+
+// A listing of this process starts after the owner candidate was selected:
+// the owner admission refuses (before the device registration and before
+// the send); a resend after an upstream error re-checks the database.
+func TestMarketOwnerAttemptRefusedWhileListingRuns(t *testing.T) {
+	env, upstream, acc, dev := ownerForwardEnv(t, true)
+	token := env.rt.BeginListing(acc.ID)
+	c, _, parsed := claudeCodeCacheSafeRetryContext(t)
+	ctx, _ := ownerForwardCtx(c.Request.Context(), ownerKey(mktOwner, mktHosted))
+	_, err := env.svc.Forward(ctx, c, acc, parsed)
+	requireMarketInvalidated(t, err, true)
+	require.Zero(t, upstream.calls)
+	require.Empty(t, dev.classes)
+	require.Empty(t, env.store.requests, "refused before any database read")
+	env.rt.AbortListing(acc.ID, token)
+
+	// Owner resend after a 5xx: the listing committed meanwhile is seen.
+	calls := 0
+	unlisted := env.store.facts
+	env.store.facts = func(req *MarketAdmissionRequest) *MarketAuthoritativeFacts {
+		calls++
+		if calls <= 2 {
+			return unlisted(req)
+		}
+		return listedFacts(unlisted)(req)
+	}
+	require.True(t, env.svc.marketOwnerResendRefused(func() context.Context {
+		c2, _, _ := claudeCodeCacheSafeRetryContext(t)
+		x, _ := ownerForwardCtx(c2.Request.Context(), ownerKey(mktOwner, mktHosted))
+		calls = 2
+		return x
+	}(), acc), "the resend re-check reads the database and refuses")
+	plainCtx, _ := WithMarketAttempt(context.Background(), nil)
+	require.False(t, env.svc.marketOwnerResendRefused(plainCtx, acc), "non-owner attempts keep their admission")
+}
+
+func TestMarketRefusalInvalidationSet(t *testing.T) {
+	for _, r := range []string{marketRefusalShared, marketRefusalPending, "not_listed", "not_market_member", "listing_changed",
+		"plan_mismatch", "owner_changed", "owner_version", "market_disabled"} {
+		require.True(t, marketRefusalInvalidatesListing(r), r)
+	}
+	for _, r := range []string{"account_inactive", "account_missing", "group_inactive", "not_priced", "not_allowed", "owner_inactive",
+		"capacity_changed", "device_policy_changed", "not_owner", "not_owner_group", "ineligible_max_sessions_enabled", "rejected"} {
+		require.False(t, marketRefusalInvalidatesListing(r), r)
+	}
 }
 
 func TestMarketBuyerRefusalAfterOwnerTakeBackIsInvalidated(t *testing.T) {

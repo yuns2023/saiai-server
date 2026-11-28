@@ -36,6 +36,9 @@ func authOnlyGroupFields(g *service.Group) service.Group {
 	out.Description = ""
 	out.ShowAccountQuota = false
 	out.SubscriptionRevenueRate = nil
+	// The plan is admin-only (views, validation, the final admission reads
+	// it from the database); the request path never needs it.
+	out.MarketPlan = nil
 	out.SoraStorageQuotaBytes = 0
 	out.DefaultValidityDays = 0
 	out.SortOrder = 0

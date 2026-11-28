@@ -485,10 +485,10 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	require.Equal(t, 0, repo.cooldowns[len(repo.cooldowns)-1], "the current setting is used (0 applies at once)")
 	delete(settings.values, SettingKeyMarketModeSwitchCooldownHours)
 
-	// The PUT passes the cooldown and the optional tier through.
+	// The PUT passes the optional tier through (the cooldown setting is
+	// read inside the repository transaction).
 	_, err = svc.OwnerSet(ctx, 7, 11, 0, true)
 	require.NoError(t, err)
-	require.Equal(t, 24, repo.lastOwnerSet.CooldownHours)
 	require.Zero(t, repo.lastOwnerSet.GroupID)
 
 	// Paused owner: listing refused with the reason; unlisting allowed.

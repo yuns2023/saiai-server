@@ -1043,7 +1043,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				case FailoverCanceled:
 					return
 				default: // FailoverExhausted
-					if fs.MarketInvalidatedSeen && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+					if fs.OnlyMarketInvalidated() && errors.Is(err, service.ErrNoAvailableAccounts) &&
+						h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
 						return
 					}
 					if fs.LastFailoverErr != nil {
@@ -1369,7 +1370,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					case FailoverContinue:
 						continue
 					case FailoverExhausted:
-						if fs.MarketInvalidatedSeen && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+						if fs.OnlyMarketInvalidated() && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
 							return
 						}
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)

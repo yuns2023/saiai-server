@@ -13,9 +13,9 @@
 -- account_market_listings.plan: the account's plan, set by the admin (self-
 -- onboard approval or the admin sharing settings). The allowed tiers are
 -- derived from it on every read and write; allowed_group_ids is no longer an
--- authorization source (new writes store only the selected tier there, which
--- keeps the listed CHECK satisfied). account_market_listing_events.plan keeps
--- the history complete.
+-- authorization source: it is normalized here (and written from now on) as
+-- a mirror of the selected tier, which keeps the listed CHECK satisfied.
+-- account_market_listing_events.plan keeps the history complete.
 --
 -- Reservations: the server ignores reserved_* (selection and final
 -- admission treat them as 0). Existing rows are normalized to 0 and the
@@ -61,6 +61,13 @@ ALTER TABLE account_market_listings
 UPDATE account_market_listings
 SET reserved_concurrency = 0, reserved_devices = 0, reserved_admissions = 0
 WHERE reserved_concurrency <> 0 OR reserved_devices <> 0 OR reserved_admissions <> 0;
+
+-- allowed_group_ids only mirrors the selection from now on (listed CHECK of
+-- 134: listed ⇒ selected ∈ allowed; revoked rows have no selection).
+UPDATE account_market_listings
+SET allowed_group_ids = CASE WHEN selected_group_id IS NULL THEN '{}'::bigint[] ELSE ARRAY[selected_group_id] END
+WHERE allowed_group_ids IS DISTINCT FROM
+      (CASE WHEN selected_group_id IS NULL THEN '{}'::bigint[] ELSE ARRAY[selected_group_id] END);
 
 CREATE INDEX IF NOT EXISTS account_market_listing_events_owner_switch_idx
     ON account_market_listing_events (account_id, created_at DESC, id DESC)

@@ -156,8 +156,10 @@ never lists. Deleting the account revokes.
   A request for the current state (same tier) is an idempotent 200 and uses
   no cooldown. Admin revoke / re-grant, owner cleared, tier deleted, demoted
   or re-planned and the withdrawal unlist neither count nor reset it. A
-  smaller setting (or 0) applies at once; reaching the boundary exactly is
-  allowed. While `market_enabled` is off, switching back to 自用 is always
+  smaller setting (or 0) applies at once (it is read after the account
+  lock); reaching the boundary exactly is allowed. A request for the state
+  the account is already shared in is answered 200 before any other check
+  (also with the switch off or the tier inactive). While `market_enabled` is off, switching back to 自用 is always
   allowed (it still counts as a switch). Inside the cooldown:
   429 `MARKET_SWITCH_COOLDOWN`, `Retry-After: <seconds>`,
   `metadata.next_switch_at` (RFC3339).
@@ -169,14 +171,18 @@ never lists. Deleting the account revokes.
   `account_inactive`. The UI maps each to plain text, with a generic text for
   unknown codes.
 - **Using a shared account through the owner's hosted Key.** When every
-  account of the Key's own exclusive hosted group is shared by that user
-  (confirmed in the database where the selection is exhausted, first
-  selection and reselect alike), the gateway answers
+  failure of the request was such a market refusal and every account of the
+  Key's own exclusive hosted group is shared by that user (confirmed in one
+  database read where the selection is exhausted, first selection and
+  reselect alike; the read also re-checks that the group still is an owner
+  group of that user), the gateway answers
   **403 `HOSTED_ACCOUNT_SHARED`** with `x-should-retry: false` and no
   `Retry-After`: 该托管号正在共享中，请在托管页切回「自用」后再使用。 Ops
   records it as a client-side business limit; one WARN line
   `gateway.hosted_account_shared` per account per hour. Device-full,
-  quota exhaustion and database errors keep their existing errors.
+  quota exhaustion and database errors keep their existing errors. If an SSE
+  ping was already flushed (a long wait for a user slot), the same error is
+  sent as an SSE `error` event instead (status and headers are committed).
 - Earnings: summary (`frozen`, `available`, `converted_total`, `min_convert`,
   `as_of`), a keyset-paged ledger and 转入余额. Amounts are exact decimal
   strings (up to 10 decimals); the UI never converts them to floats. The cut
@@ -198,11 +204,16 @@ An account that is neither on the market nor in a tier takes exactly the old
 code path (self-use accounts the registry knows as unlisted included). An
 owner buying through a tier key is a buyer (`self_purchase`), not the owner
 path. A listing write still running in this process (before its commit the
-database still says unlisted) makes the owner path avoid the account. Every
+database still says unlisted) makes the owner path avoid the account, at
+selection and again in the owner admission and at every send. Every
 selection path (load-aware layers, direct sticky hit, fresh-copy re-check,
-wait plan after an initial-serial release) carries the owner class, and a
-plain attempt that meets a listed view at the dispatch boundary is upgraded
-to an owner attempt in the owner's group (elsewhere it reselects).
+wait plan after an initial-serial release) carries the owner class; when
+the bucket copy looked listed and the fresh copy does not, the request keeps
+the owner check for the fresh copy. A plain attempt that meets a listed view
+at the dispatch boundary is upgraded to an owner attempt in the owner's
+group (elsewhere it reselects). A same-account resend of an owner attempt
+(retry after an upstream error) confirms the owner admission in the database
+again.
 
 **Owner group.** Checked in the database on the admission snapshot: the
 group is live, active, Anthropic, standard, hosted usage on, exclusive, not
@@ -221,8 +232,14 @@ downgraded to another path. A refusal because the sharing mode or listing
 changed (owner path `shared`, buyer `not_listed`, `listing_changed`,
 `plan_mismatch`, …) reselects without the account and never switches a
 bound session to cache-read billing (the cache is rebuilt at the normal
-price) and never re-admits the account through the 503 same-account backoff;
-account-health refusals and database errors keep the generic failover.
+price), does not count as an account switch (each such account is excluded
+for the rest of the request, also across the 503 same-account backoff), and
+never replaces an earlier real failure as the error the client gets. The
+invalidating reasons are `shared`, `listing_pending`, `not_listed`,
+`not_market_member`, `listing_changed`, `plan_mismatch`, `owner_changed`,
+`owner_version` and `market_disabled`; every other refusal (account health,
+price, allowlists, capacity, device policy) and database errors keep the
+generic failover.
 
 **Final admission.** After the device check and pricing, before the first
 upstream send, a buyer attempt runs one REPEATABLE READ transaction that
@@ -482,7 +499,8 @@ earnings on one account. Each accrue can be reversed once.
   (catalog-only), two slug-format CHECKs (one scan each of `groups` and
   `account_market_listings`, both small), `reserved_*` defaults set to 0 and
   existing rows normalized to 0 (no CHECK forcing 0, rollback stays
-  possible), and a partial index on the events for the cooldown lookup.
+  possible), `allowed_group_ids` normalized to mirror the selected tier, and
+  a partial index on the events for the cooldown lookup.
   Pre-check: `SELECT count(*) FROM groups; SELECT count(*), count(*) FILTER
   (WHERE reserved_concurrency + reserved_devices + reserved_admissions > 0)
   FROM account_market_listings; SELECT count(*) FROM

@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -120,6 +121,18 @@ func TestMarketOwnerSwitchCooldown(t *testing.T) {
 	require.True(t, view.CanUnlist)
 	f.setCooldownHours(t, 24)
 
+	// Same target while the switch is off or the tier inactive: still 200.
+	f.setMarketEnabled(t, false)
+	_, err = svc.OwnerSet(ctx, owner, acc, tier, true)
+	require.NoError(t, err, "already shared: idempotent with the market off")
+	f.setMarketEnabled(t, true)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET status = 'inactive' WHERE id = $1", tier)
+	require.NoError(t, err)
+	_, err = svc.OwnerSet(ctx, owner, acc, 0, true)
+	require.NoError(t, err, "already shared: idempotent with the tier inactive")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET status = 'active' WHERE id = $1", tier)
+	require.NoError(t, err)
+
 	// Market switched off: taking the account back is always allowed.
 	f.setMarketEnabled(t, false)
 	view, err = svc.OwnerGet(ctx, owner, acc)
@@ -132,6 +145,29 @@ func TestMarketOwnerSwitchCooldown(t *testing.T) {
 	// ... and it is an effective switch: listing again waits.
 	_, err = svc.OwnerSet(ctx, owner, acc, 0, true)
 	requireCooldown(t, err, 24*time.Hour)
+
+	// The setting is read after the account lock: lowering it while the PUT
+	// waits applies to that PUT.
+	holder, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = holder.Rollback() }()
+	_, err = lockMarketAccountTx(ctx, holder, acc)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.OwnerSet(ctx, owner, acc, 0, true)
+		done <- err
+	}()
+	waitForLockWait(t)
+	f.setCooldownHours(t, 0)
+	require.NoError(t, holder.Rollback())
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("owner PUT did not finish")
+	}
+	require.Equal(t, service.MarketListingStatusListed, marketListingState(t, f, acc).Status)
 }
 
 func TestMarketOwnerSwitchCooldownIgnoresNonOwnerEvents(t *testing.T) {
@@ -410,6 +446,11 @@ func TestMigration138NormalizesReservationsAndAddsPlans(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `UPDATE account_market_listings SET reserved_concurrency = 2, reserved_devices = 3 WHERE account_id = 102`)
 	require.NoError(t, err)
+	// Legacy multi-tier permission: listed in 31 with 31 and 32 allowed;
+	// unlisted with 33 allowed and nothing selected.
+	_, err = db.ExecContext(ctx, `INSERT INTO account_market_listings (account_id, owner_user_id, allowed_group_ids, selected_group_id, status, listed_at)
+		VALUES (104, 7, '{31,32}', 31, 'listed', NOW()), (105, 7, '{33}', NULL, 'unlisted', NULL)`)
+	require.NoError(t, err)
 
 	require.NoError(t, applyMigrationsFS(ctx, db, migrations.FS))
 	require.NoError(t, applyMigrationsFS(ctx, db, migrations.FS), "re-applying is a no-op")
@@ -425,6 +466,11 @@ func TestMigration138NormalizesReservationsAndAddsPlans(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_market_listings
 		WHERE reserved_concurrency <> 0 OR reserved_devices <> 0 OR reserved_admissions <> 0`).Scan(&nonZero))
 	require.Zero(t, nonZero, "existing rows normalized")
+	var mirrored104, mirrored105 pq.Int64Array
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT allowed_group_ids FROM account_market_listings WHERE account_id = 104`).Scan(&mirrored104))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT allowed_group_ids FROM account_market_listings WHERE account_id = 105`).Scan(&mirrored105))
+	require.Equal(t, []int64{31}, []int64(mirrored104), "allowed mirrors the selection")
+	require.Empty(t, mirrored105)
 	_, err = db.ExecContext(ctx, `INSERT INTO account_market_listings (account_id, owner_user_id) VALUES (103, 7)`)
 	require.NoError(t, err)
 	var r1, r2, r3 int

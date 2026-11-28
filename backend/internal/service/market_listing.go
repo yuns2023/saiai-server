@@ -220,10 +220,9 @@ type MarketOwnerSetParams struct {
 	// GroupID 0 = the only live, active tier of the plan.
 	GroupID int64
 	Listed  bool
-	// CooldownHours: market_mode_switch_cooldown_hours read for this request
-	// (0 = none).
-	CooldownHours int
 	// Validate runs on the locked account before listing (not on unlist).
+	// The cooldown setting is read inside the transaction, after the lock
+	// and the idempotency check.
 	Validate func(account *Account) error
 	// BeforeListWrite runs once every check passed, right before the listing
 	// writes; ListingRolledBack runs when the transaction is then rolled

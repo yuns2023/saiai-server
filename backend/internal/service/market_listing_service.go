@@ -223,11 +223,7 @@ func (s *MarketListingService) OwnerGet(ctx context.Context, ownerUserID, accoun
 // while the market is off is always allowed; a request for the current
 // state is an idempotent no-op.
 func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accountID, groupID int64, listed bool) (*OwnerMarketView, error) {
-	cfg, err := s.settings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var beforeWrite, rolledBack func()
+	var beforeWrite, rolledBack, ended func()
 	if listed && s.listings != nil {
 		// Marked locally only once every check passed (inside the locked
 		// transaction, right before the writes); cleared at once on a
@@ -244,21 +240,21 @@ func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accoun
 				s.listings.AbortListing(accountID, token)
 			}
 		}
-		defer func() {
+		ended = func() {
 			if marked && !finished {
 				finished = true
 				s.listings.EndListing(accountID, token)
 			}
-		}()
+		}
+		defer ended()
 	}
-	if _, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
+	_, err := s.repo.OwnerSet(ctx, MarketOwnerSetParams{
 		BeforeListWrite:   beforeWrite,
 		ListingRolledBack: rolledBack,
 		OwnerUserID:       ownerUserID,
 		AccountID:         accountID,
 		GroupID:           groupID,
 		Listed:            listed,
-		CooldownHours:     cfg.ModeSwitchCooldownHours,
 		Validate: func(account *Account) error {
 			if reason := marketListBlockedReason(account); reason != "" {
 				return NewMarketAccountNotEligibleError(reason)
@@ -268,7 +264,13 @@ func (s *MarketListingService) OwnerSet(ctx context.Context, ownerUserID, accoun
 			}
 			return nil
 		},
-	}); err != nil {
+	})
+	if ended != nil {
+		// The transaction is over: from now on the owner path's database
+		// check decides (no avoidance while the view is read back).
+		ended()
+	}
+	if err != nil {
 		return nil, err
 	}
 	return s.OwnerGet(ctx, ownerUserID, accountID)

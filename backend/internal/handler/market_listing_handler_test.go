@@ -178,7 +178,6 @@ func TestOwnerMarketHandlerJSONAndAuth(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, 1, repo.sets)
 	require.Zero(t, repo.lastSet.GroupID, "omitted group_id: the plan's only tier")
-	require.Equal(t, 24, repo.lastSet.CooldownHours)
 	require.Contains(t, w.Body.String(), `"status":"listed"`)
 	require.Contains(t, w.Body.String(), `"mode":"shared"`)
 	w = httptest.NewRecorder()

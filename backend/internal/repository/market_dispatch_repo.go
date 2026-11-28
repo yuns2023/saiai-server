@@ -253,7 +253,10 @@ func (r *marketListingRepository) CountMarketTierPlatformMembers(ctx context.Con
 // HostedGroupSharedAccounts reads, in one statement, the live admin member
 // accounts of groupID (total) and the ids of those whose listing is listed
 // and whose current owner is userID (the HOSTED_ACCOUNT_SHARED decision:
-// every account the owner's hosted Key could use is shared).
+// every account the owner's hosted Key could use is shared). A group that is
+// not (any more) an owner group of userID (marketOwnerGroupQuery: live,
+// active, hosted, exclusive, only this user, every member owned by them)
+// yields 0 accounts, so no 403 is derived from a stale Key snapshot.
 func (r *marketListingRepository) HostedGroupSharedAccounts(ctx context.Context, groupID, userID int64) (int, []int64, error) {
 	var (
 		total  int
@@ -265,7 +268,7 @@ func (r *marketListingRepository) HostedGroupSharedAccounts(ctx context.Context,
 		FROM account_groups ag
 		JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
 		LEFT JOIN account_market_listings l ON l.account_id = a.id
-		WHERE ag.group_id = $1 AND ag.source = 'admin'`,
+		WHERE ag.group_id = $1 AND ag.source = 'admin' AND (`+marketOwnerGroupQuery+`)`,
 		[]any{groupID, userID}, &total, &shared)
 	if err != nil {
 		return 0, nil, err

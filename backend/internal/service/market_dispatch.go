@@ -94,14 +94,21 @@ const (
 	HostedAccountSharedMessage   = "该托管号正在共享中，请在托管页切回「自用」后再使用。"
 	// marketRefusalShared: the owner candidate is listed in the database.
 	marketRefusalShared = "shared"
+	// marketRefusalPending: a listing write of this process for the owner
+	// candidate is in progress.
+	marketRefusalPending = "listing_pending"
 )
 
-// marketRefusalKeepsGenericFailover: refusals about the account's health
-// (not its sharing mode) keep the generic failover (cache-read billing on a
-// bound session, same-account backoff) exactly as before.
-func marketRefusalKeepsGenericFailover(reason string) bool {
+// marketRefusalInvalidatesListing: the final-admission refusals that mean
+// the candidate's sharing mode or listing changed (owner switched, listing
+// moved, revoked, re-planned, market off, owner changed). They reselect
+// without the account (MarketInvalidated); every other refusal (account
+// health, price, allowlists, capacity or device policy) keeps the generic
+// failover exactly as before.
+func marketRefusalInvalidatesListing(reason string) bool {
 	switch reason {
-	case "account_inactive", "account_missing", "group_inactive":
+	case marketRefusalShared, marketRefusalPending, "not_listed", "not_market_member", "listing_changed",
+		"plan_mismatch", "owner_changed", "owner_version", "market_disabled":
 		return true
 	}
 	return false
@@ -442,22 +449,29 @@ func (r *MarketRuntime) IsListed(accountID int64) bool {
 }
 
 // marketListingPending: a listing transaction of this process for the
-// account has started and was not yet confirmed by a later registry poll
-// (BeginListing). The owner path avoids such an account: the database may
-// still say unlisted until that transaction commits.
+// account has started and not ended yet (BeginListing without EndListing /
+// AbortListing). The owner path avoids such an account: the database still
+// says unlisted until that transaction commits. Once it ended (committed or
+// unknown) the mark only keeps the account "possibly listed" until a later
+// poll (marketAccountListed), and the owner path's database check decides.
 func (r *MarketRuntime) marketListingPending(accountID int64) bool {
 	if r == nil {
 		return false
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.pending[accountID]
-	return ok
+	for _, p := range r.pending[accountID] {
+		if p.endedAt.IsZero() {
+			return true
+		}
+	}
+	return false
 }
 
 // anyListingKnown: the registry knows at least one listed or pending
-// account, or never loaded (a cheap guard before authoritative reads that
-// only matter when something is shared).
+// account (a cheap guard before authoritative reads that only matter when
+// something is shared; a registry that never loaded knows none, so a site
+// without listings never reads).
 func (r *MarketRuntime) anyListingKnown() bool {
 	if r == nil {
 		return false
@@ -503,11 +517,14 @@ type marketAttemptKey struct{}
 type MarketDispatch struct {
 	APIKey *APIKey
 
-	mu        sync.Mutex
-	leases    map[int64]string
-	priceKey  string
-	priceSnap *MarketPriceSnapshot
-	priceDone bool
+	mu     sync.Mutex
+	leases map[int64]string
+	// ownerCheck: accounts one copy of which looked listed during this
+	// selection (the owner path's database check must run for them).
+	ownerCheck map[int64]struct{}
+	priceKey   string
+	priceSnap  *MarketPriceSnapshot
+	priceDone  bool
 }
 
 // WithMarketDispatch marks a request as market-capable for apiKey (the Key
@@ -528,6 +545,32 @@ func marketDispatchFromContext(ctx context.Context) *MarketDispatch {
 		return nil
 	}
 	return d
+}
+
+// markMarketOwnerCheck keeps "possibly listed" for an account for the rest
+// of this request's selection and dispatch.
+func markMarketOwnerCheck(ctx context.Context, accountID int64) {
+	d := marketDispatchFromContext(ctx)
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	if d.ownerCheck == nil {
+		d.ownerCheck = map[int64]struct{}{}
+	}
+	d.ownerCheck[accountID] = struct{}{}
+	d.mu.Unlock()
+}
+
+func marketOwnerCheckMarked(ctx context.Context, accountID int64) bool {
+	d := marketDispatchFromContext(ctx)
+	if d == nil {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, ok := d.ownerCheck[accountID]
+	return ok
 }
 
 // MarketAttempt is one dispatch attempt: the selection expectation in, the
@@ -656,7 +699,7 @@ func (s *GatewayService) classifyMarketCandidateInGroup(ctx context.Context, acc
 	if account == nil {
 		return MarketClassExcluded, nil
 	}
-	listed := s.marketAccountListed(account)
+	listed := s.marketAccountListed(account) || marketOwnerCheckMarked(ctx, account.ID)
 	if s.isRunModeSimple() {
 		if listed {
 			return MarketClassExcluded, nil
@@ -847,10 +890,13 @@ func (s *GatewayService) marketSelectionChanged(ctx context.Context, selected, f
 	}
 	a, selA := s.classifyMarketCandidateInGroup(ctx, selected, groupID, false)
 	if marketOwnerOrNone(a) && marketOwnerOrNone(b) {
-		// Self-use either way: an owner candidate (possibly stale listed
-		// view) and a plain one both end in the same owner-group dispatch;
-		// the dispatch boundary decides on the fresh copy, so a stale
-		// "listed" view never drops a self-use account.
+		// Self-use either way: a stale "listed" view never drops a self-use
+		// account. The listed evidence of either copy is kept for this
+		// request, so the dispatch boundary still runs the owner's database
+		// check on the fresh copy.
+		if a == MarketClassOwner && b == MarketClassNone {
+			markMarketOwnerCheck(ctx, fresh.ID)
+		}
 		return false
 	}
 	if a != b {
@@ -1160,9 +1206,10 @@ func NewFallbackWaitPlan(selection *AccountSelectionResult, timeout time.Duratio
 // Final admission (dispatch boundary)
 
 // marketGate runs at the start of Forward: a listed account or a market
-// selection must come with a matching attempt; anything else (a listed
-// account reached without a market selection, a selection for another
-// account) is refused before any upstream work.
+// selection must come with a matching attempt. A plain attempt on a
+// possibly-listed account is upgraded to an owner attempt in the owner's own
+// hosted group (database checks follow) and reselects anywhere else; a
+// selection for another account is refused before any upstream work.
 func (s *GatewayService) marketGate(ctx context.Context, account *Account) (*MarketAttempt, error) {
 	attempt := marketAttemptFromContext(ctx)
 	var sel *MarketSelection
@@ -1231,11 +1278,32 @@ func marketDeviceAdmissionFor(ctx context.Context, account *Account) *MarketDevi
 	return nil
 }
 
-// marketListedWithoutAdmission: right before a first send, an attempt
-// without a buyer/owner market admission whose account is now listed (local
-// registry or cached copy only; no DB/Redis round trip).
+// marketListedWithoutAdmission: right before a send, an attempt without a
+// buyer/owner market admission whose account is now listed (local registry
+// or cached copy only; no DB/Redis round trip), or an owner attempt whose
+// account has a listing write of this process in progress.
 func (s *GatewayService) marketListedWithoutAdmission(ctx context.Context, account *Account) bool {
-	return account != nil && marketDeviceAdmissionFor(ctx, account) == nil && s.marketAccountListed(account)
+	if account == nil {
+		return false
+	}
+	adm := marketDeviceAdmissionFor(ctx, account)
+	if adm == nil {
+		return s.marketAccountListed(account)
+	}
+	return adm.Class == MarketDeviceClassOwner && s.market.marketListingPending(account.ID)
+}
+
+// marketOwnerResendRefused: before a same-account resend of an owner
+// attempt (retry after an upstream error), the owner admission is confirmed
+// again in the database, so a listing committed meanwhile is never used by
+// a new send. Other attempts: false (buyers keep their admission).
+func (s *GatewayService) marketOwnerResendRefused(ctx context.Context, account *Account) bool {
+	attempt := marketAttemptFromContext(ctx)
+	if attempt == nil || attempt.Selection == nil || attempt.Selection.Class != MarketClassOwner || account == nil ||
+		attempt.Selection.AccountID != account.ID {
+		return false
+	}
+	return s.finalizeMarketAdmission(ctx, account, attempt, "") != nil
 }
 
 // markMarketDeviceAdmitted records a successful class-aware device
@@ -1309,6 +1377,12 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 		logMarketAdmission(ctx, sel, "billing_group_mismatch", nil)
 		return ErrMarketAdmissionRejected
 	}
+	if sel.Class == MarketClassOwner && s.market.marketListingPending(account.ID) {
+		// A listing write of this process is in progress (the database
+		// still says unlisted until it commits): never the owner path.
+		logMarketAdmission(ctx, sel, marketRefusalPending, nil)
+		return ErrMarketListingInvalidated
+	}
 
 	admitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
 	verdict, err := s.market.store.AdmitMarketCandidate(admitCtx, req, func(f *MarketAuthoritativeFacts) string {
@@ -1340,9 +1414,14 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 			reason = verdict.Reason
 		}
 		logMarketAdmission(ctx, sel, reason, nil)
-		if verdict == nil || marketRefusalKeepsGenericFailover(reason) {
-			return ErrMarketAdmissionRejected
+		if verdict != nil && marketRefusalInvalidatesListing(reason) {
+			return ErrMarketListingInvalidated
 		}
+		return ErrMarketAdmissionRejected
+	}
+	if sel.Class == MarketClassOwner && s.market.marketListingPending(account.ID) {
+		// A listing of this process started while the check ran.
+		logMarketAdmission(ctx, sel, marketRefusalPending, nil)
 		return ErrMarketListingInvalidated
 	}
 	if ctx.Err() != nil {

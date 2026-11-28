@@ -895,7 +895,7 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 		if enabled {
 			// With the market off a take-back is always allowed (the account
 			// could neither sell nor be used otherwise).
-			if err := checkOwnerSwitchCooldownTx(ctx, tx, p.AccountID, p.CooldownHours); err != nil {
+			if err := checkOwnerSwitchCooldownTx(ctx, tx, p.AccountID); err != nil {
 				return nil, err
 			}
 		}
@@ -903,6 +903,16 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 			return nil, err
 		}
 		return r.commitListing(ctx, tx, p.AccountID)
+	}
+
+	if current != nil && current.Status == service.MarketListingStatusListed &&
+		(p.GroupID <= 0 || equalOptionalInt64(current.SelectedGroupID, &p.GroupID)) {
+		// Already shared (in this tier): idempotent, whatever the switch,
+		// the tier status or the account state say now.
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return current, nil
 	}
 
 	var enabled string
@@ -960,7 +970,7 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 			return nil, err
 		}
 	}
-	if err := checkOwnerSwitchCooldownTx(ctx, tx, p.AccountID, p.CooldownHours); err != nil {
+	if err := checkOwnerSwitchCooldownTx(ctx, tx, p.AccountID); err != nil {
 		return nil, err
 	}
 
@@ -995,8 +1005,16 @@ func (r *marketListingRepository) OwnerSet(ctx context.Context, p service.Market
 }
 
 // checkOwnerSwitchCooldownTx refuses an owner switch inside the cooldown
-// (429 MARKET_SWITCH_COOLDOWN with next_switch_at in database time).
-func checkOwnerSwitchCooldownTx(ctx context.Context, q sqlQueryer, accountID int64, cooldownHours int) error {
+// (429 MARKET_SWITCH_COOLDOWN with next_switch_at in database time). The
+// setting is read here, after the account lock, so a change saved while the
+// request waited applies.
+func checkOwnerSwitchCooldownTx(ctx context.Context, q sqlQueryer, accountID int64) error {
+	var raw sql.NullString
+	if err := scanSingleRow(ctx, q, "SELECT value FROM settings WHERE key = $1",
+		[]any{service.SettingKeyMarketModeSwitchCooldownHours}, &raw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	cooldownHours := service.ParseMarketSettings(map[string]string{service.SettingKeyMarketModeSwitchCooldownHours: raw.String}).ModeSwitchCooldownHours
 	next, now, err := marketOwnerSwitchCooldownTx(ctx, q, accountID, cooldownHours)
 	if err != nil {
 		return err

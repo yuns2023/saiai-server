@@ -5867,9 +5867,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := marketDispatchCancelled(ctx); err != nil {
 			return nil, err
 		}
-		if s.marketListedWithoutAdmission(ctx, account) {
+		if s.marketListedWithoutAdmission(ctx, account) || (attempt > 1 && s.marketOwnerResendRefused(ctx, account)) {
 			// Listed while this non-market attempt waited (e.g. in device
-			// registration): never send through it.
+			// registration), or an owner attempt whose account is being /
+			// was listed before this resend: never send through it.
 			if replayResp != nil {
 				// A same-account replay round: end with the response that
 				// asked for it, exactly as if no replay were allowed.

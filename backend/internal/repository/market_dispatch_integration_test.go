@@ -243,8 +243,16 @@ func TestMarketAdmitPlatformAndOwnerPaths(t *testing.T) {
 	require.Equal(t, []int64{listed}, shared)
 	total, shared, err = f.market.HostedGroupSharedAccounts(ctx, hosted, other)
 	require.NoError(t, err)
-	require.Equal(t, 1, total)
-	require.Empty(t, shared, "only the user's own listed accounts count")
+	require.Zero(t, total, "not an owner group of that user: nothing to report")
+	require.Empty(t, shared)
+	// The group stopped being a hosted group after the Key snapshot: no 403.
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET hosted_usage_enabled = FALSE WHERE id = $1", hosted)
+	require.NoError(t, err)
+	total, _, err = f.market.HostedGroupSharedAccounts(ctx, hosted, owner)
+	require.NoError(t, err)
+	require.Zero(t, total)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE groups SET hosted_usage_enabled = TRUE WHERE id = $1", hosted)
+	require.NoError(t, err)
 
 	// Opposite timing 1: a listing transaction not yet committed — the
 	// database still says unlisted (the gateway avoids such an account
