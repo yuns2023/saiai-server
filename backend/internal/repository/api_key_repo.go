@@ -702,6 +702,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		ShowAccountQuota:                 g.ShowAccountQuota,
 		HostedUsageEnabled:               g.HostedUsageEnabled,
 		MarketTier:                       g.MarketTier,
+		MarketPlan:                       g.MarketPlan,
 		Status:                           g.Status,
 		Hydrated:                         true,
 		RequiredLevelID:                  g.RequiredLevelID,

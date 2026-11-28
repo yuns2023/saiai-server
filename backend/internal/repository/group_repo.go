@@ -88,6 +88,7 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetShowAccountQuota(groupIn.ShowAccountQuota).
 		SetHostedUsageEnabled(groupIn.HostedUsageEnabled).
 		SetMarketTier(groupIn.MarketTier).
+		SetNillableMarketPlan(groupIn.MarketPlan).
 		SetNillableRequiredLevelID(groupIn.RequiredLevelID).
 		SetStatus(groupIn.Status).
 		SetSubscriptionType(groupIn.SubscriptionType).
@@ -216,9 +217,12 @@ func (r *groupRepository) updateOnce(ctx context.Context, groupIn *service.Group
 		defer func() { _ = tx.Rollback() }()
 		client = tx.Client()
 	}
-	var wasMarketTier bool
-	if err := scanSingleRow(ctx, client, "SELECT market_tier FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
-		[]any{groupIn.ID}, &wasMarketTier); err != nil {
+	var (
+		wasMarketTier bool
+		oldPlan       sql.NullString
+	)
+	if err := scanSingleRow(ctx, client, "SELECT market_tier, market_plan FROM groups WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+		[]any{groupIn.ID}, &wasMarketTier, &oldPlan); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ownTx, service.ErrGroupNotFound
 		}
@@ -319,6 +323,12 @@ func (r *groupRepository) updateOnce(ctx context.Context, groupIn *service.Group
 		builder = builder.ClearImagePrice4k()
 	}
 
+	if groupIn.MarketPlan != nil {
+		builder = builder.SetMarketPlan(*groupIn.MarketPlan)
+	} else {
+		builder = builder.ClearMarketPlan()
+	}
+
 	// 处理 FallbackGroupID：nil 时清除，否则设置
 	if groupIn.FallbackGroupID != nil {
 		builder = builder.SetFallbackGroupID(*groupIn.FallbackGroupID)
@@ -352,8 +362,15 @@ func (r *groupRepository) updateOnce(ctx context.Context, groupIn *service.Group
 		}
 		return ownTx, translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
-	if wasMarketTier && !groupIn.MarketTier {
+	switch {
+	case wasMarketTier && !groupIn.MarketTier:
 		if err := marketRemoveGroupTx(ctx, client, groupIn.ID, service.MarketListingActionGroupDemoted); err != nil {
+			return ownTx, err
+		}
+	case groupIn.MarketTier && !equalNullableString(oldPlan, groupIn.MarketPlan):
+		// Re-classified: listings selected here whose plan no longer matches
+		// are unlisted like a demotion (same transaction, group row locked).
+		if err := marketReplanGroupTx(ctx, client, groupIn.ID, groupIn.MarketPlan); err != nil {
 			return ownTx, err
 		}
 	}

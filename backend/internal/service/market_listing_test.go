@@ -6,6 +6,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -52,6 +53,20 @@ func TestGroupValidateMarketTier(t *testing.T) {
 	fb := int64(9)
 	g.FallbackGroupID = &fb
 	requireMarketReason(t, g.ValidateMarketTier(), "MARKET_TIER_FALLBACK")
+
+	// Plans: slug format, and only on a tier.
+	for _, plan := range []string{"max", "pro", "t1-pro", "ultra_2", "0", "a1234567890123456789012345678901"} {
+		g := ok()
+		g.MarketPlan = &plan
+		require.NoError(t, g.ValidateMarketTier(), plan)
+	}
+	for _, plan := range []string{"", "Max", "-max", "_max", "max plan", "a12345678901234567890123456789012", "máx"} {
+		g := ok()
+		g.MarketPlan = &plan
+		requireMarketReason(t, g.ValidateMarketTier(), "MARKET_PLAN_INVALID")
+	}
+	plan := "max"
+	requireMarketReason(t, (&Group{Platform: PlatformAnthropic, MarketPlan: &plan}).ValidateMarketTier(), "MARKET_PLAN_REQUIRES_TIER")
 }
 
 // marketTierGroupRepo adds the tier guard to the fallback-chain stub.
@@ -221,24 +236,9 @@ func TestMarketAccountIneligibleReason(t *testing.T) {
 	require.Equal(t, MarketReasonProxyUnavailable, marketListBlockedReason(self))
 }
 
-func TestValidateMarketProtectionForAccount(t *testing.T) {
-	unlimited := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Concurrency: 0, Extra: map[string]any{}}
-	requireMarketReason(t, validateMarketProtectionForAccount(unlimited, MarketProtectionParams{}), "MARKET_INVALID_PARAMS")
-	acc := &Account{Platform: PlatformAnthropic, Type: AccountTypeSetupToken, Concurrency: 3,
-		Extra: map[string]any{"claude_oauth_carpool_device_limit": 5, "claude_oauth_carpool_maintenance_admissions_per_cycle": 2}}
-	p := MarketProtectionParams{ReservedConcurrency: 2, ReservedDevices: 4, ReservedAdmissions: 2}
-	require.NoError(t, validateMarketProtectionForAccount(acc, p))
-	for name, mutate := range map[string]func(*MarketProtectionParams){
-		"concurrency": func(p *MarketProtectionParams) { p.ReservedConcurrency = 3 },
-		"devices":     func(p *MarketProtectionParams) { p.ReservedDevices = 5 },
-		"admissions":  func(p *MarketProtectionParams) { p.ReservedAdmissions = 3 },
-		"negative":    func(p *MarketProtectionParams) { p.ReservedDevices = -1 },
-	} {
-		q := p
-		mutate(&q)
-		require.Error(t, validateMarketProtectionForAccount(acc, q), name)
-		requireMarketReason(t, validateMarketProtectionForAccount(acc, q), "MARKET_INVALID_PARAMS")
-	}
+func TestMarketCapacityReason(t *testing.T) {
+	require.Equal(t, MarketReasonProtectionInvalid, marketCapacityReason(&Account{Concurrency: 0}), "unlimited slots cannot be shared")
+	require.Empty(t, marketCapacityReason(&Account{Concurrency: 1}), "no reservation: one slot is enough")
 }
 
 func TestParseMarketSettings(t *testing.T) {
@@ -247,7 +247,11 @@ func TestParseMarketSettings(t *testing.T) {
 	require.True(t, def.PlatformCutRate.Equal(decimal.RequireFromString("0.2")))
 	require.Equal(t, 7, def.EarningFreezeDays)
 	require.True(t, def.MinConvertUSD.Equal(decimal.NewFromInt(1)))
-	require.Equal(t, MarketProtectionParams{ReservedConcurrency: 1, ReservedDevices: 2, ReservedAdmissions: 1}, def.DefaultProtection)
+	require.Equal(t, 24, def.ModeSwitchCooldownHours)
+	for raw, want := range map[string]int{"0": 0, "1": 1, "168": 168, "169": 24, "-1": 24, "x": 24, "": 24} {
+		require.Equal(t, want, ParseMarketSettings(map[string]string{SettingKeyMarketModeSwitchCooldownHours: raw}).ModeSwitchCooldownHours, raw)
+	}
+	require.NotContains(t, MarketSettingKeys(), "market_default_reserved_concurrency", "the reservation defaults are no longer read")
 
 	for raw, want := range map[string]string{
 		"0":       "0", // explicit 0 kept, never the default
@@ -261,9 +265,9 @@ func TestParseMarketSettings(t *testing.T) {
 		got := ParseMarketSettings(map[string]string{SettingKeyMarketPlatformCutRate: raw})
 		require.True(t, got.PlatformCutRate.Equal(decimal.RequireFromString(want)), "raw %q → %s", raw, got.PlatformCutRate)
 	}
-	zero := ParseMarketSettings(map[string]string{SettingKeyMarketEarningFreezeDays: "0", SettingKeyMarketDefaultReservedConcurrency: "0"})
+	zero := ParseMarketSettings(map[string]string{SettingKeyMarketEarningFreezeDays: "0", SettingKeyMarketModeSwitchCooldownHours: "0"})
 	require.Equal(t, 0, zero.EarningFreezeDays)
-	require.Equal(t, 0, zero.DefaultProtection.ReservedConcurrency)
+	require.Equal(t, 0, zero.ModeSwitchCooldownHours)
 	require.Equal(t, 7, ParseMarketSettings(map[string]string{SettingKeyMarketEarningFreezeDays: "91"}).EarningFreezeDays)
 	require.True(t, ParseMarketSettings(map[string]string{SettingKeyMarketMinConvertUSD: "0.001"}).MinConvertUSD.Equal(decimal.NewFromInt(1)))
 
@@ -293,11 +297,19 @@ type fakeMarketRepo struct {
 	listing      *MarketListing
 	tiers        []MarketTierOption
 	adminMembers []int64
+	nextSwitch   *time.Time
 	lastCfg      *MarketAdminConfigureParams
+	lastOwnerSet *MarketOwnerSetParams
+	tierQueries  []string
+	cooldowns    []int
 }
 
 func (f *fakeMarketRepo) GetListing(context.Context, int64) (*MarketListing, error) {
-	return f.listing, nil
+	if f.listing == nil {
+		return nil, nil
+	}
+	l := *f.listing
+	return &l, nil
 }
 func (f *fakeMarketRepo) GetAccountFacts(context.Context, int64) (*Account, error) {
 	return f.account, nil
@@ -308,8 +320,11 @@ func (f *fakeMarketRepo) GetOwnedAccountFacts(_ context.Context, owner, _ int64)
 	}
 	return f.account, nil
 }
-func (f *fakeMarketRepo) ListTierOptions(context.Context, []int64) ([]MarketTierOption, error) {
-	return f.tiers, nil
+func (f *fakeMarketRepo) ListPlanTierOptions(_ context.Context, plan, _ string, _ *int64) ([]MarketTierOption, error) {
+	f.tierQueries = append(f.tierQueries, plan)
+	out := make([]MarketTierOption, len(f.tiers))
+	copy(out, f.tiers)
+	return out, nil
 }
 func (f *fakeMarketRepo) HasAdminMembership(context.Context, int64, int64) (bool, error) {
 	return false, nil
@@ -317,31 +332,29 @@ func (f *fakeMarketRepo) HasAdminMembership(context.Context, int64, int64) (bool
 func (f *fakeMarketRepo) ListAdminMemberGroupIDs(context.Context, int64, []int64) ([]int64, error) {
 	return f.adminMembers, nil
 }
+func (f *fakeMarketRepo) NextOwnerSwitchAt(_ context.Context, _ int64, hours int) (*time.Time, error) {
+	f.cooldowns = append(f.cooldowns, hours)
+	return f.nextSwitch, nil
+}
 func (f *fakeMarketRepo) AdminConfigure(_ context.Context, p MarketAdminConfigureParams) (*MarketListing, error) {
 	f.lastCfg = &p
-	params := p.Defaults
-	if p.Merge != nil {
-		params = p.Merge(params)
-	}
-	if err := p.Validate(f.account, params); err != nil {
+	if err := p.Validate(f.account); err != nil {
 		return nil, err
 	}
-	f.listing = &MarketListing{AccountID: f.account.ID, OwnerUserID: *f.account.OwnerUserID, AllowedGroupIDs: p.AllowedGroupIDs, Status: MarketListingStatusUnlisted, Version: 1, Protection: params}
+	plan := p.Plan
+	f.listing = &MarketListing{AccountID: f.account.ID, OwnerUserID: *f.account.OwnerUserID, Plan: &plan, Status: MarketListingStatusUnlisted, Version: 1}
 	return f.listing, nil
 }
 func (f *fakeMarketRepo) AdminRevoke(context.Context, int64, int64) (*MarketListing, error) {
 	return f.listing, nil
 }
 func (f *fakeMarketRepo) OwnerSet(_ context.Context, p MarketOwnerSetParams) (*MarketListing, error) {
+	f.lastOwnerSet = &p
 	if _, err := f.GetOwnedAccountFacts(context.Background(), p.OwnerUserID, p.AccountID); err != nil {
 		return nil, err
 	}
 	if p.Listed && p.Validate != nil {
-		protection := MarketProtectionParams{}
-		if f.listing != nil {
-			protection = f.listing.Protection
-		}
-		if err := p.Validate(f.account, protection); err != nil {
+		if err := p.Validate(f.account); err != nil {
 			return nil, err
 		}
 	}
@@ -377,33 +390,48 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	view, err := svc.OwnerGet(ctx, 7, 11)
 	require.NoError(t, err)
 	require.Equal(t, MarketListingStatusNotConfigured, view.Status)
+	require.Equal(t, MarketModeSelfUse, view.Mode)
+	require.Equal(t, 24, view.CooldownHours)
 	require.Equal(t, []string{MarketReasonMarketDisabled, MarketReasonNotConfigured}, view.UnavailableReasons)
 	require.False(t, view.CanList)
+	require.False(t, view.CanUnlist)
+	require.NotNil(t, view.UpstreamWindows)
 	_, err = svc.OwnerGet(ctx, 8, 11)
 	requireMarketReason(t, err, "HOSTED_ACCOUNT_NOT_FOUND")
 
-	// Admin: defaults + partial override; validation against the account.
-	three := 3
-	admin, err := svc.AdminConfigure(ctx, 1, 11, AdminMarketListingInput{AllowedGroupIDs: []int64{4, 3, 4}, ReservedDevices: &three})
+	// Admin: the plan is the only input (slug checked before the repository).
+	admin, err := svc.AdminConfigure(ctx, 1, 11, " max ")
 	require.NoError(t, err)
-	require.Equal(t, []int64{3, 4}, repo.lastCfg.AllowedGroupIDs, "deduped and sorted")
-	require.Equal(t, 3, admin.Listing.Protection.ReservedDevices)
-	require.Equal(t, 1, admin.Listing.Protection.ReservedConcurrency)
-	tooMany := 3
-	_, err = svc.AdminConfigure(ctx, 1, 11, AdminMarketListingInput{AllowedGroupIDs: []int64{3}, ReservedConcurrency: &tooMany})
-	requireMarketReason(t, err, "MARKET_INVALID_PARAMS")
-	_, err = svc.AdminConfigure(ctx, 1, 11, AdminMarketListingInput{AllowedGroupIDs: []int64{0}})
-	requireMarketReason(t, err, "MARKET_INVALID_TIER")
+	require.Equal(t, "max", repo.lastCfg.Plan, "trimmed")
+	require.Equal(t, "max", *admin.Listing.Plan)
+	for _, bad := range []string{"", "Max", "max plan"} {
+		repo.lastCfg = nil
+		_, err = svc.AdminConfigure(ctx, 1, 11, bad)
+		requireMarketReason(t, err, "MARKET_PLAN_UNKNOWN")
+		require.Nil(t, repo.lastCfg, "refused before the repository")
+	}
 	noOwner := &fakeMarketRepo{account: &Account{ID: 12, Platform: PlatformAnthropic, Type: AccountTypeSetupToken}}
-	_, err = NewMarketListingService(noOwner, settings).AdminConfigure(ctx, 1, 12, AdminMarketListingInput{AllowedGroupIDs: []int64{3}})
+	_, err = NewMarketListingService(noOwner, settings).AdminConfigure(ctx, 1, 12, "max")
 	requireMarketReason(t, err, "MARKET_ACCOUNT_NO_OWNER")
+	// Unlimited concurrency does not block the admin, only the owner's listing.
+	repo.account.Concurrency = 0
+	_, err = svc.AdminConfigure(ctx, 1, 11, "max")
+	require.NoError(t, err)
+	repo.account.Concurrency = 3
 
 	settings.values[SettingKeyMarketEnabled] = "true"
-	repo.tiers = []MarketTierOption{{GroupID: 3, Name: "T1", RateMultiplier: 1.2, Available: true}}
+	max := "max"
+	repo.tiers = []MarketTierOption{{GroupID: 3, Name: "T2-Max", RateMultiplier: 0.3, Plan: &max, Available: true}}
 	view, err = svc.OwnerGet(ctx, 7, 11)
 	require.NoError(t, err)
 	require.True(t, view.CanList, view.UnavailableReasons)
-	require.NotNil(t, view.Protection)
+	require.Equal(t, []string{"max"}, repo.tierQueries[len(repo.tierQueries)-1:], "tiers derived from the plan")
+	require.Equal(t, "max", *view.Plan)
+	require.Equal(t, MarketModeSelfUse, view.Mode)
+	admin, err = svc.AdminGet(ctx, 11)
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, admin.Listing.AllowedGroupIDs, "listing.allowed_group_ids = the derived tiers")
+	require.Len(t, admin.AllowedTiers, 1)
 
 	// The only tier already has the account as an admin member: not listable.
 	repo.adminMembers = []int64{3}
@@ -412,17 +440,59 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	require.True(t, view.AllowedTiers[0].AdminMember)
 	require.Equal(t, []string{MarketReasonNoAllowedTier}, view.UnavailableReasons)
 	repo.adminMembers = nil
-	// Concurrency lowered below the stored reservation since the admin allowed it.
-	repo.listing.Protection.ReservedConcurrency = 2
-	repo.account.Concurrency = 2
+
+	// No plan on the listing.
+	repo.listing.Plan = nil
+	view, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.Equal(t, []string{MarketReasonNoPlan}, view.UnavailableReasons)
+	repo.listing.Plan = &max
+
+	// Unlimited concurrency: reason + listing refused.
+	repo.account.Concurrency = 0
 	view, err = svc.OwnerGet(ctx, 7, 11)
 	require.NoError(t, err)
 	require.Equal(t, []string{MarketReasonProtectionInvalid}, view.UnavailableReasons)
-	_, err = svc.OwnerSet(ctx, 7, 11, 3, true)
-	requireMarketReason(t, err, "MARKET_INVALID_PARAMS")
+	_, err = svc.OwnerSet(ctx, 7, 11, 0, true)
+	requireMarketReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE")
 	repo.account.Concurrency = 3
 
+	// Cooldown: reason, next_switch_at rounded up, shared → can_unlist only
+	// once elapsed or with the market off.
+	next := time.Date(2026, 11, 29, 8, 0, 0, 400_000_000, time.UTC)
+	repo.nextSwitch = &next
+	repo.listing.Status = MarketListingStatusListed
+	repo.listing.SelectedGroupID = ptrInt64(3)
+	view, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.Equal(t, MarketModeShared, view.Mode)
+	require.Equal(t, []string{MarketReasonSwitchCooldown}, view.UnavailableReasons)
+	require.Equal(t, time.Date(2026, 11, 29, 8, 0, 1, 0, time.UTC), *view.NextSwitchAt)
+	require.False(t, view.CanUnlist)
+	settings.values[SettingKeyMarketEnabled] = "false"
+	view, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.True(t, view.CanUnlist, "market off: take-back regardless of the cooldown")
+	settings.values[SettingKeyMarketEnabled] = "true"
+	repo.nextSwitch = nil
+	view, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.True(t, view.CanUnlist)
+	require.Nil(t, view.NextSwitchAt)
+	settings.values[SettingKeyMarketModeSwitchCooldownHours] = "0"
+	_, err = svc.OwnerGet(ctx, 7, 11)
+	require.NoError(t, err)
+	require.Equal(t, 0, repo.cooldowns[len(repo.cooldowns)-1], "the current setting is used (0 applies at once)")
+	delete(settings.values, SettingKeyMarketModeSwitchCooldownHours)
+
+	// The PUT passes the cooldown and the optional tier through.
+	_, err = svc.OwnerSet(ctx, 7, 11, 0, true)
+	require.NoError(t, err)
+	require.Equal(t, 24, repo.lastOwnerSet.CooldownHours)
+	require.Zero(t, repo.lastOwnerSet.GroupID)
+
 	// Paused owner: listing refused with the reason; unlisting allowed.
+	repo.listing.Status = MarketListingStatusUnlisted
 	now := repo.account.CreatedAt
 	repo.account.OwnerPausedAt = &now
 	view, err = svc.OwnerGet(ctx, 7, 11)
@@ -432,6 +502,57 @@ func TestMarketListingServiceViewsAndChecks(t *testing.T) {
 	requireMarketReason(t, err, "MARKET_ACCOUNT_NOT_ELIGIBLE")
 	_, err = svc.OwnerSet(ctx, 7, 11, 0, false)
 	require.NoError(t, err)
+}
+
+func TestMarketSwitchCooldownError(t *testing.T) {
+	err := NewMarketSwitchCooldownError(time.Date(2026, 11, 29, 8, 0, 0, 1, time.FixedZone("x", 3600)), 0)
+	app := infraerrors.FromError(err)
+	require.EqualValues(t, 429, app.Code)
+	require.Equal(t, "MARKET_SWITCH_COOLDOWN", app.Reason)
+	require.Equal(t, "2026-11-29T07:00:01Z", app.Metadata["next_switch_at"], "RFC3339 UTC, rounded up")
+	require.Equal(t, "1", app.Metadata["retry_after_seconds"], "at least 1")
+}
+
+func TestUpdateGroupMarketPlanPresence(t *testing.T) {
+	ctx := context.Background()
+	update := func(prepare func(*marketTierGroupRepo), in *UpdateGroupInput) (*marketTierGroupRepo, error) {
+		groups, rates := newMarketTierRepos()
+		if prepare != nil {
+			prepare(groups)
+		}
+		svc := &adminServiceImpl{groupRepo: groups, userGroupRateRepo: rates}
+		_, err := svc.UpdateGroup(ctx, 1, in)
+		return groups, err
+	}
+	max, pro, bad := "max", " pro ", "Max"
+	withPlan := func(g *marketTierGroupRepo) { g.groups[1].MarketPlan = &max }
+
+	// Absent: kept.
+	groups, err := update(withPlan, &UpdateGroupInput{})
+	require.NoError(t, err)
+	require.Equal(t, "max", *groups.updated.MarketPlan)
+	// Present null / "" (normalized by the handler to nil): cleared.
+	groups, err = update(withPlan, &UpdateGroupInput{MarketPlanSet: true})
+	require.NoError(t, err)
+	require.Nil(t, groups.updated.MarketPlan)
+	// Present string: trimmed and set.
+	groups, err = update(nil, &UpdateGroupInput{MarketPlan: &pro, MarketPlanSet: true})
+	require.NoError(t, err)
+	require.Equal(t, "pro", *groups.updated.MarketPlan)
+	// Invalid slug.
+	_, err = update(nil, &UpdateGroupInput{MarketPlan: &bad, MarketPlanSet: true})
+	requireMarketReason(t, err, "MARKET_PLAN_INVALID")
+	// Demotion clears the stored plan, also with an explicit null.
+	off := false
+	groups, err = update(withPlan, &UpdateGroupInput{MarketTier: &off})
+	require.NoError(t, err)
+	require.Nil(t, groups.updated.MarketPlan)
+	groups, err = update(withPlan, &UpdateGroupInput{MarketTier: &off, MarketPlanSet: true})
+	require.NoError(t, err)
+	require.Nil(t, groups.updated.MarketPlan)
+	// An explicit plan on a non-tier: 400.
+	_, err = update(withPlan, &UpdateGroupInput{MarketTier: &off, MarketPlan: &max, MarketPlanSet: true})
+	requireMarketReason(t, err, "MARKET_PLAN_REQUIRES_TIER")
 }
 
 func TestResolveGatewayGroupNeverEntersMarketTier(t *testing.T) {

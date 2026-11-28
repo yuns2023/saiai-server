@@ -746,3 +746,24 @@ func TestHandleFailoverError_FableCreditsRequiredExcludesAccount(t *testing.T) {
 	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(context.Background()))
 	require.Contains(t, fs.FailedAccountIDs, int64(100))
 }
+
+// A candidate refused because its sharing mode or listing changed is not an
+// account failure: no cache-read billing for the switch, and it is never
+// re-admitted by the 503 same-account backoff (exclusions kept).
+func TestFailoverMarketInvalidated(t *testing.T) {
+	ctx := context.Background()
+	fs := NewFailoverState(3, true)
+	invalidated := &service.UpstreamFailoverError{StatusCode: 503, MarketInvalidated: true}
+	require.Equal(t, FailoverContinue, fs.HandleFailoverError(ctx, &mockTempUnscheduler{}, 1, service.PlatformAnthropic, invalidated))
+	require.False(t, fs.ForceCacheBilling, "a bound session does not switch to cache-read billing")
+	require.True(t, fs.MarketInvalidatedSeen)
+	require.Contains(t, fs.FailedAccountIDs, int64(1))
+	require.Equal(t, FailoverExhausted, fs.HandleSelectionExhausted(ctx), "no backoff that clears the exclusion set")
+	require.Contains(t, fs.FailedAccountIDs, int64(1))
+
+	// A generic 503 keeps the old behavior.
+	generic := NewFailoverState(3, true)
+	require.Equal(t, FailoverContinue, generic.HandleFailoverError(ctx, &mockTempUnscheduler{}, 2, service.PlatformAnthropic, newTestFailoverErr(503, false, false)))
+	require.True(t, generic.ForceCacheBilling)
+	require.False(t, generic.MarketInvalidatedSeen)
+}

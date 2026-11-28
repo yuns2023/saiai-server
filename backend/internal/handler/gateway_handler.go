@@ -1020,6 +1020,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					continue
 				}
 				if len(fs.FailedAccountIDs) == 0 {
+					if errors.Is(err, service.ErrNoAvailableAccounts) && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+						return
+					}
 					// No upstream attempt yet (a reselect after a cleared
 					// exclusion set still has LastFailoverErr), no fallback
 					// group, and no smart switch policy spanning groups.
@@ -1040,6 +1043,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				case FailoverCanceled:
 					return
 				default: // FailoverExhausted
+					if fs.MarketInvalidatedSeen && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+						return
+					}
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhaustedAfterSelection(c, fs.LastFailoverErr, err, platform, streamStarted)
 					} else {
@@ -1363,6 +1369,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					case FailoverContinue:
 						continue
 					case FailoverExhausted:
+						if fs.MarketInvalidatedSeen && h.writeHostedAccountShared(c, currentAPIKey, streamStarted) {
+							return
+						}
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
 						return
 					case FailoverCanceled:
@@ -2281,6 +2290,28 @@ func (h *GatewayHandler) writeAllAccountsRateLimited(c *gin.Context, apiKey *ser
 	}
 	service.MarkOpsRoutingRateLimited(c)
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", service.AllAccountsRateLimitedMessage(resetAt), false)
+	return true
+}
+
+// writeHostedAccountShared answers 403 HOSTED_ACCOUNT_SHARED where a
+// Messages selection is exhausted and the service confirmed (database read)
+// that every account of the owner's hosted Key is shared: x-should-retry:
+// false, no Retry-After (the account does not come back by itself; the owner
+// must switch to 自用). Logged by Ops as a client-side business limit. False
+// (nothing written) on any doubt: the caller keeps its existing error.
+func (h *GatewayHandler) writeHostedAccountShared(c *gin.Context, apiKey *service.APIKey, streamStarted bool) bool {
+	if h == nil || h.gatewayService == nil || apiKey == nil || (!streamStarted && c.Writer.Written()) {
+		return false
+	}
+	if !h.gatewayService.HostedAccountSharedBlocked(c.Request.Context(), apiKey) {
+		return false
+	}
+	if !streamStarted {
+		c.Writer.Header().Del("Retry-After")
+		c.Header("x-should-retry", "false")
+	}
+	service.MarkOpsUserLimit(c)
+	h.handleStreamingAwareError(c, http.StatusForbidden, service.HostedAccountSharedErrorType, service.HostedAccountSharedMessage, streamStarted)
 	return true
 }
 

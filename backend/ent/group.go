@@ -38,6 +38,8 @@ type Group struct {
 	HostedUsageEnabled bool `json:"hosted_usage_enabled,omitempty"`
 	// MarketTier holds the value of the "market_tier" field.
 	MarketTier bool `json:"market_tier,omitempty"`
+	// MarketPlan holds the value of the "market_plan" field.
+	MarketPlan *string `json:"market_plan,omitempty"`
 	// 允许专属分组用户查看账号额度快照
 	ShowAccountQuota bool `json:"show_account_quota,omitempty"`
 	// 使用该分组所需的最低用户等级；为空时保留原公开/专属规则
@@ -263,7 +265,7 @@ func (*Group) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case group.FieldID, group.FieldRequiredLevelID, group.FieldDefaultValidityDays, group.FieldSoraStorageQuotaBytes, group.FieldFallbackGroupID, group.FieldFallbackGroupIDOnInvalidRequest, group.FieldSortOrder, group.FieldInputModerationCooldownMinutes, group.FieldInputModerationDisableAfterHits, group.FieldInputModerationStrikeWindowHours, group.FieldInputModerationMinConfidence, group.FieldInputModerationDedupeMinutes, group.FieldClaudeDeviceBaseLimit:
 			values[i] = new(sql.NullInt64)
-		case group.FieldName, group.FieldDescription, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldCodexTimezoneAction, group.FieldClientAttestationPolicy, group.FieldClaudeDeviceLimitMode, group.FieldClaudeEntrypointPolicy:
+		case group.FieldName, group.FieldDescription, group.FieldMarketPlan, group.FieldStatus, group.FieldPlatform, group.FieldSubscriptionType, group.FieldInputModerationActionMode, group.FieldCodexClientPolicy, group.FieldCodexTimezoneAction, group.FieldClientAttestationPolicy, group.FieldClaudeDeviceLimitMode, group.FieldClaudeEntrypointPolicy:
 			values[i] = new(sql.NullString)
 		case group.FieldCreatedAt, group.FieldUpdatedAt, group.FieldDeletedAt:
 			values[i] = new(sql.NullTime)
@@ -343,6 +345,13 @@ func (_m *Group) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field market_tier", values[i])
 			} else if value.Valid {
 				_m.MarketTier = value.Bool
+			}
+		case group.FieldMarketPlan:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field market_plan", values[i])
+			} else if value.Valid {
+				_m.MarketPlan = new(string)
+				*_m.MarketPlan = value.String
 			}
 		case group.FieldShowAccountQuota:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -778,6 +787,11 @@ func (_m *Group) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("market_tier=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MarketTier))
+	builder.WriteString(", ")
+	if v := _m.MarketPlan; v != nil {
+		builder.WriteString("market_plan=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	builder.WriteString("show_account_quota=")
 	builder.WriteString(fmt.Sprintf("%v", _m.ShowAccountQuota))

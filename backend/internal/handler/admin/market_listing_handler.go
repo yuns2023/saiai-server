@@ -10,8 +10,8 @@ import (
 )
 
 // MarketListingHandler serves /api/v1/admin/accounts/:id/market-listing
-// (sharing market, P3a): which tiers the account may be listed in and the
-// owner-protection parameters.
+// (sharing market, P3a): the account's plan, which decides the tiers it may
+// be shared in.
 type MarketListingHandler struct {
 	service *service.MarketListingService
 }
@@ -20,14 +20,10 @@ func NewMarketListingHandler(s *service.MarketListingService) *MarketListingHand
 	return &MarketListingHandler{service: s}
 }
 
-// marketListingRequest: allowed_group_ids is required (an empty list allows
-// no tier); omitted protection fields keep the stored value (site default on
-// create).
+// marketListingRequest: plan is required. The legacy fields
+// allowed_group_ids and reserved_* are not read (ignored if sent).
 type marketListingRequest struct {
-	AllowedGroupIDs     *[]int64 `json:"allowed_group_ids"`
-	ReservedConcurrency *int     `json:"reserved_concurrency"`
-	ReservedDevices     *int     `json:"reserved_devices"`
-	ReservedAdmissions  *int     `json:"reserved_admissions"`
+	Plan *string `json:"plan"`
 }
 
 func marketListingAccountID(c *gin.Context) (int64, bool) {
@@ -67,16 +63,11 @@ func (h *MarketListingHandler) Put(c *gin.Context) {
 		return
 	}
 	var req marketListingRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.AllowedGroupIDs == nil {
-		response.BadRequest(c, "allowed_group_ids is required")
+	if err := c.ShouldBindJSON(&req); err != nil || req.Plan == nil || service.NormalizeMarketPlanInput(*req.Plan) == "" {
+		response.BadRequest(c, "plan is required")
 		return
 	}
-	view, err := h.service.AdminConfigure(c.Request.Context(), marketListingAdminID(c), accountID, service.AdminMarketListingInput{
-		AllowedGroupIDs:     *req.AllowedGroupIDs,
-		ReservedConcurrency: req.ReservedConcurrency,
-		ReservedDevices:     req.ReservedDevices,
-		ReservedAdmissions:  req.ReservedAdmissions,
-	})
+	view, err := h.service.AdminConfigure(c.Request.Context(), marketListingAdminID(c), accountID, *req.Plan)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

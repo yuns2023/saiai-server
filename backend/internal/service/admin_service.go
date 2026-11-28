@@ -141,13 +141,15 @@ type CreateGroupInput struct {
 	ShowAccountQuota     bool
 	HostedUsageEnabled   bool
 	MarketTier           bool
-	IsExclusive          bool
-	RequiredLevelID      *int64
-	SubscriptionType     string   // standard/subscription
-	FiveHourLimitUSD     *float64 // 5小时限额 (USD)
-	DailyLimitUSD        *float64 // 日限额 (USD)
-	WeeklyLimitUSD       *float64 // 周限额 (USD)
-	MonthlyLimitUSD      *float64 // 月限额 (USD)
+	// MarketPlan: plan slug of a market tier ("" or nil = none).
+	MarketPlan       *string
+	IsExclusive      bool
+	RequiredLevelID  *int64
+	SubscriptionType string   // standard/subscription
+	FiveHourLimitUSD *float64 // 5小时限额 (USD)
+	DailyLimitUSD    *float64 // 日限额 (USD)
+	WeeklyLimitUSD   *float64 // 周限额 (USD)
+	MonthlyLimitUSD  *float64 // 月限额 (USD)
 	// 统计用订阅实收倍率（元/$1）。Update 时仅在 SubscriptionRevenueRateSet 为 true 时写入；nil 表示清空。
 	SubscriptionRevenueRate    *float64
 	SubscriptionRevenueRateSet bool
@@ -210,14 +212,19 @@ type UpdateGroupInput struct {
 	ShowAccountQuota     *bool
 	HostedUsageEnabled   *bool
 	MarketTier           *bool
-	IsExclusive          *bool
-	RequiredLevelID      *int64
-	Status               string
-	SubscriptionType     string   // standard/subscription
-	FiveHourLimitUSD     *float64 // 5小时限额 (USD)
-	DailyLimitUSD        *float64 // 日限额 (USD)
-	WeeklyLimitUSD       *float64 // 周限额 (USD)
-	MonthlyLimitUSD      *float64 // 月限额 (USD)
+	// MarketPlan / MarketPlanSet: set = the request carried market_plan
+	// (nil or "" clears it); not set keeps the stored plan, which is cleared
+	// when the group stops being a tier.
+	MarketPlan       *string
+	MarketPlanSet    bool
+	IsExclusive      *bool
+	RequiredLevelID  *int64
+	Status           string
+	SubscriptionType string   // standard/subscription
+	FiveHourLimitUSD *float64 // 5小时限额 (USD)
+	DailyLimitUSD    *float64 // 日限额 (USD)
+	WeeklyLimitUSD   *float64 // 周限额 (USD)
+	MonthlyLimitUSD  *float64 // 月限额 (USD)
 	// 统计用订阅实收倍率（元/$1）。Update 时仅在 SubscriptionRevenueRateSet 为 true 时写入；nil 表示清空。
 	SubscriptionRevenueRate    *float64
 	SubscriptionRevenueRateSet bool
@@ -1201,6 +1208,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		ShowAccountQuota:                 input.ShowAccountQuota && input.IsExclusive,
 		HostedUsageEnabled:               input.HostedUsageEnabled,
 		MarketTier:                       input.MarketTier,
+		MarketPlan:                       normalizeGroupMarketPlan(input.MarketPlan),
 		IsExclusive:                      input.IsExclusive,
 		RequiredLevelID:                  input.RequiredLevelID,
 		Status:                           StatusActive,
@@ -1477,6 +1485,16 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.MarketTier != nil {
 		group.MarketTier = *input.MarketTier
+	}
+	if input.MarketPlanSet {
+		group.MarketPlan = normalizeGroupMarketPlan(input.MarketPlan)
+	} else if !group.MarketTier {
+		// A stored plan does not survive a demotion (it would block every
+		// later save of the group).
+		group.MarketPlan = nil
+	}
+	if err := group.ValidateMarketTier(); err != nil && (errors.Is(err, ErrMarketPlanInvalid) || errors.Is(err, ErrMarketPlanRequiresTier)) {
+		return nil, err
 	}
 	if input.ShowAccountQuota != nil {
 		group.ShowAccountQuota = *input.ShowAccountQuota

@@ -47,6 +47,10 @@ type FailoverState struct {
 	SameAccountRetryCount map[int64]int
 	LastFailoverErr       *service.UpstreamFailoverError
 	ForceCacheBilling     bool
+	// MarketInvalidatedSeen: a candidate was refused because its sharing
+	// mode or listing changed (the HOSTED_ACCOUNT_SHARED check at
+	// exhaustion only runs then).
+	MarketInvalidatedSeen bool
 	hasBoundSession       bool
 }
 
@@ -71,8 +75,11 @@ func (s *FailoverState) HandleFailoverError(
 ) FailoverAction {
 	s.LastFailoverErr = failoverErr
 
-	// 缓存计费判断
-	if needForceCacheBilling(s.hasBoundSession, failoverErr) {
+	// 缓存计费判断. A changed sharing mode / listing is not an account
+	// failure: the cache is rebuilt at the normal price (the buyer pays).
+	if failoverErr.MarketInvalidated {
+		s.MarketInvalidatedSeen = true
+	} else if needForceCacheBilling(s.hasBoundSession, failoverErr) {
 		s.ForceCacheBilling = true
 	}
 
@@ -132,7 +139,9 @@ func (s *FailoverState) HandleFailoverError(
 // 返回 FailoverExhausted 时，调用方应返回错误响应。
 // 返回 FailoverCanceled 时，调用方应直接 return。
 func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAction {
-	if s.LastFailoverErr != nil &&
+	// A candidate refused for its sharing mode / listing stays excluded (it
+	// is not a capacity blip to back off from).
+	if s.LastFailoverErr != nil && !s.LastFailoverErr.MarketInvalidated &&
 		s.LastFailoverErr.StatusCode == http.StatusServiceUnavailable &&
 		s.SwitchCount <= s.MaxSwitches {
 

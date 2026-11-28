@@ -150,6 +150,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 	out := &AdminGroup{
 		Group:                            groupFromServiceBase(g),
 		SubscriptionRevenueRate:          g.SubscriptionRevenueRate,
+		MarketPlan:                       g.MarketPlan,
 		InputModerationEnabled:           g.InputModerationEnabled,
 		InputModerationAutoDisableUser:   g.InputModerationAutoDisableUser,
 		InputModerationCategories:        g.InputModerationCategories,

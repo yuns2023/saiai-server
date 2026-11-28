@@ -33,6 +33,8 @@ const (
 	FieldHostedUsageEnabled = "hosted_usage_enabled"
 	// FieldMarketTier holds the string denoting the market_tier field in the database.
 	FieldMarketTier = "market_tier"
+	// FieldMarketPlan holds the string denoting the market_plan field in the database.
+	FieldMarketPlan = "market_plan"
 	// FieldShowAccountQuota holds the string denoting the show_account_quota field in the database.
 	FieldShowAccountQuota = "show_account_quota"
 	// FieldRequiredLevelID holds the string denoting the required_level_id field in the database.
@@ -224,6 +226,7 @@ var Columns = []string{
 	FieldIsExclusive,
 	FieldHostedUsageEnabled,
 	FieldMarketTier,
+	FieldMarketPlan,
 	FieldShowAccountQuota,
 	FieldRequiredLevelID,
 	FieldStatus,
@@ -453,6 +456,11 @@ func ByHostedUsageEnabled(opts ...sql.OrderTermOption) OrderOption {
 // ByMarketTier orders the results by the market_tier field.
 func ByMarketTier(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMarketTier, opts...).ToFunc()
+}
+
+// ByMarketPlan orders the results by the market_plan field.
+func ByMarketPlan(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMarketPlan, opts...).ToFunc()
 }
 
 // ByShowAccountQuota orders the results by the show_account_quota field.

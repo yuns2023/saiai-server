@@ -13,18 +13,15 @@ import (
 // stored value means its default; an explicit 0 is a valid value wherever
 // the range includes 0 (it never falls back to the default).
 const (
-	SettingKeyMarketEnabled                     = "market_enabled"
-	SettingKeyMarketPlatformCutRate             = "market_platform_cut_rate"
-	SettingKeyMarketEarningFreezeDays           = "market_earning_freeze_days"
-	SettingKeyMarketMinConvertUSD               = "market_min_convert_usd"
-	SettingKeyMarketDefaultReservedConcurrency  = "market_default_reserved_concurrency"
-	SettingKeyMarketDefaultReservedDevices      = "market_default_reserved_devices"
-	SettingKeyMarketDefaultReservedAdmissions   = "market_default_reserved_admissions"
+	SettingKeyMarketEnabled           = "market_enabled"
+	SettingKeyMarketPlatformCutRate   = "market_platform_cut_rate"
+	SettingKeyMarketEarningFreezeDays = "market_earning_freeze_days"
+	SettingKeyMarketMinConvertUSD     = "market_min_convert_usd"
+	// SettingKeyMarketModeSwitchCooldownHours: minimum hours between two
+	// effective owner switches 共享 ↔ 自用 (0..168, default 24, 0 = none).
+	SettingKeyMarketModeSwitchCooldownHours     = "market_mode_switch_cooldown_hours"
 	MaxMarketEarningFreezeDays                  = 90
 	DefaultMarketEarningFreezeDays              = 7
-	DefaultMarketDefaultReservedConcurrency     = 1
-	DefaultMarketDefaultReservedDevices         = 2
-	DefaultMarketDefaultReservedAdmissions      = 1
 	marketPlatformCutRateDecimals               = 4
 	marketMinConvertDecimals                    = 2
 	marketSettingDefaultPlatformCutRateText     = "0.2"
@@ -51,8 +48,8 @@ type MarketSettings struct {
 	// MinConvertUSD: smallest earnings → balance conversion, 0.01..10000,
 	// at most 2 decimals.
 	MinConvertUSD decimal.Decimal
-	// DefaultProtection seeds new listings.
-	DefaultProtection MarketProtectionParams
+	// ModeSwitchCooldownHours: 0..168 (0 = no cooldown).
+	ModeSwitchCooldownHours int
 }
 
 // MarketSettingKeys are the settings rows of the feature.
@@ -62,9 +59,7 @@ func MarketSettingKeys() []string {
 		SettingKeyMarketPlatformCutRate,
 		SettingKeyMarketEarningFreezeDays,
 		SettingKeyMarketMinConvertUSD,
-		SettingKeyMarketDefaultReservedConcurrency,
-		SettingKeyMarketDefaultReservedDevices,
-		SettingKeyMarketDefaultReservedAdmissions,
+		SettingKeyMarketModeSwitchCooldownHours,
 	}
 }
 
@@ -88,18 +83,16 @@ func MarketDecimalFromFloat(v float64) (decimal.Decimal, bool) {
 	return decimal.NewFromFloat(v), true
 }
 
-// ParseMarketSettings turns stored values into settings.
+// ParseMarketSettings turns stored values into settings. The removed
+// reservation defaults (market_default_reserved_*) are not read.
 func ParseMarketSettings(values map[string]string) MarketSettings {
 	out := MarketSettings{
 		Enabled:           values[SettingKeyMarketEnabled] == "true",
 		PlatformCutRate:   DefaultMarketPlatformCutRate,
 		EarningFreezeDays: parseBoundedIntSetting(values[SettingKeyMarketEarningFreezeDays], 0, MaxMarketEarningFreezeDays, DefaultMarketEarningFreezeDays),
 		MinConvertUSD:     DefaultMarketMinConvertUSD,
-		DefaultProtection: MarketProtectionParams{
-			ReservedConcurrency: parseBoundedIntSetting(values[SettingKeyMarketDefaultReservedConcurrency], 0, MaxMarketReservedConcurrency, DefaultMarketDefaultReservedConcurrency),
-			ReservedDevices:     parseBoundedIntSetting(values[SettingKeyMarketDefaultReservedDevices], 0, MaxMarketReservedDevices, DefaultMarketDefaultReservedDevices),
-			ReservedAdmissions:  parseBoundedIntSetting(values[SettingKeyMarketDefaultReservedAdmissions], 0, MaxMarketReservedAdmissions, DefaultMarketDefaultReservedAdmissions),
-		},
+		ModeSwitchCooldownHours: parseBoundedIntSetting(values[SettingKeyMarketModeSwitchCooldownHours], 0,
+			MaxMarketModeSwitchCooldownHours, DefaultMarketModeSwitchCooldownHours),
 	}
 	if v, err := decimal.NewFromString(strings.TrimSpace(values[SettingKeyMarketPlatformCutRate])); err == nil && ValidMarketPlatformCutRate(v) {
 		out.PlatformCutRate = v
@@ -125,22 +118,18 @@ func marketSettingUpdates(settings *SystemSettings, updates map[string]string) {
 	defer restrictMarketUpdates(settings.MarketFields, updates)
 	in := *settings.Market
 	stored := map[string]string{
-		SettingKeyMarketEnabled:                    strconv.FormatBool(in.Enabled),
-		SettingKeyMarketPlatformCutRate:            in.PlatformCutRate.String(),
-		SettingKeyMarketEarningFreezeDays:          strconv.Itoa(in.EarningFreezeDays),
-		SettingKeyMarketMinConvertUSD:              in.MinConvertUSD.String(),
-		SettingKeyMarketDefaultReservedConcurrency: strconv.Itoa(in.DefaultProtection.ReservedConcurrency),
-		SettingKeyMarketDefaultReservedDevices:     strconv.Itoa(in.DefaultProtection.ReservedDevices),
-		SettingKeyMarketDefaultReservedAdmissions:  strconv.Itoa(in.DefaultProtection.ReservedAdmissions),
+		SettingKeyMarketEnabled:                 strconv.FormatBool(in.Enabled),
+		SettingKeyMarketPlatformCutRate:         in.PlatformCutRate.String(),
+		SettingKeyMarketEarningFreezeDays:       strconv.Itoa(in.EarningFreezeDays),
+		SettingKeyMarketMinConvertUSD:           in.MinConvertUSD.String(),
+		SettingKeyMarketModeSwitchCooldownHours: strconv.Itoa(in.ModeSwitchCooldownHours),
 	}
 	parsed := ParseMarketSettings(stored)
 	updates[SettingKeyMarketEnabled] = strconv.FormatBool(parsed.Enabled)
 	updates[SettingKeyMarketPlatformCutRate] = parsed.PlatformCutRate.String()
 	updates[SettingKeyMarketEarningFreezeDays] = strconv.Itoa(parsed.EarningFreezeDays)
 	updates[SettingKeyMarketMinConvertUSD] = parsed.MinConvertUSD.String()
-	updates[SettingKeyMarketDefaultReservedConcurrency] = strconv.Itoa(parsed.DefaultProtection.ReservedConcurrency)
-	updates[SettingKeyMarketDefaultReservedDevices] = strconv.Itoa(parsed.DefaultProtection.ReservedDevices)
-	updates[SettingKeyMarketDefaultReservedAdmissions] = strconv.Itoa(parsed.DefaultProtection.ReservedAdmissions)
+	updates[SettingKeyMarketModeSwitchCooldownHours] = strconv.Itoa(parsed.ModeSwitchCooldownHours)
 }
 
 // restrictMarketUpdates keeps only the market keys the caller provided

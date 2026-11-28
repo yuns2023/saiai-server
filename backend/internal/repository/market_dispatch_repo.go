@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 // Market dispatch store (P3a part 2): the polled "listed accounts + switch"
@@ -103,6 +104,7 @@ func marketFactsFromState(state *service.MarketAdmissionState) *service.MarketAu
 		Account:            state.Account,
 		GroupFound:         state.GroupFound,
 		GroupMarketTier:    state.GroupMarketTier,
+		GroupMarketPlan:    state.GroupMarketPlan,
 		GroupActive:        state.GroupStatus == service.StatusActive,
 		GroupPlatform:      state.GroupPlatform,
 		OwnerUserStatus:    state.OwnerUserStatus,
@@ -246,4 +248,27 @@ func (r *marketListingRepository) CountMarketTierPlatformMembers(ctx context.Con
 			AND NOT (a.type IN ('oauth', 'setup-token') AND COALESCE(lower(trim(a.extra->>'claude_oauth_mode')), '') = 'pinned')`,
 		[]any{groupID}, &n)
 	return n, err
+}
+
+// HostedGroupSharedAccounts reads, in one statement, the live admin member
+// accounts of groupID (total) and the ids of those whose listing is listed
+// and whose current owner is userID (the HOSTED_ACCOUNT_SHARED decision:
+// every account the owner's hosted Key could use is shared).
+func (r *marketListingRepository) HostedGroupSharedAccounts(ctx context.Context, groupID, userID int64) (int, []int64, error) {
+	var (
+		total  int
+		shared pq.Int64Array
+	)
+	err := scanSingleRow(ctx, r.db, `
+		SELECT COUNT(*),
+		       COALESCE(array_agg(a.id ORDER BY a.id) FILTER (WHERE l.status = 'listed' AND a.owner_user_id = $2), '{}')
+		FROM account_groups ag
+		JOIN accounts a ON a.id = ag.account_id AND a.deleted_at IS NULL
+		LEFT JOIN account_market_listings l ON l.account_id = a.id
+		WHERE ag.group_id = $1 AND ag.source = 'admin'`,
+		[]any{groupID, userID}, &total, &shared)
+	if err != nil {
+		return 0, nil, err
+	}
+	return total, []int64(shared), nil
 }

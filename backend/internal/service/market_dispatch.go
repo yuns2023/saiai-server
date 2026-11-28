@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"strconv"
@@ -26,13 +27,18 @@ import (
 //
 //   - buyer: the group is a market tier and the account is listed there
 //     (market membership + listing snapshot of that tier). Uses the buyer
-//     concurrency cap C - R (dual slot sets), class-aware device admission and
-//     a positive price; a buyer lease is admitted only by the final
-//     admission, which writes the immutable market_admissions row.
-//     Authenticated user = owner is still the buyer path (self purchase).
-//   - owner: a listed account used through the authenticated user's own
-//     exclusive hosted group while they are its owner. Total capacity only
-//     (it may use the reservations); owner device class.
+//     slot set (cap = the account concurrency; reservations are always 0),
+//     class-aware device admission and a positive price; a buyer lease is
+//     admitted only by the final admission, which writes the immutable
+//     market_admissions row. Authenticated user = owner is still the buyer
+//     path (self purchase).
+//   - owner: 共享 and 自用 are exclusive, so a shared (listed) account never
+//     serves its owner's hosted group. The owner class exists only for a
+//     "listed" view that may be stale (registry, cached copy, first load
+//     missing): the account stays an owner self-use candidate and the
+//     authoritative check (precheck before the device registration, final
+//     check before the send) requires it to be NOT listed in the database.
+//     A listing whose write is still running in this process is avoided.
 //   - platform: an admin member of a market tier without an owner and not
 //     listed. Original capacity; the final admission re-checks "no owner,
 //     still an admin member, not listed" in the database.
@@ -74,16 +80,41 @@ var (
 	// ErrMarketCountTokensUnsupported: a market tier without platform
 	// accounts has no count_tokens upstream (404 like platforms without it).
 	ErrMarketCountTokensUnsupported = errors.New("count_tokens is not available in this market tier")
+	// ErrMarketListingInvalidated (is ErrMarketAdmissionRejected): the
+	// candidate's sharing mode or listing changed (an authoritative refusal,
+	// or a listing seen locally after a plain selection). It reselects
+	// without the account (UpstreamFailoverError.MarketInvalidated).
+	ErrMarketListingInvalidated = fmt.Errorf("%w: sharing mode or listing changed", ErrMarketAdmissionRejected)
 )
+
+// HostedAccountSharedMessage is the 403 HOSTED_ACCOUNT_SHARED text for an
+// owner's hosted Key whose accounts are all shared.
+const (
+	HostedAccountSharedErrorType = "HOSTED_ACCOUNT_SHARED"
+	HostedAccountSharedMessage   = "该托管号正在共享中，请在托管页切回「自用」后再使用。"
+	// marketRefusalShared: the owner candidate is listed in the database.
+	marketRefusalShared = "shared"
+)
+
+// marketRefusalKeepsGenericFailover: refusals about the account's health
+// (not its sharing mode) keep the generic failover (cache-read billing on a
+// bound session, same-account backoff) exactly as before.
+func marketRefusalKeepsGenericFailover(reason string) bool {
+	switch reason {
+	case "account_inactive", "account_missing", "group_inactive":
+		return true
+	}
+	return false
+}
 
 // AccountMarketListing is the listing snapshot carried on a listed account's
 // cached copy (status listed only). It drives selection; the final admission
-// re-reads the row.
+// re-reads the row. (Snapshots written by the previous binary also carry a
+// "protection" object; it is ignored.)
 type AccountMarketListing struct {
-	GroupID     int64                  `json:"group_id"`
-	OwnerUserID int64                  `json:"owner_user_id"`
-	Version     int64                  `json:"version"`
-	Protection  MarketProtectionParams `json:"protection"`
+	GroupID     int64 `json:"group_id"`
+	OwnerUserID int64 `json:"owner_user_id"`
+	Version     int64 `json:"version"`
 }
 
 // MarketSelection is the admission expectation of one selected candidate,
@@ -95,13 +126,11 @@ type MarketSelection struct {
 	GroupID   int64
 	// OwnerUserID: the owner the candidate was selected with (buyer/owner).
 	OwnerUserID int64
-	// ListingVersion / Concurrency / reservations: the resource policy the
-	// lease was taken under (buyer). A change makes the final admission fail.
+	// ListingVersion / Concurrency: the resource policy the lease was taken
+	// under (buyer). A change makes the final admission fail.
 	ListingVersion      int64
 	Concurrency         int
 	BuyerMaxConcurrency int
-	ReservedDevices     int
-	ReservedAdmissions  int
 	SelfPurchase        bool
 	// LeaseID is the buyer lease (request id in both slot sets) currently
 	// held for this candidate; the final admission checks it is still held.
@@ -134,11 +163,10 @@ type MarketSlotCache interface {
 	SlotTTLSeconds() int
 }
 
-// MarketDeviceAdmission is the class-aware carpool device admission input.
+// MarketDeviceAdmission is the class-aware carpool device admission input
+// (no reservations: the limits are the account's own).
 type MarketDeviceAdmission struct {
-	Class              string
-	ReservedDevices    int
-	ReservedAdmissions int
+	Class string
 }
 
 // MarketCarpoolAdmissionCache registers devices of listed accounts by class.
@@ -165,9 +193,11 @@ type MarketAuthoritativeFacts struct {
 	OwnerPaused            bool
 	OwnerWithdrawRequested bool
 	// MembershipSource of the (account, group) pair: "" = no membership.
-	MembershipSource      string
-	GroupFound            bool
-	GroupMarketTier       bool
+	MembershipSource string
+	GroupFound       bool
+	GroupMarketTier  bool
+	// GroupMarketPlan: the tier's plan (buyer path; nil = none).
+	GroupMarketPlan       *string
 	GroupActive           bool
 	GroupPlatform         string
 	GroupHosted           bool
@@ -212,6 +242,9 @@ type MarketDispatchStore interface {
 	AdmitMarketCandidate(ctx context.Context, req *MarketAdmissionRequest, evaluate func(*MarketAuthoritativeFacts) string) (*MarketAdmissionVerdict, error)
 	GetMarketAdmissionByAttempt(ctx context.Context, attemptID string) (*MarketAdmission, error)
 	CountMarketTierPlatformMembers(ctx context.Context, groupID int64) (int, error)
+	// HostedGroupSharedAccounts: the live admin member accounts of groupID
+	// (total) and the ids of those that are listed and owned by userID.
+	HostedGroupSharedAccounts(ctx context.Context, groupID, userID int64) (total int, shared []int64, err error)
 }
 
 // MarketRuntime holds the process-wide market dispatch state.
@@ -225,9 +258,11 @@ type MarketRuntime struct {
 	lastWarn time.Time
 	// pending: listings started in this process and not yet confirmed by a
 	// poll that began after they ended (treated as listed meanwhile).
-	pending  map[int64]map[uint64]*marketPendingListing
-	stopOnce sync.Once
-	stop     chan struct{}
+	pending map[int64]map[uint64]*marketPendingListing
+	// sharedLogged: last HOSTED_ACCOUNT_SHARED log per account.
+	sharedLogged map[int64]time.Time
+	stopOnce     sync.Once
+	stop         chan struct{}
 }
 
 // NewMarketRuntime creates the runtime; Start begins polling.
@@ -404,6 +439,32 @@ func (r *MarketRuntime) IsListed(accountID int64) bool {
 	}
 	r.mu.RUnlock()
 	return ok
+}
+
+// marketListingPending: a listing transaction of this process for the
+// account has started and was not yet confirmed by a later registry poll
+// (BeginListing). The owner path avoids such an account: the database may
+// still say unlisted until that transaction commits.
+func (r *MarketRuntime) marketListingPending(accountID int64) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.pending[accountID]
+	return ok
+}
+
+// anyListingKnown: the registry knows at least one listed or pending
+// account, or never loaded (a cheap guard before authoritative reads that
+// only matter when something is shared).
+func (r *MarketRuntime) anyListingKnown() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.listed) > 0 || len(r.pending) > 0
 }
 
 // marketAccountListed: cached copy or registry.
@@ -610,19 +671,17 @@ func (s *GatewayService) classifyMarketCandidateInGroup(ctx context.Context, acc
 		if group == nil {
 			return MarketClassExcluded, nil
 		}
-		authUser := authUserIDFromContext(ctx)
-		// The owner path exists only where the final admission runs (Messages):
-		// count_tokens, Ops retries and other paths never use a listed account.
-		if marketDispatchFromContext(ctx) != nil && group.UsesHostedUsage() && group.IsExclusive && group.IsActive() &&
-			account.OwnerUserID != nil && authUser > 0 && *account.OwnerUserID == authUser &&
-			slices.Contains(account.GroupIDs, group.ID) {
-			return MarketClassOwner, &MarketSelection{
-				Class:       MarketClassOwner,
-				AccountID:   account.ID,
-				GroupID:     group.ID,
-				OwnerUserID: authUser,
-				Concurrency: account.Concurrency,
-			}
+		// Shared ⇒ never the owner path. A listing write still running in
+		// this process: avoid the account (the database may still say
+		// unlisted). Any other "listed" view may be stale (registry poll,
+		// cached copy, first load missing): keep the account as an owner
+		// self-use candidate; the authoritative check requires it to be
+		// unlisted before the device registration and again before the send.
+		if s.market.marketListingPending(account.ID) {
+			return MarketClassExcluded, nil
+		}
+		if sel := s.marketOwnerCandidate(ctx, account, group); sel != nil {
+			return MarketClassOwner, sel
 		}
 		return MarketClassExcluded, nil
 	}
@@ -650,6 +709,26 @@ func (s *GatewayService) classifyMarketCandidateInGroup(ctx context.Context, acc
 	return MarketClassExcluded, nil
 }
 
+// marketOwnerCandidate: the owner self-use candidate of a possibly-listed
+// account in the authenticated user's own exclusive hosted group, only where
+// the final admission runs (Messages): count_tokens, Ops retries and other
+// paths never use a listed account.
+func (s *GatewayService) marketOwnerCandidate(ctx context.Context, account *Account, group *Group) *MarketSelection {
+	authUser := authUserIDFromContext(ctx)
+	if account == nil || group == nil || marketDispatchFromContext(ctx) == nil || !group.UsesHostedUsage() || !group.IsExclusive ||
+		!group.IsActive() || group.MarketTier || account.OwnerUserID == nil || authUser <= 0 || *account.OwnerUserID != authUser ||
+		!slices.Contains(account.GroupIDs, group.ID) {
+		return nil
+	}
+	return &MarketSelection{
+		Class:       MarketClassOwner,
+		AccountID:   account.ID,
+		GroupID:     group.ID,
+		OwnerUserID: authUser,
+		Concurrency: account.Concurrency,
+	}
+}
+
 // marketBuyerSelection checks the cached buyer conditions; reason "" = ok.
 func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Account, group *Group, sellable bool) (*MarketSelection, string) {
 	dispatch := marketDispatchFromContext(ctx)
@@ -666,8 +745,9 @@ func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Acco
 	if MarketAccountIneligibleReason(account) != "" || !account.IsSchedulable() {
 		return nil, "ineligible"
 	}
-	buyerMax := account.Concurrency - listing.Protection.ReservedConcurrency
-	if account.Concurrency <= 0 || buyerMax < 1 {
+	// No owner reservation: buyers may use the whole account (stored
+	// reserved_* values are never read).
+	if account.Concurrency <= 0 {
 		return nil, "buyer_capacity"
 	}
 	sel := &MarketSelection{
@@ -677,9 +757,7 @@ func (s *GatewayService) marketBuyerSelection(ctx context.Context, account *Acco
 		OwnerUserID:         listing.OwnerUserID,
 		ListingVersion:      listing.Version,
 		Concurrency:         account.Concurrency,
-		BuyerMaxConcurrency: buyerMax,
-		ReservedDevices:     listing.Protection.ReservedDevices,
-		ReservedAdmissions:  listing.Protection.ReservedAdmissions,
+		BuyerMaxConcurrency: account.Concurrency,
 		SelfPurchase:        dispatch.APIKey.UserID == listing.OwnerUserID,
 	}
 	sel.DeviceLimit, sel.CycleBudget, sel.CycleAdmissions, sel.CycleGeneration = marketDevicePolicy(account)
@@ -768,6 +846,13 @@ func (s *GatewayService) marketSelectionChanged(ctx context.Context, selected, f
 		return true
 	}
 	a, selA := s.classifyMarketCandidateInGroup(ctx, selected, groupID, false)
+	if marketOwnerOrNone(a) && marketOwnerOrNone(b) {
+		// Self-use either way: an owner candidate (possibly stale listed
+		// view) and a plain one both end in the same owner-group dispatch;
+		// the dispatch boundary decides on the fresh copy, so a stale
+		// "listed" view never drops a self-use account.
+		return false
+	}
 	if a != b {
 		return true
 	}
@@ -775,6 +860,10 @@ func (s *GatewayService) marketSelectionChanged(ctx context.Context, selected, f
 		return true
 	}
 	return false
+}
+
+func marketOwnerOrNone(class string) bool {
+	return class == MarketClassOwner || class == MarketClassNone
 }
 
 func mustMarketGroup(ctx context.Context) *int64 {
@@ -1082,7 +1171,17 @@ func (s *GatewayService) marketGate(ctx context.Context, account *Account) (*Mar
 	}
 	if sel == nil {
 		if account != nil && s.marketAccountListed(account) {
-			return nil, ErrMarketAdmissionRejected
+			// Listed per the local view after a plain selection. In the
+			// owner's own hosted group that view may be stale: continue as an
+			// owner self-use attempt (database checks before the device
+			// registration and the send). Anywhere else: reselect.
+			if attempt != nil {
+				if owner := s.marketGateOwnerSelection(ctx, account); owner != nil {
+					attempt.Selection = owner
+					return attempt, nil
+				}
+			}
+			return nil, ErrMarketListingInvalidated
 		}
 		return nil, nil
 	}
@@ -1095,6 +1194,27 @@ func (s *GatewayService) marketGate(ctx context.Context, account *Account) (*Mar
 	return attempt, nil
 }
 
+// marketGateOwnerSelection classifies a possibly-listed account reached by a
+// plain attempt against the billed Key's group (the owner path requires that
+// group); nil = not an owner self-use candidate.
+func (s *GatewayService) marketGateOwnerSelection(ctx context.Context, account *Account) *MarketSelection {
+	dispatch := marketDispatchFromContext(ctx)
+	if dispatch == nil || dispatch.APIKey.GroupID == nil || s.market.marketListingPending(account.ID) {
+		return nil
+	}
+	group := s.groupForMarket(ctx, dispatch.APIKey.GroupID)
+	if group == nil {
+		group = dispatch.APIKey.Group
+		if group == nil || group.ID != *dispatch.APIKey.GroupID {
+			return nil
+		}
+	}
+	if s.isRunModeSimple() {
+		return nil
+	}
+	return s.marketOwnerCandidate(ctx, account, group)
+}
+
 // marketDeviceAdmissionFor returns the class-aware device admission of the
 // current attempt (nil = the old path).
 func marketDeviceAdmissionFor(ctx context.Context, account *Account) *MarketDeviceAdmission {
@@ -1104,11 +1224,7 @@ func marketDeviceAdmissionFor(ctx context.Context, account *Account) *MarketDevi
 	}
 	switch attempt.Selection.Class {
 	case MarketClassBuyer:
-		return &MarketDeviceAdmission{
-			Class:              MarketDeviceClassBuyer,
-			ReservedDevices:    attempt.Selection.ReservedDevices,
-			ReservedAdmissions: attempt.Selection.ReservedAdmissions,
-		}
+		return &MarketDeviceAdmission{Class: MarketDeviceClassBuyer}
 	case MarketClassOwner:
 		return &MarketDeviceAdmission{Class: MarketDeviceClassOwner}
 	}
@@ -1201,6 +1317,8 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 	cancel()
 	if err != nil {
 		if sel.Class != MarketClassBuyer {
+			// Unknown, never "shared": the generic failover (temporarily
+			// unavailable), as before.
 			logMarketAdmission(ctx, sel, "db_error", err)
 			return ErrMarketAdmissionRejected
 		}
@@ -1222,7 +1340,10 @@ func (s *GatewayService) finalizeMarketAdmission(ctx context.Context, account *A
 			reason = verdict.Reason
 		}
 		logMarketAdmission(ctx, sel, reason, nil)
-		return ErrMarketAdmissionRejected
+		if verdict == nil || marketRefusalKeepsGenericFailover(reason) {
+			return ErrMarketAdmissionRejected
+		}
+		return ErrMarketListingInvalidated
 	}
 	if ctx.Err() != nil {
 		// The client went away while the admission ran: its lease was
@@ -1290,6 +1411,12 @@ func logMarketAdmission(ctx context.Context, sel *MarketSelection, reason string
 	if err != nil {
 		fields = append(fields, zap.Error(err))
 	}
+	if reason == marketRefusalShared {
+		// Expected while the owner's account is shared (the request ends
+		// with HOSTED_ACCOUNT_SHARED, logged once per hour per account).
+		logger.FromContext(ctx).Info("gateway.market_admission_rejected", fields...)
+		return
+	}
 	logger.FromContext(ctx).Warn("gateway.market_admission_rejected", fields...)
 }
 
@@ -1336,6 +1463,12 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 		if f.OwnerUserStatus != StatusActive {
 			return "owner_inactive"
 		}
+		// 共享 and 自用 are exclusive: a listed account never serves its
+		// owner's hosted group (the owner class only exists for a possibly
+		// stale "listed" view, which the database must contradict).
+		if listed {
+			return marketRefusalShared
+		}
 		return ""
 	case MarketClassBuyer:
 		if !f.MarketEnabled {
@@ -1346,6 +1479,11 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 		}
 		if !listed || f.Listing.SelectedGroupID == nil || *f.Listing.SelectedGroupID != req.GroupID {
 			return "not_listed"
+		}
+		// The plan is the only permission: the tier must still be of the
+		// listing's plan (a re-plan unlists, this covers older rows).
+		if f.Listing.Plan == nil || f.GroupMarketPlan == nil || *f.Listing.Plan != *f.GroupMarketPlan {
+			return "plan_mismatch"
 		}
 		if f.Listing.Version != sel.ListingVersion {
 			return "listing_changed"
@@ -1362,11 +1500,9 @@ func EvaluateMarketAdmission(sel *MarketSelection, req *MarketAdmissionRequest, 
 		if reason := MarketAccountIneligibleReason(acc); reason != "" {
 			return "ineligible_" + reason
 		}
-		if acc.Concurrency != sel.Concurrency || acc.Concurrency-f.Listing.Protection.ReservedConcurrency != sel.BuyerMaxConcurrency {
+		// No reservations: stored reserved_* values are never read.
+		if acc.Concurrency != sel.Concurrency || acc.Concurrency != sel.BuyerMaxConcurrency {
 			return "capacity_changed"
-		}
-		if f.Listing.Protection.ReservedDevices != sel.ReservedDevices || f.Listing.Protection.ReservedAdmissions != sel.ReservedAdmissions {
-			return "reservation_changed"
 		}
 		limit, budget, admissions, generation := marketDevicePolicy(acc)
 		if limit != sel.DeviceLimit || budget != sel.CycleBudget || admissions != sel.CycleAdmissions || generation != sel.CycleGeneration {
@@ -1388,12 +1524,32 @@ func marketDispatchCancelled(ctx context.Context) error {
 }
 
 // marketAdmissionError maps a final-admission failure: a cancelled request
-// ends (no reselection); anything else fails over.
+// ends (no reselection); a changed sharing mode / listing reselects without
+// the account (MarketInvalidated); anything else fails over as before.
 func marketAdmissionError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if errors.Is(err, ErrMarketListingInvalidated) {
+		return marketInvalidatedFailoverError(err)
+	}
 	return marketAdmissionFailoverError(err)
+}
+
+// marketInvalidatedFailoverError: the 503 failover of a candidate whose
+// sharing mode or listing changed (nothing was sent). MarketInvalidated: no
+// cache-read billing for the switch (the buyer rebuilds the cache at the
+// normal price) and no exclusion reset.
+func marketInvalidatedFailoverError(cause error) error {
+	if cause == nil {
+		cause = ErrMarketListingInvalidated
+	}
+	return &UpstreamFailoverError{
+		StatusCode:        503,
+		ResponseBody:      []byte(`{"type":"error","error":{"type":"overloaded_error","message":"No available accounts"}}`),
+		Cause:             cause,
+		MarketInvalidated: true,
+	}
 }
 
 // marketAdmissionFailoverError refuses a candidate at the dispatch boundary
@@ -1408,6 +1564,68 @@ func marketAdmissionFailoverError(cause error) error {
 		ResponseBody: []byte(`{"type":"error","error":{"type":"overloaded_error","message":"No available accounts"}}`),
 		Cause:        cause,
 	}
+}
+
+// HostedAccountSharedBlocked runs where a Messages selection is exhausted:
+// true only when it is authoritatively confirmed (database read) that every
+// live account of the Key's own exclusive hosted group is shared by the
+// Key's user, so the owner must switch back to 自用. Any doubt (no market,
+// nothing listed locally, not such a group, read error) is false: the
+// caller keeps its existing error. Logs one WARN per account per hour.
+func (s *GatewayService) HostedAccountSharedBlocked(ctx context.Context, apiKey *APIKey) bool {
+	if s == nil || s.market == nil || s.market.store == nil || apiKey == nil || apiKey.GroupID == nil || apiKey.UserID <= 0 {
+		return false
+	}
+	group := apiKey.Group
+	if group == nil || group.ID != *apiKey.GroupID || group.MarketTier || !group.UsesHostedUsage() || !group.IsExclusive {
+		return false
+	}
+	if !s.market.anyListingKnown() {
+		return false
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), marketAdmissionTimeout)
+	total, shared, err := s.market.store.HostedGroupSharedAccounts(readCtx, group.ID, apiKey.UserID)
+	cancel()
+	if err != nil {
+		logger.FromContext(ctx).Warn("gateway.hosted_account_shared_check_failed", zap.Int64("group_id", group.ID), zap.Error(err))
+		return false
+	}
+	if total == 0 || len(shared) != total {
+		return false
+	}
+	for _, accountID := range shared {
+		if s.market.hostedSharedLogDue(accountID) {
+			logger.FromContext(ctx).Warn("gateway.hosted_account_shared",
+				zap.Int64("account_id", accountID), zap.Int64("group_id", group.ID), zap.Int64("user_id", apiKey.UserID))
+		}
+	}
+	return true
+}
+
+// hostedSharedLogDue: at most one HOSTED_ACCOUNT_SHARED log line per
+// account per hour (process-local).
+func (r *MarketRuntime) hostedSharedLogDue(accountID int64) bool {
+	if r == nil {
+		return false
+	}
+	now := time.Now()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sharedLogged == nil {
+		r.sharedLogged = map[int64]time.Time{}
+	}
+	if last, ok := r.sharedLogged[accountID]; ok && now.Sub(last) < time.Hour {
+		return false
+	}
+	if len(r.sharedLogged) > 4096 {
+		for id, at := range r.sharedLogged {
+			if now.Sub(at) >= time.Hour {
+				delete(r.sharedLogged, id)
+			}
+		}
+	}
+	r.sharedLogged[accountID] = now
+	return true
 }
 
 // SelectMarketTierCountTokensAccount selects the count_tokens account of a

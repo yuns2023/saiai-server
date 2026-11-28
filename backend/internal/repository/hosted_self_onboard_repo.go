@@ -369,16 +369,15 @@ func (r *hostedApplicationRepository) SetOwnerAccountState(ctx context.Context, 
 	if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 		return nil, err
 	}
-	// Pause and withdraw stop sharing in the same transaction (the UPDATE
-	// above holds the account row lock). Resume never relists.
-	switch action {
-	case service.HostedOwnerActionPause:
-		err = marketUnlistAccountTx(ctx, tx, accountID, service.MarketListingActionOwnerPaused, false, service.MarketListingActorOwner, ownerUserID)
-	case service.HostedOwnerActionWithdraw:
-		err = marketUnlistAccountTx(ctx, tx, accountID, service.MarketListingActionOwnerWithdraw, false, service.MarketListingActorOwner, ownerUserID)
-	}
-	if err != nil {
-		return nil, err
+	// Withdraw stops sharing in the same transaction (the UPDATE above holds
+	// the account row lock), with its own event action: it is not an owner
+	// switch and never counts for the cooldown. Pause keeps the owner's mode
+	// (a paused account serves nobody: scheduling and the final admission
+	// check the pause); resume only clears the pause and never relists.
+	if action == service.HostedOwnerActionWithdraw {
+		if err := marketUnlistAccountTx(ctx, tx, accountID, service.MarketListingActionOwnerWithdraw, false, service.MarketListingActorOwner, ownerUserID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -552,6 +551,14 @@ func (r *hostedApplicationRepository) Approve(ctx context.Context, p service.Hos
 	ownerID := app.UserID
 	if _, err := setAccountOwnerTx(ctx, txc, accountID, &ownerID, p.AdminUserID); err != nil {
 		return nil, err
+	}
+	if p.MarketPlan != "" {
+		// Same transaction, after the account and its owner history: the
+		// listing starts as 自用 (unlisted) with the plan; an unknown plan
+		// aborts the whole approval.
+		if err := CreateApprovedMarketListingTx(ctx, txc, txc, accountID, ownerID, p.AdminUserID, p.MarketPlan); err != nil {
+			return nil, err
+		}
 	}
 	groupPayload := buildSchedulerGroupPayload([]int64{groupID})
 	if err := enqueueSchedulerOutbox(ctx, txc, service.SchedulerOutboxEventAccountChanged, &accountID, nil, groupPayload); err != nil {

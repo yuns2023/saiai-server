@@ -148,6 +148,20 @@ func (_c *GroupCreate) SetNillableMarketTier(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetMarketPlan sets the "market_plan" field.
+func (_c *GroupCreate) SetMarketPlan(v string) *GroupCreate {
+	_c.mutation.SetMarketPlan(v)
+	return _c
+}
+
+// SetNillableMarketPlan sets the "market_plan" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableMarketPlan(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetMarketPlan(*v)
+	}
+	return _c
+}
+
 // SetShowAccountQuota sets the "show_account_quota" field.
 func (_c *GroupCreate) SetShowAccountQuota(v bool) *GroupCreate {
 	_c.mutation.SetShowAccountQuota(v)
@@ -1303,6 +1317,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldMarketTier, field.TypeBool, value)
 		_node.MarketTier = value
 	}
+	if value, ok := _c.mutation.MarketPlan(); ok {
+		_spec.SetField(group.FieldMarketPlan, field.TypeString, value)
+		_node.MarketPlan = &value
+	}
 	if value, ok := _c.mutation.ShowAccountQuota(); ok {
 		_spec.SetField(group.FieldShowAccountQuota, field.TypeBool, value)
 		_node.ShowAccountQuota = value
@@ -1779,6 +1797,24 @@ func (u *GroupUpsert) SetMarketTier(v bool) *GroupUpsert {
 // UpdateMarketTier sets the "market_tier" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateMarketTier() *GroupUpsert {
 	u.SetExcluded(group.FieldMarketTier)
+	return u
+}
+
+// SetMarketPlan sets the "market_plan" field.
+func (u *GroupUpsert) SetMarketPlan(v string) *GroupUpsert {
+	u.Set(group.FieldMarketPlan, v)
+	return u
+}
+
+// UpdateMarketPlan sets the "market_plan" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateMarketPlan() *GroupUpsert {
+	u.SetExcluded(group.FieldMarketPlan)
+	return u
+}
+
+// ClearMarketPlan clears the value of the "market_plan" field.
+func (u *GroupUpsert) ClearMarketPlan() *GroupUpsert {
+	u.SetNull(group.FieldMarketPlan)
 	return u
 }
 
@@ -2785,6 +2821,27 @@ func (u *GroupUpsertOne) SetMarketTier(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateMarketTier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMarketTier()
+	})
+}
+
+// SetMarketPlan sets the "market_plan" field.
+func (u *GroupUpsertOne) SetMarketPlan(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMarketPlan(v)
+	})
+}
+
+// UpdateMarketPlan sets the "market_plan" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateMarketPlan() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMarketPlan()
+	})
+}
+
+// ClearMarketPlan clears the value of the "market_plan" field.
+func (u *GroupUpsertOne) ClearMarketPlan() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearMarketPlan()
 	})
 }
 
@@ -4095,6 +4152,27 @@ func (u *GroupUpsertBulk) SetMarketTier(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateMarketTier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMarketTier()
+	})
+}
+
+// SetMarketPlan sets the "market_plan" field.
+func (u *GroupUpsertBulk) SetMarketPlan(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetMarketPlan(v)
+	})
+}
+
+// UpdateMarketPlan sets the "market_plan" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateMarketPlan() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateMarketPlan()
+	})
+}
+
+// ClearMarketPlan clears the value of the "market_plan" field.
+func (u *GroupUpsertBulk) ClearMarketPlan() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearMarketPlan()
 	})
 }
 

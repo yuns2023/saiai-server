@@ -18068,6 +18068,7 @@ type GroupMutation struct {
 	is_exclusive                            *bool
 	hosted_usage_enabled                    *bool
 	market_tier                             *bool
+	market_plan                             *string
 	show_account_quota                      *bool
 	status                                  *string
 	platform                                *string
@@ -18635,6 +18636,55 @@ func (m *GroupMutation) OldMarketTier(ctx context.Context) (v bool, err error) {
 // ResetMarketTier resets all changes to the "market_tier" field.
 func (m *GroupMutation) ResetMarketTier() {
 	m.market_tier = nil
+}
+
+// SetMarketPlan sets the "market_plan" field.
+func (m *GroupMutation) SetMarketPlan(s string) {
+	m.market_plan = &s
+}
+
+// MarketPlan returns the value of the "market_plan" field in the mutation.
+func (m *GroupMutation) MarketPlan() (r string, exists bool) {
+	v := m.market_plan
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMarketPlan returns the old "market_plan" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldMarketPlan(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMarketPlan is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMarketPlan requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMarketPlan: %w", err)
+	}
+	return oldValue.MarketPlan, nil
+}
+
+// ClearMarketPlan clears the value of the "market_plan" field.
+func (m *GroupMutation) ClearMarketPlan() {
+	m.market_plan = nil
+	m.clearedFields[group.FieldMarketPlan] = struct{}{}
+}
+
+// MarketPlanCleared returns if the "market_plan" field was cleared in this mutation.
+func (m *GroupMutation) MarketPlanCleared() bool {
+	_, ok := m.clearedFields[group.FieldMarketPlan]
+	return ok
+}
+
+// ResetMarketPlan resets all changes to the "market_plan" field.
+func (m *GroupMutation) ResetMarketPlan() {
+	m.market_plan = nil
+	delete(m.clearedFields, group.FieldMarketPlan)
 }
 
 // SetShowAccountQuota sets the "show_account_quota" field.
@@ -21541,7 +21591,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 58)
+	fields := make([]string, 0, 59)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -21568,6 +21618,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.market_tier != nil {
 		fields = append(fields, group.FieldMarketTier)
+	}
+	if m.market_plan != nil {
+		fields = append(fields, group.FieldMarketPlan)
 	}
 	if m.show_account_quota != nil {
 		fields = append(fields, group.FieldShowAccountQuota)
@@ -21742,6 +21795,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.HostedUsageEnabled()
 	case group.FieldMarketTier:
 		return m.MarketTier()
+	case group.FieldMarketPlan:
+		return m.MarketPlan()
 	case group.FieldShowAccountQuota:
 		return m.ShowAccountQuota()
 	case group.FieldRequiredLevelID:
@@ -21867,6 +21922,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldHostedUsageEnabled(ctx)
 	case group.FieldMarketTier:
 		return m.OldMarketTier(ctx)
+	case group.FieldMarketPlan:
+		return m.OldMarketPlan(ctx)
 	case group.FieldShowAccountQuota:
 		return m.OldShowAccountQuota(ctx)
 	case group.FieldRequiredLevelID:
@@ -22036,6 +22093,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMarketTier(v)
+		return nil
+	case group.FieldMarketPlan:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMarketPlan(v)
 		return nil
 	case group.FieldShowAccountQuota:
 		v, ok := value.(bool)
@@ -22707,6 +22771,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldDescription) {
 		fields = append(fields, group.FieldDescription)
 	}
+	if m.FieldCleared(group.FieldMarketPlan) {
+		fields = append(fields, group.FieldMarketPlan)
+	}
 	if m.FieldCleared(group.FieldRequiredLevelID) {
 		fields = append(fields, group.FieldRequiredLevelID)
 	}
@@ -22777,6 +22844,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldDescription:
 		m.ClearDescription()
+		return nil
+	case group.FieldMarketPlan:
+		m.ClearMarketPlan()
 		return nil
 	case group.FieldRequiredLevelID:
 		m.ClearRequiredLevelID()
@@ -22863,6 +22933,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldMarketTier:
 		m.ResetMarketTier()
+		return nil
+	case group.FieldMarketPlan:
+		m.ResetMarketPlan()
 		return nil
 	case group.FieldShowAccountQuota:
 		m.ResetShowAccountQuota()

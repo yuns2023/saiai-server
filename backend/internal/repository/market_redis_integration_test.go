@@ -192,42 +192,43 @@ func marketDevice(t *testing.T, cache *identityCache, ctx context.Context, accou
 
 func TestMarketDeviceClasses(t *testing.T) {
 	owner := service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}
-	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedDevices: 2}
+	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer}
 	full := service.ErrClaudeOAuthCarpoolDevicesFull
 
-	t.Run("buyer limit is limit minus reserved; owner keeps the rest", func(t *testing.T) {
+	t.Run("one limit for the whole account, no owner reservation", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
 		const account, limit = int64(51), 5
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 4; i++ {
 			require.NoError(t, marketDevice(t, cache, ctx, account, fmt.Sprintf("b%d", i), limit, nil, buyer))
 		}
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "b3", limit, nil, buyer), full)
 		require.NoError(t, marketDevice(t, cache, ctx, account, "o1", limit, nil, owner))
-		require.NoError(t, marketDevice(t, cache, ctx, account, "o2", limit, nil, owner))
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "o3", limit, nil, owner), full, "total limit")
-		// Known devices keep working.
+		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "b9", limit, nil, buyer), full, "total limit")
+		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "o2", limit, nil, owner), full, "total limit for the owner too")
+		// Known devices keep working, whichever class asks.
 		require.NoError(t, marketDevice(t, cache, ctx, account, "b1", limit, nil, buyer))
 		require.NoError(t, marketDevice(t, cache, ctx, account, "o1", limit, nil, owner))
-		// A buyer request on an owner device does not inherit the exemption.
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "o1", limit, nil, buyer), full)
-		// An owner request on a buyer device is just a known device.
-		require.NoError(t, marketDevice(t, cache, ctx, account, "b2", limit, nil, owner))
-		// Manual delete frees the class count (derived from the records).
+		require.NoError(t, marketDevice(t, cache, ctx, account, "o1", limit, nil, buyer), "a buyer request on the owner's device reuses it")
+		require.NoError(t, marketDevice(t, cache, ctx, account, "b2", limit, nil, owner), "an owner request on a buyer device is just a known device")
+		records, err := cache.ListCarpoolDevices(ctx, account)
+		require.NoError(t, err)
+		require.Len(t, records, 5, "reuse never adds a record")
+		for _, r := range records {
+			if r.OriginalDeviceID == "o1" {
+				require.Equal(t, service.MarketDeviceClassOwner, r.Class, "the record keeps its class")
+			}
+		}
+		// Manual delete frees a slot (records are counted on every admission).
 		require.NoError(t, cache.DeleteCarpoolDevice(ctx, account, carpoolDeviceField("b0")))
 		require.NoError(t, marketDevice(t, cache, ctx, account, "b9", limit, nil, buyer))
 	})
 
-	t.Run("legacy records count as buyer devices; owner claims its own", func(t *testing.T) {
+	t.Run("legacy records count against the limit; owner claims its own", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
 		const account, limit = int64(52), 5
 		for i := 0; i < 4; i++ {
 			_, err := cache.GetOrCreateCarpoolDevice(ctx, account, fmt.Sprintf("legacy%d", i), service.ClientHints{}, limit, time.Now().Unix())
 			require.NoError(t, err)
 		}
-		// 4 legacy (buyer) devices > buyer limit 3: kept, but no new buyer device.
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "new-buyer", limit, nil, buyer), full)
-		require.NoError(t, marketDevice(t, cache, ctx, account, "legacy0", limit, nil, buyer), "legacy devices are not evicted")
-		// The owner uses legacy1: it becomes an owner device; buyers now 3.
 		require.NoError(t, marketDevice(t, cache, ctx, account, "legacy1", limit, nil, owner))
 		records, err := cache.ListCarpoolDevices(ctx, account)
 		require.NoError(t, err)
@@ -237,8 +238,9 @@ func TestMarketDeviceClasses(t *testing.T) {
 		}
 		require.Equal(t, service.MarketDeviceClassOwner, classes["legacy1"])
 		require.Equal(t, "", classes["legacy0"])
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "new-buyer", limit, nil, buyer), full, "3 buyer devices = buyer limit")
-		require.NoError(t, marketDevice(t, cache, ctx, account, "new-owner", limit, nil, owner))
+		require.NoError(t, marketDevice(t, cache, ctx, account, "new-buyer", limit, nil, buyer), "4 of 5 used")
+		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "new-owner", limit, nil, owner), full)
+		require.NoError(t, marketDevice(t, cache, ctx, account, "legacy0", limit, nil, buyer), "legacy devices are not evicted")
 	})
 
 	t.Run("shrunk limit keeps devices and refuses new ones", func(t *testing.T) {
@@ -247,21 +249,38 @@ func TestMarketDeviceClasses(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			require.NoError(t, marketDevice(t, cache, ctx, account, fmt.Sprintf("b%d", i), 5, nil, buyer))
 		}
-		// Limit 5 -> 4: buyer limit 2 < 3 existing buyers.
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "b3", 4, nil, buyer), full)
-		require.NoError(t, marketDevice(t, cache, ctx, account, "b0", 4, nil, buyer))
-		require.NoError(t, marketDevice(t, cache, ctx, account, "o", 4, nil, owner))
-		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "o2", 4, nil, owner), full)
+		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "b3", 3, nil, buyer), full)
+		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "o", 3, nil, owner), full)
+		require.NoError(t, marketDevice(t, cache, ctx, account, "b0", 3, nil, buyer))
 	})
 
 	t.Run("unidentified device", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
 		require.ErrorIs(t, marketDevice(t, cache, ctx, 54, "  ", 5, nil, buyer), service.ErrMarketDeviceUnidentified)
 	})
+
+	// Acceptance: L = 1, the cycle admission already used, an existing
+	// owner-class record. After listing, the same device passes on the
+	// buyer path (e.g. the owner buying from the same machine) without a new
+	// admission; a new device is still refused.
+	t.Run("L=1 owner device after listing", func(t *testing.T) {
+		cache, ctx := newMarketIdentityCache(t)
+		const account = int64(55)
+		p := &service.CarpoolAdmissionPolicy{Generation: "00000000000000000009", Admissions: 1, InitialDue: "2026-11-19T00:00:00Z"}
+		require.NoError(t, marketDevice(t, cache, ctx, account, "laptop", 1, p, owner))
+		require.NoError(t, marketDevice(t, cache, ctx, account, "laptop", 1, p, buyer))
+		require.ErrorIs(t, marketDevice(t, cache, ctx, account, "other-machine", 1, p, buyer), full)
+		raw, err := cache.rdb.Get(ctx, carpoolAdmissionBudgetKey(account)).Result()
+		require.NoError(t, err)
+		var budget carpoolAdmissionBudget
+		require.NoError(t, json.Unmarshal([]byte(raw), &budget))
+		require.Equal(t, 1, budget.Used, "the reused device consumed no admission")
+	})
 }
 
 func TestMarketDeviceCycleBudget(t *testing.T) {
 	owner := service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}
+	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer}
 	full := service.ErrClaudeOAuthCarpoolDevicesFull
 	policy := func(q int) *service.CarpoolAdmissionPolicy {
 		return &service.CarpoolAdmissionPolicy{Generation: "00000000000000000001", Admissions: q, InitialDue: "2026-11-19T00:00:00Z"}
@@ -269,52 +288,44 @@ func TestMarketDeviceCycleBudget(t *testing.T) {
 
 	t.Run("Q=0 is unlimited for both classes", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
-		buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 1}
 		for i := 0; i < 3; i++ {
 			require.NoError(t, marketDevice(t, cache, ctx, 61, fmt.Sprintf("b%d", i), 10, policy(0), buyer))
 		}
 	})
 
-	t.Run("Q-Rq=0 blocks new buyer devices this cycle, not the owner", func(t *testing.T) {
+	t.Run("one budget Q for the whole account", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
-		buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
-		require.ErrorIs(t, marketDevice(t, cache, ctx, 62, "b0", 10, policy(2), buyer), full)
+		require.NoError(t, marketDevice(t, cache, ctx, 62, "b0", 10, policy(2), buyer))
 		require.NoError(t, marketDevice(t, cache, ctx, 62, "o0", 10, policy(2), owner))
-		require.NoError(t, marketDevice(t, cache, ctx, 62, "o1", 10, policy(2), owner))
-		require.ErrorIs(t, marketDevice(t, cache, ctx, 62, "o2", 10, policy(2), owner), full, "total Q")
+		require.ErrorIs(t, marketDevice(t, cache, ctx, 62, "o1", 10, policy(2), owner), full, "total Q")
+		require.ErrorIs(t, marketDevice(t, cache, ctx, 62, "b1", 10, policy(2), buyer), full)
 	})
 
-	t.Run("a budget from before the market counts its admissions as buyer ones", func(t *testing.T) {
+	t.Run("a budget from before the market keeps its count", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
-		buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
-		p := policy(5)
-		// Two unclassified admissions this cycle (old path).
+		p := policy(3)
 		for _, d := range []string{"x0", "x1"} {
 			_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, 64, d, service.ClientHints{}, 10, time.Now().Unix(), *p)
 			require.NoError(t, err)
 		}
-		// Buyer quota 5-2 = 3, two already used: one more buyer device only.
 		require.NoError(t, marketDevice(t, cache, ctx, 64, "b0", 10, p, buyer))
-		require.ErrorIs(t, marketDevice(t, cache, ctx, 64, "b1", 10, p, buyer), full)
-		require.NoError(t, marketDevice(t, cache, ctx, 64, "o0", 10, p, owner), "the owner keeps the reserved admissions")
+		require.ErrorIs(t, marketDevice(t, cache, ctx, 64, "o0", 10, p, owner), full, "2 + 1 = Q")
 	})
 
-	t.Run("buyers within Q-Rq, owner within Q; rollover resets both counts", func(t *testing.T) {
+	t.Run("rollover resets the count; BuyerUsed bookkeeping kept", func(t *testing.T) {
 		cache, ctx := newMarketIdentityCache(t)
-		buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 1}
 		p := policy(3)
 		require.NoError(t, marketDevice(t, cache, ctx, 63, "b0", 10, p, buyer))
 		require.NoError(t, marketDevice(t, cache, ctx, 63, "b1", 10, p, buyer))
-		require.ErrorIs(t, marketDevice(t, cache, ctx, 63, "b2", 10, p, buyer), full)
 		require.NoError(t, marketDevice(t, cache, ctx, 63, "o0", 10, p, owner))
-		require.ErrorIs(t, marketDevice(t, cache, ctx, 63, "o1", 10, p, owner), full)
+		require.ErrorIs(t, marketDevice(t, cache, ctx, 63, "b2", 10, p, buyer), full)
 
 		raw, err := cache.rdb.Get(ctx, carpoolAdmissionBudgetKey(63)).Result()
 		require.NoError(t, err)
 		var budget carpoolAdmissionBudget
 		require.NoError(t, json.Unmarshal([]byte(raw), &budget))
 		require.Equal(t, 3, budget.Used)
-		require.Equal(t, 2, budget.BuyerUsed)
+		require.Equal(t, 2, budget.BuyerUsed, "kept for the previous binary")
 
 		_, err = cache.ResetCarpoolAdmissionCycle(ctx, 63, 10, *p, "2026-11-20T00:00:00Z")
 		require.NoError(t, err)
@@ -330,7 +341,7 @@ func TestMarketDeviceCycleBudget(t *testing.T) {
 func TestMarketDeviceBudgetAfterMaintenanceThenPlainAdmissions(t *testing.T) {
 	cache, ctx := newMarketIdentityCache(t)
 	full := service.ErrClaudeOAuthCarpoolDevicesFull
-	p := service.CarpoolAdmissionPolicy{Generation: "00000000000000000002", Admissions: 5, InitialDue: "2026-11-19T00:00:00Z"}
+	p := service.CarpoolAdmissionPolicy{Generation: "00000000000000000002", Admissions: 3, InitialDue: "2026-11-19T00:00:00Z"}
 	// Cycle rollover (not the first cycle), then two plain admissions, then
 	// the account is listed in the same cycle.
 	_, err := cache.ResetCarpoolAdmissionCycle(ctx, 65, 10, p, "2026-11-20T00:00:00Z")
@@ -339,23 +350,24 @@ func TestMarketDeviceBudgetAfterMaintenanceThenPlainAdmissions(t *testing.T) {
 		_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, 65, d, service.ClientHints{}, 10, time.Now().Unix(), p)
 		require.NoError(t, err)
 	}
-	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
+	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer}
 	require.NoError(t, marketDevice(t, cache, ctx, 65, "b0", 10, &p, buyer))
-	require.ErrorIs(t, marketDevice(t, cache, ctx, 65, "b1", 10, &p, buyer), full, "plain admissions count as buyer ones: 2 + 1 = Q - Rq")
+	require.ErrorIs(t, marketDevice(t, cache, ctx, 65, "b1", 10, &p, buyer), full, "plain admissions count: 2 + 1 = Q")
 }
 
 func TestMarketDeviceBudgetUnlistRelistSameCycle(t *testing.T) {
 	cache, ctx := newMarketIdentityCache(t)
 	full := service.ErrClaudeOAuthCarpoolDevicesFull
-	p := service.CarpoolAdmissionPolicy{Generation: "00000000000000000003", Admissions: 5, InitialDue: "2026-11-19T00:00:00Z"}
-	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer, ReservedAdmissions: 2}
-	require.NoError(t, marketDevice(t, cache, ctx, 66, "b0", 10, &p, buyer)) // listed: classified
-	// Unlisted: two plain admissions in the same cycle.
+	p := service.CarpoolAdmissionPolicy{Generation: "00000000000000000003", Admissions: 3, InitialDue: "2026-11-19T00:00:00Z"}
+	buyer := service.MarketDeviceAdmission{Class: service.MarketDeviceClassBuyer}
+	require.NoError(t, marketDevice(t, cache, ctx, 66, "b0", 10, &p, buyer)) // shared
+	// Self-use: two plain admissions in the same cycle.
 	for _, d := range []string{"x0", "x1"} {
 		_, err := cache.GetOrCreateCarpoolDeviceWithPolicy(ctx, 66, d, service.ClientHints{}, 10, time.Now().Unix(), p)
 		require.NoError(t, err)
 	}
-	// Relisted: 1 + 2 = Q - Rq, no further buyer device this cycle.
+	// Shared again: 1 + 2 = Q, no further device this cycle; known ones work.
 	require.ErrorIs(t, marketDevice(t, cache, ctx, 66, "b1", 10, &p, buyer), full)
-	require.NoError(t, marketDevice(t, cache, ctx, 66, "o0", 10, &p, service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}))
+	require.ErrorIs(t, marketDevice(t, cache, ctx, 66, "o0", 10, &p, service.MarketDeviceAdmission{Class: service.MarketDeviceClassOwner}), full)
+	require.NoError(t, marketDevice(t, cache, ctx, 66, "x0", 10, &p, buyer), "a device registered while self-use is reused")
 }

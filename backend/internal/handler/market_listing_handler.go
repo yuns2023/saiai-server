@@ -3,6 +3,7 @@ package handler
 import (
 	"strconv"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -55,20 +56,32 @@ func (h *MarketListingHandler) Get(c *gin.Context) {
 }
 
 // Put handles PUT /api/v1/hosted/owned-accounts/:id/market with
-// {"group_id": <allowed tier>, "listed": true|false}. group_id is required
-// when listing; unlisting ignores it.
+// {"listed": true|false, "group_id"?: <tier>}: 共享 (listed) or 自用.
+// group_id is optional when the plan has exactly one tier (more than one →
+// 400 MARKET_TIER_REQUIRED); unlisting ignores it. A switch inside the
+// cooldown → 429 MARKET_SWITCH_COOLDOWN with Retry-After and
+// metadata.next_switch_at.
 func (h *MarketListingHandler) Put(c *gin.Context) {
 	userID, accountID, ok := h.ownerAndAccount(c)
 	if !ok {
 		return
 	}
 	var req ownerMarketRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Listed == nil || (*req.Listed && req.GroupID <= 0) {
-		response.BadRequest(c, "listed is required; group_id is required when listing")
+	if err := c.ShouldBindJSON(&req); err != nil || req.Listed == nil || req.GroupID < 0 {
+		response.BadRequest(c, "listed is required")
 		return
 	}
-	view, err := h.service.OwnerSet(c.Request.Context(), userID, accountID, req.GroupID, *req.Listed)
+	groupID := req.GroupID
+	if !*req.Listed {
+		groupID = 0
+	}
+	view, err := h.service.OwnerSet(c.Request.Context(), userID, accountID, groupID, *req.Listed)
 	if err != nil {
+		if app := infraerrors.FromError(err); app != nil && app.Reason == "MARKET_SWITCH_COOLDOWN" {
+			if seconds := app.Metadata["retry_after_seconds"]; seconds != "" {
+				c.Header("Retry-After", seconds)
+			}
+		}
 		response.ErrorFrom(c, err)
 		return
 	}

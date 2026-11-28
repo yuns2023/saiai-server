@@ -46,17 +46,23 @@ func (r *adminMarketRepo) GetListing(context.Context, int64) (*service.MarketLis
 	return r.listing, nil
 }
 
-func (r *adminMarketRepo) ListTierOptions(context.Context, []int64) ([]service.MarketTierOption, error) {
-	return []service.MarketTierOption{{GroupID: 3, Name: "T1", RateMultiplier: 1.2, Available: true}}, nil
+func (r *adminMarketRepo) ListPlanTierOptions(_ context.Context, plan, _ string, _ *int64) ([]service.MarketTierOption, error) {
+	if plan == "" {
+		return []service.MarketTierOption{}, nil
+	}
+	return []service.MarketTierOption{{GroupID: 3, Name: "T2-Max", RateMultiplier: 0.3, Plan: &plan, Available: true}}, nil
 }
 
 func (r *adminMarketRepo) AdminConfigure(_ context.Context, p service.MarketAdminConfigureParams) (*service.MarketListing, error) {
 	r.cfg = &p
-	params := p.Merge(p.Defaults)
-	if err := p.Validate(r.account(), params); err != nil {
+	if err := p.Validate(r.account()); err != nil {
 		return nil, err
 	}
-	r.listing = &service.MarketListing{AccountID: 11, OwnerUserID: 7, AllowedGroupIDs: p.AllowedGroupIDs, Status: service.MarketListingStatusUnlisted, Version: 1, Protection: params}
+	if p.Plan == "unknown" {
+		return nil, service.ErrMarketPlanUnknown
+	}
+	plan := p.Plan
+	r.listing = &service.MarketListing{AccountID: 11, OwnerUserID: 7, Plan: &plan, Status: service.MarketListingStatusUnlisted, Version: 1}
 	return r.listing, nil
 }
 
@@ -65,7 +71,7 @@ func (r *adminMarketRepo) AdminRevoke(context.Context, int64, int64) (*service.M
 		return nil, service.ErrMarketListingNotFound
 	}
 	r.listing.Status = service.MarketListingStatusRevoked
-	r.listing.AllowedGroupIDs = []int64{}
+	r.listing.Plan = nil
 	return r.listing, nil
 }
 
@@ -119,34 +125,42 @@ func TestAdminMarketListingHandlerJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/admin/accounts/11/market-listing", nil))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	viewKeys := []string{"account_id", "allowed_tiers", "default_protection", "ineligible_reason", "listing", "market_enabled", "owner_user_id"}
+	viewKeys := []string{"account_id", "allowed_tiers", "ineligible_reason", "listing", "market_enabled", "owner_user_id"}
 	require.Equal(t, viewKeys, marketJSONKeys(t, marketData(t, w)))
 	require.Contains(t, w.Body.String(), `"listing":null`)
 
 	w = httptest.NewRecorder()
-	// cap_5h_pct: a retired field an old tab may still send; ignored.
+	// Legacy fields an old tab may still send (allowed tiers, reservations,
+	// retired caps) are ignored.
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing",
-		bytes.NewBufferString(`{"allowed_group_ids":[3],"reserved_concurrency":0,"cap_5h_pct":50}`)))
+		bytes.NewBufferString(`{"plan":"max","allowed_group_ids":[9],"reserved_concurrency":2,"cap_5h_pct":50}`)))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "max", repo.cfg.Plan)
 	data := marketData(t, w)
 	require.Equal(t, viewKeys, marketJSONKeys(t, data))
 	var view struct {
-		Listing json.RawMessage `json:"listing"`
+		Listing      json.RawMessage   `json:"listing"`
+		AllowedTiers []json.RawMessage `json:"allowed_tiers"`
 	}
 	require.NoError(t, json.Unmarshal(data, &view))
-	require.Equal(t, []string{"account_id", "allowed_group_ids", "created_at", "listed_at", "owner_user_id", "protection",
+	require.Equal(t, []string{"account_id", "allowed_group_ids", "created_at", "listed_at", "owner_user_id", "plan",
 		"selected_group_id", "status", "updated_at", "version"}, marketJSONKeys(t, view.Listing))
-	require.Equal(t, 0, repo.listing.Protection.ReservedConcurrency, "explicit 0 is kept")
-	require.Equal(t, 2, repo.listing.Protection.ReservedDevices, "omitted = site default")
+	require.Contains(t, string(view.Listing), `"plan":"max"`)
+	require.Contains(t, string(view.Listing), `"allowed_group_ids":[3]`, "derived from the plan")
+	require.Len(t, view.AllowedTiers, 1)
+	require.NotContains(t, w.Body.String(), "protection")
 
-	for _, raw := range []string{`{}`, `{"reserved_concurrency":1}`, `nope`} {
+	for _, raw := range []string{`{}`, `{"plan":""}`, `{"plan":"  "}`, `{"allowed_group_ids":[3]}`, `nope`} {
 		w = httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing", bytes.NewBufferString(raw)))
 		require.Equal(t, http.StatusBadRequest, w.Code, raw)
 	}
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing", bytes.NewBufferString(`{"allowed_group_ids":[3],"reserved_concurrency":3}`)))
-	require.Equal(t, http.StatusBadRequest, w.Code, "reserved_concurrency must leave buyers a slot")
+	for _, raw := range []string{`{"plan":"Max"}`, `{"plan":"unknown"}`} {
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/admin/accounts/11/market-listing", bytes.NewBufferString(raw)))
+		require.Equal(t, http.StatusBadRequest, w.Code, raw)
+		require.Contains(t, w.Body.String(), "MARKET_PLAN_UNKNOWN", raw)
+	}
 
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/admin/accounts/11/market-listing", nil))
@@ -175,22 +189,28 @@ func TestResolveMarketSettings(t *testing.T) {
 			require.NotEmpty(t, msg, "cut %v", tc.rate)
 		}
 	}
-	got, msg := resolveMarketSettings(&marketSettingsRequest{MarketEarningFreezeDays: i(0), MarketDefaultReservedDevices: i(0)}, prev)
+	got, msg := resolveMarketSettings(&marketSettingsRequest{MarketEarningFreezeDays: i(0), MarketModeSwitchCooldownHours: i(0)}, prev)
 	require.Empty(t, msg)
 	require.Equal(t, 0, got.EarningFreezeDays)
-	require.Equal(t, 0, got.DefaultProtection.ReservedDevices)
+	require.Equal(t, 0, got.ModeSwitchCooldownHours, "explicit 0 = no cooldown")
 	require.True(t, got.PlatformCutRate.Equal(decimal.RequireFromString("0.2")), "omitted keeps stored")
+	got, msg = resolveMarketSettings(&marketSettingsRequest{MarketModeSwitchCooldownHours: i(168)}, prev)
+	require.Empty(t, msg)
+	require.Equal(t, 168, got.ModeSwitchCooldownHours)
 	for _, req := range []marketSettingsRequest{
 		{MarketEarningFreezeDays: i(91)}, {MarketMinConvertUSD: f(0)}, {MarketMinConvertUSD: f(1.005)},
-		{MarketDefaultReservedDevices: i(33)}, {MarketDefaultReservedAdmissions: i(-1)}, {MarketDefaultReservedConcurrency: i(-1)},
+		{MarketModeSwitchCooldownHours: i(169)}, {MarketModeSwitchCooldownHours: i(-1)},
 	} {
 		_, msg := resolveMarketSettings(&req, prev)
 		require.NotEmpty(t, msg, "%+v", req)
 	}
 
 	require.False(t, (&marketSettingsRequest{}).present(), "unrelated saves do not write the market block")
-	require.True(t, (&marketSettingsRequest{MarketDefaultReservedAdmissions: i(2)}).present())
-	require.Equal(t, []string{service.SettingKeyMarketDefaultReservedAdmissions}, (&marketSettingsRequest{MarketDefaultReservedAdmissions: i(2)}).providedKeys())
+	require.True(t, (&marketSettingsRequest{MarketModeSwitchCooldownHours: i(2)}).present())
+	require.Equal(t, []string{service.SettingKeyMarketModeSwitchCooldownHours}, (&marketSettingsRequest{MarketModeSwitchCooldownHours: i(2)}).providedKeys())
+	cool := prevMarket
+	cool.ModeSwitchCooldownHours = 6
+	require.Equal(t, []string{"market_mode_switch_cooldown_hours"}, diffMarketSettings(&service.SystemSettings{Market: &prevMarket}, &service.SystemSettings{Market: &cool}))
 	// Audit: an unrelated save (no market block written) reports no market change.
 	enabled := service.ParseMarketSettings(map[string]string{service.SettingKeyMarketEnabled: "true"})
 	require.Empty(t, diffMarketSettings(&service.SystemSettings{Market: &enabled}, &service.SystemSettings{}))
@@ -200,7 +220,10 @@ func TestResolveMarketSettings(t *testing.T) {
 
 	// The embedded request block decodes from the flat settings body.
 	var req UpdateSettingsRequest
-	require.NoError(t, json.Unmarshal([]byte(`{"market_enabled":true,"market_platform_cut_rate":0,"market_earning_freeze_days":3}`), &req))
+	require.NoError(t, json.Unmarshal([]byte(`{"market_enabled":true,"market_platform_cut_rate":0,"market_earning_freeze_days":3,
+		"market_mode_switch_cooldown_hours":12,"market_default_reserved_concurrency":2}`), &req))
+	require.Equal(t, 12, *req.MarketModeSwitchCooldownHours)
+	require.NotContains(t, req.providedKeys(), "market_default_reserved_concurrency", "removed keys are ignored")
 	require.NotNil(t, req.MarketEnabled)
 	require.True(t, *req.MarketEnabled)
 	require.NotNil(t, req.MarketPlatformCutRate)

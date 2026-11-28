@@ -693,3 +693,21 @@ func TestSelfOnboardedRefreshNeverDirect(t *testing.T) {
 	_, err = svc.RefreshAccountToken(context.Background(), acc)
 	require.ErrorIs(t, err, ErrAccountProxyRequired)
 }
+
+func TestHostedApproveMarketPlan(t *testing.T) {
+	h := newHostedHarness(t)
+	h.repo.getApp = &HostedApplication{ID: 3, Status: HostedApplicationStatusPending}
+	_, err := h.svc.Approve(context.Background(), 1, 3, HostedApproveRequest{ProxyMode: HostedApproveProxyExisting, ProxyID: 1, MarketPlan: " max "})
+	require.NoError(t, err)
+	require.Len(t, h.repo.approves, 1)
+	require.Equal(t, "max", h.repo.approves[0].MarketPlan, "passed to the approval transaction")
+
+	for _, bad := range []string{"Max", "max plan", "-x"} {
+		_, err = h.svc.Approve(context.Background(), 1, 3, HostedApproveRequest{ProxyMode: HostedApproveProxyExisting, ProxyID: 1, MarketPlan: bad})
+		require.Equal(t, "MARKET_PLAN_UNKNOWN", hostedReason(err), bad)
+	}
+	require.Len(t, h.repo.approves, 1, "refused before the transaction")
+	_, err = h.svc.Approve(context.Background(), 1, 3, HostedApproveRequest{ProxyMode: HostedApproveProxyExisting, ProxyID: 1})
+	require.NoError(t, err)
+	require.Empty(t, h.repo.approves[1].MarketPlan, "omitted: no listing")
+}

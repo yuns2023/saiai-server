@@ -100,6 +100,11 @@ func MarketTier(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMarketTier, v))
 }
 
+// MarketPlan applies equality check predicate on the "market_plan" field. It's identical to MarketPlanEQ.
+func MarketPlan(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMarketPlan, v))
+}
+
 // ShowAccountQuota applies equality check predicate on the "show_account_quota" field. It's identical to ShowAccountQuotaEQ.
 func ShowAccountQuota(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldShowAccountQuota, v))
@@ -648,6 +653,81 @@ func MarketTierEQ(v bool) predicate.Group {
 // MarketTierNEQ applies the NEQ predicate on the "market_tier" field.
 func MarketTierNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldMarketTier, v))
+}
+
+// MarketPlanEQ applies the EQ predicate on the "market_plan" field.
+func MarketPlanEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMarketPlan, v))
+}
+
+// MarketPlanNEQ applies the NEQ predicate on the "market_plan" field.
+func MarketPlanNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldMarketPlan, v))
+}
+
+// MarketPlanIn applies the In predicate on the "market_plan" field.
+func MarketPlanIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldMarketPlan, vs...))
+}
+
+// MarketPlanNotIn applies the NotIn predicate on the "market_plan" field.
+func MarketPlanNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldMarketPlan, vs...))
+}
+
+// MarketPlanGT applies the GT predicate on the "market_plan" field.
+func MarketPlanGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldMarketPlan, v))
+}
+
+// MarketPlanGTE applies the GTE predicate on the "market_plan" field.
+func MarketPlanGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldMarketPlan, v))
+}
+
+// MarketPlanLT applies the LT predicate on the "market_plan" field.
+func MarketPlanLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldMarketPlan, v))
+}
+
+// MarketPlanLTE applies the LTE predicate on the "market_plan" field.
+func MarketPlanLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldMarketPlan, v))
+}
+
+// MarketPlanContains applies the Contains predicate on the "market_plan" field.
+func MarketPlanContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldMarketPlan, v))
+}
+
+// MarketPlanHasPrefix applies the HasPrefix predicate on the "market_plan" field.
+func MarketPlanHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldMarketPlan, v))
+}
+
+// MarketPlanHasSuffix applies the HasSuffix predicate on the "market_plan" field.
+func MarketPlanHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldMarketPlan, v))
+}
+
+// MarketPlanIsNil applies the IsNil predicate on the "market_plan" field.
+func MarketPlanIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldMarketPlan))
+}
+
+// MarketPlanNotNil applies the NotNil predicate on the "market_plan" field.
+func MarketPlanNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldMarketPlan))
+}
+
+// MarketPlanEqualFold applies the EqualFold predicate on the "market_plan" field.
+func MarketPlanEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldMarketPlan, v))
+}
+
+// MarketPlanContainsFold applies the ContainsFold predicate on the "market_plan" field.
+func MarketPlanContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldMarketPlan, v))
 }
 
 // ShowAccountQuotaEQ applies the EQ predicate on the "show_account_quota" field.
