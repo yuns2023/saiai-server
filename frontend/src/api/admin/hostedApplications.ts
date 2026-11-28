@@ -43,6 +43,8 @@ export interface ApproveHostedApplicationRequest {
   carpool_device_limit: number
   carpool_admissions_per_cycle: number
   carpool_interval_hours: number
+  /** Optional sharing 套餐: the approval also grants sharing (the account starts as 自用). Omitted = no sharing. */
+  market_plan?: string
 }
 
 export interface ApproveHostedApplicationResult {
@@ -82,6 +84,8 @@ export interface ApproveForm {
   carpool_device_limit: number | ''
   carpool_admissions_per_cycle: number | ''
   carpool_interval_hours: number | ''
+  /** '' = 不开通共享. */
+  market_plan: string
 }
 
 /**
@@ -140,6 +144,8 @@ export function approvePayload(form: ApproveForm): ApproveHostedApplicationReque
     carpool_interval_hours: Number(form.carpool_interval_hours)
   }
   if (form.proxy_mode === 'existing' && form.proxy_id) body.proxy_id = form.proxy_id
+  // Only a chosen 套餐 is sent: none means the account cannot be shared until an administrator sets one.
+  if (form.market_plan) body.market_plan = form.market_plan
   return body
 }
 

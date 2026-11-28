@@ -191,6 +191,19 @@
         <p v-if="tried && numberProblems.length" class="text-xs text-red-600 dark:text-red-400" data-testid="number-error">
           {{ t('admin.hostedApplications.numbersInvalid') }}
         </p>
+
+        <div>
+          <label class="input-label">{{ t('admin.hostedApplications.marketPlan') }}</label>
+          <Select v-model="approveForm.market_plan" :options="planOptions" class="w-full sm:w-64" data-testid="market-plan-select" />
+          <p class="input-hint">{{ t('admin.hostedApplications.marketPlanHint') }}</p>
+          <p v-if="planGroupsFailed" class="mt-1 flex items-center gap-2 text-xs text-red-600 dark:text-red-400" data-testid="plan-groups-failed">
+            {{ t('admin.hostedApplications.groupsLoadFailed') }}
+            <button type="button" class="btn btn-secondary btn-sm" @click.prevent="loadPlanGroups">{{ t('admin.hostedApplications.retry') }}</button>
+          </p>
+          <p v-else-if="planOptions.length === 1" class="mt-1 text-xs text-gray-500 dark:text-dark-400" data-testid="plan-none-available">
+            {{ t('admin.hostedApplications.marketPlanEmpty') }}
+          </p>
+        </div>
         <p class="input-hint">{{ t('admin.hostedApplications.approveHint') }}</p>
       </form>
       <template #footer>
@@ -253,7 +266,8 @@ import {
   type ApproveHostedApplicationResult,
   type HostedApplicationStatus
 } from '@/api/admin/hostedApplications'
-import type { Proxy } from '@/types'
+import type { AdminGroup, Proxy } from '@/types'
+import { marketPlanOptions } from '@/utils/market'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
 import type { Column } from '@/components/common/types'
@@ -380,9 +394,28 @@ const approveResult = ref<ApproveHostedApplicationResult | null>(null)
 const approveForm = reactive<ApproveForm>({
   proxy_mode: 'existing',
   proxy_id: null,
-  ...defaults
+  ...defaults,
+  market_plan: ''
 })
 const tried = ref(false)
+
+/** Groups behind the 共享套餐 choices; a failed read leaves only 不开通共享 (approving still works). */
+const planGroups = ref<AdminGroup[]>([])
+const planGroupsFailed = ref(false)
+/** 不开通共享 (default) plus the distinct 套餐 of live Claude market tiers. */
+const planOptions = computed(() => [
+  { value: '', label: t('admin.hostedApplications.marketPlanNone') },
+  ...marketPlanOptions(planGroups.value, 'anthropic').map((p) => ({ value: p, label: p }))
+])
+
+async function loadPlanGroups() {
+  try {
+    planGroups.value = (await adminAPI.groups.getAll()) ?? []
+    planGroupsFailed.value = false
+  } catch {
+    planGroupsFailed.value = true
+  }
+}
 
 const proxyOptions = computed(() => proxies.value.map((p) => ({ value: p.id, label: `${p.name} · ${p.protocol}://${p.host}:${p.port}` })))
 
@@ -407,7 +440,8 @@ function openApprove(row: AdminHostedApplication) {
   Object.assign(approveForm, {
     proxy_mode: hasSubmittedProxy(row) ? 'submitted' : 'existing',
     proxy_id: null,
-    ...defaults
+    ...defaults,
+    market_plan: ''
   })
   tried.value = false
   approveResult.value = null
@@ -437,6 +471,9 @@ async function confirmApprove() {
     appStore.showSuccess(t('admin.hostedApplications.approveSuccess', { account: result.account_id }))
   } catch (err) {
     appStore.showError(errorMessage(err, t('admin.hostedApplications.approveFailed')))
+    // The tiers behind the 套餐 choices changed meanwhile: offer the current ones.
+    const code = (err as { reason?: unknown } | null)?.reason
+    if (code === 'MARKET_PLAN_UNKNOWN' || code === 'MARKET_PLAN_INVALID') void loadPlanGroups()
   } finally {
     busy.value = false
   }
@@ -497,6 +534,7 @@ function refreshAll() {
   void load()
   if (proxiesFailed.value) void loadProxies()
   if (!contextReady.value) void loadApproveContext()
+  void loadPlanGroups()
 }
 
 async function loadApproveContext() {
@@ -521,5 +559,6 @@ async function loadApproveContext() {
 onMounted(() => {
   void load()
   void loadApproveContext()
+  void loadPlanGroups()
 })
 </script>

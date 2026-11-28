@@ -1,8 +1,10 @@
 /**
- * Sharing market (P3a), owner side. An administrator allows an owned account
- * into some price tiers; the owner picks one and lists / unlists it. Sales to
- * other users earn the owner a share that is frozen for a while, then can be
- * converted into ordinary balance. Nothing here ever names a buyer.
+ * Sharing market, owner side. Each owned account is either 自用 (not on the
+ * market) or 共享 (sold on a market tier of its 套餐 to other users; my own
+ * hosted key then no longer uses it). An administrator assigns the 套餐 once;
+ * I switch between the two, at most once per `cooldown_hours`. Sales earn me a
+ * share that is frozen for a while, then can be converted into ordinary
+ * balance. Nothing here ever names a buyer.
  *
  * Field names follow the server DTOs exactly:
  * - /hosted/owned-accounts/:id/market → service.OwnerMarketView
@@ -11,6 +13,7 @@
  * Amounts are exact decimal strings; never parse them into floats for math.
  */
 import { api } from './client'
+import type { HostedWindow } from './hosted'
 
 export type MarketListingStatus = 'not_configured' | 'unlisted' | 'listed' | 'revoked'
 
@@ -24,11 +27,8 @@ export interface MarketTierOption {
   admin_member: boolean
 }
 
-export interface MarketProtection {
-  reserved_concurrency: number
-  reserved_devices: number
-  reserved_admissions: number
-}
+/** shared ⇔ status "listed". */
+export type MarketMode = 'self_use' | 'shared'
 
 export interface OwnerMarketView {
   account_id: number
@@ -36,14 +36,27 @@ export interface OwnerMarketView {
   status: MarketListingStatus | string
   selected_group_id: number | null
   version: number
+  /** 套餐 slug set by an administrator (e.g. "max"); null: the account cannot be shared. */
+  plan: string | null
+  mode: MarketMode | string
+  /** At most one switch per this many hours; 0 = no limit. */
+  cooldown_hours: number
+  /** RFC3339 (database time); null = may switch now. */
+  next_switch_at: string | null
+  /** Tiers of the account's 套餐. */
   allowed_tiers: MarketTierOption[]
-  protection: MarketProtection | null
-  /** Reason codes why it cannot be listed now (see lib/market reasonKey). */
+  /** Reason codes why it cannot switch now (see lib/market reasonKey). */
   unavailable_reasons: string[]
+  /** May switch to 共享 now. */
   can_list: boolean
+  /** May switch back to 自用 now. */
+  can_unlist: boolean
+  /** Upstream limit windows, same shape as the owned-accounts list (five_hour / seven_day); missing = unknown. */
+  upstream_windows: HostedWindow[]
 }
 
-export type OwnerMarketUpdate = { listed: true; group_id: number } | { listed: false }
+/** group_id only when the 套餐 has more than one tier (else the server picks the only one). */
+export type OwnerMarketUpdate = { listed: true; group_id?: number } | { listed: false }
 
 export interface OwnerEarnings {
   frozen: string
@@ -87,13 +100,19 @@ function accountPath(accountId: number): string {
 }
 
 function normaliseView(v: OwnerMarketView): OwnerMarketView {
+  const hours = v.cooldown_hours
   return {
     ...v,
     selected_group_id: v.selected_group_id ?? null,
+    plan: typeof v.plan === 'string' && v.plan ? v.plan : null,
+    mode: v.mode ?? (v.status === 'listed' ? 'shared' : 'self_use'),
+    cooldown_hours: typeof hours === 'number' && Number.isFinite(hours) && hours > 0 ? hours : 0,
+    next_switch_at: v.next_switch_at ?? null,
     allowed_tiers: v.allowed_tiers ?? [],
     unavailable_reasons: v.unavailable_reasons ?? [],
-    protection: v.protection ?? null,
-    can_list: v.can_list === true
+    can_list: v.can_list === true,
+    can_unlist: v.can_unlist === true,
+    upstream_windows: Array.isArray(v.upstream_windows) ? v.upstream_windows : []
   }
 }
 

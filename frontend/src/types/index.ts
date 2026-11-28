@@ -460,6 +460,8 @@ export interface Group {
   hosted_usage_enabled?: boolean
   /** Sharing-market price tier (standard anthropic, not hosted, rate > 0). Absent on older servers. */
   market_tier?: boolean
+  /** 套餐 slug of a market tier (e.g. "pro", "max"); only meaningful with market_tier. null = none (not sellable). */
+  market_plan?: string | null
   show_account_quota?: boolean
   status: 'active' | 'inactive'
   required_level_id: number | null
@@ -622,6 +624,8 @@ export interface CreateGroupRequest {
   hosted_usage_enabled?: boolean
   /** Sharing-market price tier (standard anthropic, not hosted, rate > 0). Absent on older servers. */
   market_tier?: boolean
+  /** 套餐 slug of a market tier (e.g. "pro", "max"); only meaningful with market_tier. null = none (not sellable). */
+  market_plan?: string | null
   show_account_quota?: boolean
   required_level_id?: number | null
   subscription_type?: SubscriptionType
@@ -681,6 +685,8 @@ export interface UpdateGroupRequest {
   hosted_usage_enabled?: boolean
   /** Sharing-market price tier (standard anthropic, not hosted, rate > 0). Absent on older servers. */
   market_tier?: boolean
+  /** 套餐 slug of a market tier (e.g. "pro", "max"); only meaningful with market_tier. null = none (not sellable). */
+  market_plan?: string | null
   show_account_quota?: boolean
   required_level_id?: number | null
   status?: 'active' | 'inactive'

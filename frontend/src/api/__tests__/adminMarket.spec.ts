@@ -8,10 +8,9 @@ import { marketAPI } from '@/api/admin/market'
 const view = {
   account_id: 11,
   owner_user_id: 7,
-  listing: { account_id: 11, owner_user_id: 7, allowed_group_ids: null, selected_group_id: null, status: 'unlisted', version: 2, protection: {}, listed_at: null, created_at: 'x', updated_at: 'x' },
+  listing: { account_id: 11, owner_user_id: 7, plan: 'max', allowed_group_ids: null, selected_group_id: null, status: 'unlisted', version: 2, listed_at: null, created_at: 'x', updated_at: 'x' },
   allowed_tiers: null,
   ineligible_reason: null,
-  default_protection: {},
   market_enabled: false
 }
 
@@ -25,12 +24,12 @@ describe('admin marketAPI', () => {
     expect(v.allowed_tiers).toEqual([])
     expect(v.listing?.allowed_group_ids).toEqual([])
     expect(v.ineligible_reason).toBe('')
+    expect(v.listing?.plan).toBe('max')
 
     http.put.mockResolvedValue({ data: view })
-    const body = { allowed_group_ids: [], reserved_concurrency: 0, reserved_devices: 0, reserved_admissions: 0 }
-    await marketAPI.putListing(11, body)
-    // allowed_group_ids is always sent (an empty list allows nothing); explicit zeros stay zeros.
-    expect(http.put).toHaveBeenCalledWith('/admin/accounts/11/market-listing', body)
+    await marketAPI.putListing(11, { plan: 'pro' })
+    // Only the plan: the tiers follow from it, there are no reservations.
+    expect(http.put).toHaveBeenCalledWith('/admin/accounts/11/market-listing', { plan: 'pro' })
 
     http.delete.mockResolvedValue({ data: { ...view, listing: null } })
     expect((await marketAPI.revokeListing(11)).listing).toBeNull()

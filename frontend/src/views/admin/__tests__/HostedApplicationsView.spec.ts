@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import HostedApplicationsView from '../HostedApplicationsView.vue'
 
-const { list, approve, reject, getAll, getSettings, showError, showSuccess, store } = vi.hoisted(() => ({
+const { list, approve, reject, getAll, groupsGetAll, getSettings, showError, showSuccess, store } = vi.hoisted(() => ({
   list: vi.fn(),
   approve: vi.fn(),
   reject: vi.fn(),
   getAll: vi.fn(),
+  groupsGetAll: vi.fn(),
   getSettings: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -39,14 +40,18 @@ vi.mock('@/components/common/DataTable.vue', () => ({
 vi.mock('@/utils/format', () => ({ formatDateTime: (s: string) => s }))
 vi.mock('@/composables/usePersistedPageSize', () => ({ getPersistedPageSize: () => 20 }))
 vi.mock('@/api/admin', () => ({
-  adminAPI: { hostedApplications: { list, approve, reject }, proxies: { getAll }, settings: { getSettings } }
+  adminAPI: { hostedApplications: { list, approve, reject }, proxies: { getAll }, groups: { getAll: groupsGetAll }, settings: { getSettings } }
 }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError, showSuccess }) }))
 vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => store }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) => (params ? `${key} ${JSON.stringify(params)}` : key),
-    te: (key: string) => key.startsWith('admin.hostedApplications.statuses.') || (key.startsWith('admin.hostedApplications.errors.SELF_ONBOARD_') || key.startsWith('admin.hostedApplications.errors.UPSTREAM_'))
+    te: (key: string) =>
+      key.startsWith('admin.hostedApplications.statuses.') ||
+      key.startsWith('admin.hostedApplications.errors.SELF_ONBOARD_') ||
+      key.startsWith('admin.hostedApplications.errors.UPSTREAM_') ||
+      key.startsWith('admin.hostedApplications.errors.MARKET_PLAN_')
   })
 }))
 
@@ -58,6 +63,17 @@ const withProxy = {
 }
 const withoutProxy = { ...withProxy, id: 2, proxy_display: '', proxy_protocol: '', proxy_host: '', proxy_port: 0, has_proxy_auth: false }
 const approvedRow = { ...withProxy, id: 3, status: 'approved', account_id: 77, reviewed_at: '2026-11-18T02:00:00Z' }
+
+/** Market tiers behind the 共享套餐 choices: only active Claude tiers with a plan count, each plan once. */
+const planGroups = [
+  { id: 3, name: 'T1-Pro', platform: 'anthropic', status: 'active', rate_multiplier: 1.2, market_tier: true, market_plan: 'pro' },
+  { id: 4, name: 'T2-Max', platform: 'anthropic', status: 'active', rate_multiplier: 1.6, market_tier: true, market_plan: 'max' },
+  { id: 5, name: 'T2-Max-B', platform: 'anthropic', status: 'active', rate_multiplier: 1.8, market_tier: true, market_plan: 'max' },
+  { id: 6, name: 'T3-Ultra-off', platform: 'anthropic', status: 'inactive', rate_multiplier: 2, market_tier: true, market_plan: 'ultra' },
+  { id: 7, name: 'no-plan tier', platform: 'anthropic', status: 'active', rate_multiplier: 1, market_tier: true, market_plan: null },
+  { id: 8, name: 'plain', platform: 'anthropic', status: 'active', rate_multiplier: 1, market_tier: false, market_plan: 'stale' },
+  { id: 9, name: 'oai', platform: 'openai', status: 'active', rate_multiplier: 1, market_tier: true, market_plan: 'oai' }
+]
 
 const settings = {
   hosted_self_onboard_enabled: true,
@@ -84,6 +100,7 @@ beforeEach(() => {
   list.mockResolvedValue({ items: [structuredClone(withProxy), structuredClone(withoutProxy), structuredClone(approvedRow)], total: 3, page: 1, page_size: 20, pages: 1 })
   getAll.mockResolvedValue([{ id: 8, name: 'HK-1', protocol: 'socks5', host: 'hk.example.com', port: 1080, status: 'active' }])
   getSettings.mockResolvedValue(structuredClone(settings))
+  groupsGetAll.mockResolvedValue(structuredClone(planGroups))
 })
 
 describe('Hosting applications (admin)', () => {
@@ -249,6 +266,76 @@ describe('Hosting applications (admin)', () => {
     await w.get('[data-testid=status-filter]').setValue('')
     await flushPromises()
     expect(list).toHaveBeenLastCalledWith(1, 10, { status: '' })
+  })
+
+  describe('共享套餐', () => {
+    const planSelect = (w: Awaited<ReturnType<typeof mountView>>) => w.get('[data-testid=market-plan-select]')
+
+    it('defaults to 不开通共享; the choices are the distinct plans of live Claude market tiers; nothing is sent by default', async () => {
+      approve.mockResolvedValue({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      const options = planSelect(w).findAll('option').map((o) => o.element.getAttribute('value') ?? '')
+      // The stand-in adds an empty placeholder first; the first real option is 不开通共享 ('').
+      expect(options).toEqual(['', '', 'max', 'pro'])
+      expect(planSelect(w).text()).toContain('admin.hostedApplications.marketPlanNone')
+      expect((planSelect(w).element as HTMLSelectElement).value).toBe('')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve.mock.calls[0][1]).not.toHaveProperty('market_plan')
+    })
+
+    it('a chosen plan is sent as market_plan, and the next dialog starts from 不开通共享 again', async () => {
+      approve.mockResolvedValue({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      await planSelect(w).setValue('max')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).toHaveBeenCalledWith(1, expect.objectContaining({ market_plan: 'max', proxy_mode: 'submitted' }))
+      // Close the result, open the next approval.
+      expect(w.find('[data-testid=approve-result]').exists()).toBe(true)
+      await w.get('.dialog button.btn-primary').trigger('click')
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      expect((planSelect(w).element as HTMLSelectElement).value).toBe('')
+    })
+
+    it('MARKET_PLAN_UNKNOWN shows its message and reads the tiers again', async () => {
+      approve.mockRejectedValue({ status: 400, reason: 'MARKET_PLAN_UNKNOWN', message: 'no live, active market tier has this plan' })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      await planSelect(w).setValue('pro')
+      expect(groupsGetAll).toHaveBeenCalledTimes(1)
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(showError).toHaveBeenCalledWith('admin.hostedApplications.errors.MARKET_PLAN_UNKNOWN')
+      expect(groupsGetAll).toHaveBeenCalledTimes(2)
+      // The dialog stays open for another choice.
+      expect(w.find('[data-testid=approve-dialog]').exists()).toBe(true)
+    })
+
+    it('a failed group read leaves only 不开通共享 (with a retry); approving still works', async () => {
+      groupsGetAll.mockRejectedValueOnce({ status: 500, message: 'boom' })
+      approve.mockResolvedValue({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      expect(w.get('[data-testid=plan-groups-failed]').text()).toContain('admin.hostedApplications.groupsLoadFailed')
+      expect(planSelect(w).findAll('option').map((o) => o.element.getAttribute('value'))).toEqual(['', ''])
+      await w.get('[data-testid=plan-groups-failed] button').trigger('click')
+      await flushPromises()
+      expect(w.find('[data-testid=plan-groups-failed]').exists()).toBe(false)
+      expect(planSelect(w).findAll('option')).toHaveLength(4)
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).toHaveBeenCalledTimes(1)
+    })
+
+    it('no market tier with a plan: says so; only 不开通共享', async () => {
+      groupsGetAll.mockResolvedValue([planGroups[4], planGroups[5]])
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      expect(w.find('[data-testid=plan-none-available]').exists()).toBe(true)
+    })
   })
 
   it('reloads with the chosen status filter', async () => {

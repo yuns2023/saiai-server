@@ -56,9 +56,7 @@ const market = {
   market_platform_cut_rate: 0.15,
   market_earning_freeze_days: 7,
   market_min_convert_usd: 1,
-  market_default_reserved_concurrency: 1,
-  market_default_reserved_devices: 2,
-  market_default_reserved_admissions: 1
+  market_mode_switch_cooldown_hours: 24
 }
 
 function stored(over: Record<string, unknown> = {}) {
@@ -123,7 +121,7 @@ describe('admin settings: sharing market', () => {
     expect((w.get('[data-testid=market-cut-rate]').element as HTMLInputElement).value).toBe('0')
   })
 
-  it('market on: invalid values block the save (cut rate 5 decimals, empty cut rate, min convert 3 decimals, cap 0)', async () => {
+  it('market on: invalid values block the save (cut rate 5 decimals, empty cut rate, min convert 3 decimals, cooldown out of range)', async () => {
     settingsApi.getSettings.mockResolvedValue(stored())
     const w = await mountView()
     for (const [id, value] of [
@@ -138,8 +136,10 @@ describe('admin settings: sharing market', () => {
     await w.get('[data-testid=market-min-convert]').setValue('1.005')
     await save(w)
     await w.get('[data-testid=market-min-convert]').setValue('1')
-    await w.get('[data-testid=market-default-market_default_reserved_devices]').setValue('33')
-    await save(w)
+    for (const value of ['169', '-1', '1.5', '']) {
+      await w.get('[data-testid=market-switch-cooldown]').setValue(value)
+      await save(w)
+    }
     expect(settingsApi.updateSettings).not.toHaveBeenCalled()
     expect(appStore.showError).toHaveBeenCalledWith('market.settings.invalidField')
   })
@@ -157,11 +157,43 @@ describe('admin settings: sharing market', () => {
     expect((w.get('[data-testid=market-cut-rate]').element as HTMLInputElement).value).toBe('0.15')
   })
 
+  it('switch cooldown: loads the stored value, 0 is a value (no limit), only an edit is sent; the reserved defaults are gone', async () => {
+    settingsApi.getSettings.mockResolvedValue(stored({ market_mode_switch_cooldown_hours: 12 }))
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...stored({ market_mode_switch_cooldown_hours: 12 }), ...payload }))
+    const w = await mountView()
+    const field = w.get('[data-testid=market-switch-cooldown]')
+    expect((field.element as HTMLInputElement).value).toBe('12')
+    expect(field.attributes('max')).toBe('168')
+    expect(w.find('[data-testid^=market-default-]').exists()).toBe(false)
+    expect(w.get('[data-testid=market-settings]').text()).not.toContain('defaultsTitle')
+    await save(w)
+    expect(marketKeys(settingsApi.updateSettings.mock.calls[0][0])).toEqual({})
+    await field.setValue('0')
+    await save(w)
+    const sent = marketKeys(settingsApi.updateSettings.mock.calls[1][0])
+    expect(sent).toEqual({ market_mode_switch_cooldown_hours: 0 })
+    expect(Object.keys(sent).some((k) => k.startsWith('market_default_'))).toBe(false)
+    await field.setValue('168')
+    await save(w)
+    expect(marketKeys(settingsApi.updateSettings.mock.calls[2][0])).toEqual({ market_mode_switch_cooldown_hours: 168 })
+  })
+
+  it('a server without the cooldown key: the default 24 shows and is not written back by an unrelated save', async () => {
+    const { market_mode_switch_cooldown_hours: _gone, ...older } = stored()
+    settingsApi.getSettings.mockResolvedValue(older)
+    settingsApi.updateSettings.mockImplementation(async (payload) => ({ ...older, ...payload }))
+    const w = await mountView()
+    expect((w.get('[data-testid=market-switch-cooldown]').element as HTMLInputElement).value).toBe('24')
+    await save(w)
+    expect(marketKeys(settingsApi.updateSettings.mock.calls[0][0])).toEqual({})
+  })
+
   it('a failed settings read blocks saving: market values are never written from defaults', async () => {
     settingsApi.getSettings.mockRejectedValue({ status: 500, message: 'boom' })
     const w = await mountView()
     expect((w.get('[data-testid=settings-save]').element as HTMLButtonElement).disabled).toBe(true)
     await w.get('[data-testid=market-cut-rate]').setValue('0')
+    await w.get('[data-testid=market-switch-cooldown]').setValue('0')
     await save(w)
     expect(settingsApi.updateSettings).not.toHaveBeenCalled()
   })

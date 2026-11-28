@@ -7,9 +7,10 @@
  * for it to be taken down. While self-onboarding is open, the page also lists
  * my applications and offers the form to submit my own Claude account.
  *
- * Sharing market: when an administrator allowed any of my accounts into a
- * price tier, or I have earnings, each current account gets a 共享出售 block
- * and the page a 共享收益 section. Otherwise none of it shows.
+ * Sharing market: every current account gets a 共享出售 block (自用 / 共享中,
+ * or 未开通 until an administrator assigns a 套餐). The page shows a 共享收益
+ * section when I have earnings or ledger history, or one of my current
+ * accounts is shared or may be shared right now.
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -24,7 +25,7 @@ import HostedOnboard from '@/components/HostedOnboard.vue'
 import { intlLocale } from '@/i18n'
 import { cost, count, dateTime, daysAgo, shortTime, ymd } from '@/lib/format'
 import { localMidnight, MAX_SPAN_DAYS, rangeProblem, utcWindow } from '@/lib/hosted'
-import { hasEarnings, hasPermission } from '@/lib/market'
+import { hasEarnings, sharesOrCanShare } from '@/lib/market'
 import { onboardErrorKey } from '@/lib/selfOnboard'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -161,7 +162,7 @@ async function ownerAction(a: OwnedAccount, action: OwnerAction): Promise<void> 
       app.notify('ok', t(`hosted.owner_${action}_done`))
       // Status and badges then come from the server, read after this write.
       void loadAccounts(true)
-      // Pausing or asking for take-down also stops sharing.
+      // The sharing block shows these states too (paused, take-down requested).
       void loadMarketView(a.account_id)
     }
   } catch (e) {
@@ -192,15 +193,18 @@ const hasLedger = ref(false)
 const marketSeq = new Map<number, number>()
 let earningsSeq = 0
 
-/** Shown only when one of my current accounts may be shared (or is still listed), or there are earnings. */
-const showMarket = computed(
+/**
+ * 共享收益: its own condition, apart from the per-account blocks — earnings or ledger
+ * history, or one of my current accounts is shared or may be shared right now.
+ */
+const showEarnings = computed(
   () =>
-    hosted.accounts.some((a) => a.current && hasPermission(marketViews.value[a.account_id])) ||
+    hosted.accounts.some((a) => a.current && sharesOrCanShare(marketViews.value[a.account_id])) ||
     hasEarnings(earnings.value) ||
     (earnings.value !== null && hasLedger.value)
 )
 /** A failed earnings read is reported to owners (and whoever already saw earnings), never to everyone else. */
-const showEarningsError = computed(() => earningsFailed.value && (showMarket.value || earnings.value !== null || hosted.accounts.length > 0))
+const showEarningsError = computed(() => earningsFailed.value && (showEarnings.value || earnings.value !== null || hosted.accounts.length > 0))
 
 function isNotFound(e: unknown): boolean {
   return (e as Partial<ApiError> | undefined)?.status === 404
@@ -591,9 +595,9 @@ onUnmounted(() => {
                   <span class="text-xs text-ink-3">{{ a.owner_paused ? t('hosted.pausedHint') : t('hosted.pauseHint') }}</span>
                 </template>
               </div>
-              <template v-if="a.current && (showMarket || marketFailed[a.account_id])">
+              <template v-if="a.current">
                 <HostedMarket
-                  v-if="showMarket && marketViews[a.account_id]"
+                  v-if="marketViews[a.account_id]"
                   :view="marketViews[a.account_id]"
                   @updated="setMarketView"
                   @reload="loadMarketView(a.account_id)"
@@ -613,7 +617,7 @@ onUnmounted(() => {
       {{ earnings ? t('earnings.refreshFailed') : t('earnings.loadFailed') }}
       <button type="button" class="btn btn-quiet btn-sm" @click="loadEarnings">{{ t('common.retry') }}</button>
     </p>
-    <HostedEarnings v-if="showMarket && earnings" :earnings="earnings" />
+    <HostedEarnings v-if="showEarnings && earnings" :earnings="earnings" />
 
     <p v-if="appsFailed" class="mt-8 text-sm text-seal" role="alert" data-testid="apps-error">
       {{ t('onboard.apps.loadFailed') }} <button type="button" class="btn btn-quiet btn-sm" @click="loadApplications">{{ t('common.retry') }}</button>

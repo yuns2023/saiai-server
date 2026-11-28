@@ -1,7 +1,8 @@
 /**
- * Sharing market (P3a), admin side.
- * - /admin/accounts/:id/market-listing: which tiers an owned account may be
- *   listed in, and the owner-protection parameters (service.AdminMarketListingView).
+ * Sharing market, admin side.
+ * - /admin/accounts/:id/market-listing: the 套餐 (plan) of an owned account;
+ *   its tiers are the live market tiers of that plan, and the owner switches
+ *   between 自用 and 共享 (service.AdminMarketListingView).
  * - /admin/market/earnings[/entries|/reverse]: per-owner earnings, the ledger
  *   and the reverse of frozen earnings (service.AdminOwnerEarningsPage …).
  * Field names follow the server DTO json tags; amounts are exact decimal strings.
@@ -10,23 +11,16 @@ import { apiClient } from '../client'
 
 export type MarketListingStatus = 'unlisted' | 'listed' | 'revoked'
 
-export interface MarketProtection {
-  reserved_concurrency: number
-  reserved_devices: number
-  reserved_admissions: number
-}
-
-/** At most this many allowed tiers per account (migration 134 cardinality CHECK). */
-export const MAX_MARKET_ALLOWED_GROUPS = 32
-
 export interface MarketListing {
   account_id: number
   owner_user_id: number
+  /** 套餐 slug; null = none (the owner cannot share). */
+  plan: string | null
+  /** Derived from the plan (read-only). */
   allowed_group_ids: number[]
   selected_group_id: number | null
   status: MarketListingStatus | string
   version: number
-  protection: MarketProtection
   listed_at: string | null
   created_at: string
   updated_at: string
@@ -45,16 +39,16 @@ export interface AdminMarketListingView {
   owner_user_id: number | null
   /** null: never configured. */
   listing: MarketListing | null
+  /** Tiers derived from the plan. */
   allowed_tiers: MarketTierOption[]
   /** "" when the account type/config can be shared; else a reason code. */
   ineligible_reason: string
-  default_protection: MarketProtection
   market_enabled: boolean
 }
 
-/** PUT body: allowed_group_ids is required (may be []); omitted protection fields keep the stored value. */
-export interface AdminMarketListingUpdate extends Partial<MarketProtection> {
-  allowed_group_ids: number[]
+/** PUT body: the 套餐 slug (required). Creates the listing (自用) or changes its plan; re-grants a revoked one. */
+export interface AdminMarketListingUpdate {
+  plan: string
 }
 
 export interface AdminOwnerEarningSummary {
@@ -131,7 +125,7 @@ function listingPath(accountId: number): string {
 function normaliseListingView(v: AdminMarketListingView): AdminMarketListingView {
   return {
     ...v,
-    listing: v.listing ? { ...v.listing, allowed_group_ids: v.listing.allowed_group_ids ?? [] } : null,
+    listing: v.listing ? { ...v.listing, plan: v.listing.plan || null, allowed_group_ids: v.listing.allowed_group_ids ?? [] } : null,
     allowed_tiers: v.allowed_tiers ?? [],
     ineligible_reason: v.ineligible_reason ?? ''
   }

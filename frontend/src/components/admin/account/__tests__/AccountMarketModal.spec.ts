@@ -11,7 +11,9 @@ vi.mock('@/stores/app', () => ({ useAppStore: () => store }))
 vi.mock('@/api/client', () => ({ apiClient: {} }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}:${JSON.stringify(p)}` : key), te: () => true }) }))
 
-const protection = { reserved_concurrency: 1, reserved_devices: 2, reserved_admissions: 1 }
+function listing(over: Record<string, unknown> = {}) {
+  return { account_id: 11, owner_user_id: 7, plan: 'max', allowed_group_ids: [4], selected_group_id: null, status: 'unlisted', version: 1, ...over }
+}
 
 function view(over: Record<string, unknown> = {}) {
   return {
@@ -20,18 +22,20 @@ function view(over: Record<string, unknown> = {}) {
     listing: null,
     allowed_tiers: [],
     ineligible_reason: '',
-    default_protection: protection,
     market_enabled: true,
     ...over
   }
 }
 
 const tierGroups = [
-  { id: 3, name: 'T1-Pro', platform: 'anthropic', rate_multiplier: 1.2, status: 'active', market_tier: true },
-  { id: 4, name: 'T2-Max', platform: 'anthropic', rate_multiplier: 1.6, status: 'active', market_tier: true },
-  { id: 5, name: 'plain', platform: 'anthropic', rate_multiplier: 1, status: 'active', market_tier: false },
-  { id: 6, name: 'oai-tier', platform: 'openai', rate_multiplier: 1, status: 'active', market_tier: true }
+  { id: 3, name: 'T1-Pro', platform: 'anthropic', rate_multiplier: 1.2, status: 'active', market_tier: true, market_plan: 'pro' },
+  { id: 4, name: 'T2-Max', platform: 'anthropic', rate_multiplier: 1.6, status: 'active', market_tier: true, market_plan: 'max' },
+  { id: 5, name: 'plain', platform: 'anthropic', rate_multiplier: 1, status: 'active', market_tier: false, market_plan: null },
+  { id: 6, name: 'oai-tier', platform: 'openai', rate_multiplier: 1, status: 'active', market_tier: true, market_plan: 'oai' },
+  { id: 7, name: 'T3-Ultra', platform: 'anthropic', rate_multiplier: 2, status: 'inactive', market_tier: true, market_plan: 'ultra' }
 ]
+
+const planValues = (w: Awaited<ReturnType<typeof mountModal>>) => w.get('[data-testid=market-plan]').findAll('option').map((o) => o.element.getAttribute('value'))
 
 const mountModal = async (account: Partial<Account> = {}) => {
   const w = mount(AccountMarketModal, {
@@ -53,63 +57,76 @@ beforeEach(() => {
 })
 
 describe('AccountMarketModal', () => {
-  it('new config: offers only this platform\'s tiers, starts from the defaults, saves explicit zeros', async () => {
+  it('new config: one 套餐 select with this platform\'s live plans, no tier checkboxes or reservations; saves PUT {plan}', async () => {
     market.getListing.mockResolvedValue(view())
     const w = await mountModal()
-    expect(w.find('[data-testid=market-allow-3]').exists()).toBe(true)
-    expect(w.find('[data-testid=market-allow-4]').exists()).toBe(true)
-    expect(w.find('[data-testid=market-allow-5]').exists()).toBe(false)
-    expect(w.find('[data-testid=market-allow-6]').exists()).toBe(false)
-    expect((w.get('[data-testid=market-reserved_devices]').element as HTMLInputElement).value).toBe('2')
-    // Per-account bound: concurrency 4 → at most 3 reserved.
-    expect(w.get('[data-testid=market-reserved_concurrency]').attributes('max')).toBe('3')
-
-    await w.get('[data-testid=market-allow-4] input').setValue(true)
-    await w.get('[data-testid=market-allow-3] input').setValue(true)
-    await w.get('[data-testid=market-reserved_concurrency]').setValue('0')
-    market.putListing.mockResolvedValue(view({ listing: { allowed_group_ids: [3, 4], status: 'unlisted', version: 1, protection: { ...protection, reserved_concurrency: 0 } } }))
+    expect(planValues(w)).toEqual(['', 'max', 'pro'])
+    expect(w.find('[data-testid^=market-allow-]').exists()).toBe(false)
+    expect(w.find('[data-testid^=market-reserved_]').exists()).toBe(false)
+    expect(w.text()).not.toContain('protection')
+    // Nothing chosen: refused before sending.
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(market.putListing).toHaveBeenCalledWith(11, { allowed_group_ids: [3, 4], ...protection, reserved_concurrency: 0 })
+    expect(market.putListing).not.toHaveBeenCalled()
+    expect(w.get('[data-testid=market-error]').text()).toBe('market.account.planRequired')
+
+    await w.get('[data-testid=market-plan]').setValue('max')
+    // A plan not saved yet: the tiers are a preview from the group list.
+    expect(w.get('[data-testid=market-tier-4]').text()).toContain('T2-Max ×1.6')
+    expect(w.find('[data-testid=market-tier-3]').exists()).toBe(false)
+    expect(w.find('[data-testid=market-plan-preview]').exists()).toBe(true)
+    market.getListing.mockResolvedValue(view())
+    market.putListing.mockResolvedValue(
+      view({ listing: listing(), allowed_tiers: [{ group_id: 4, name: 'T2-Max', rate_multiplier: 1.6, available: true, admin_member: false }] })
+    )
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(market.putListing).toHaveBeenCalledWith(11, { plan: 'max' })
     expect(w.emitted('updated')).toHaveLength(1)
+    expect(w.find('[data-testid=market-plan-preview]').exists()).toBe(false)
   })
 
-  it('refuses an out-of-range value before sending (static and per-account bounds)', async () => {
-    market.getListing.mockResolvedValue(view())
-    const w = await mountModal()
-    await w.get('[data-testid=market-reserved_devices]').setValue('-1')
-    await w.get('form').trigger('submit')
-    await flushPromises()
-    expect(market.putListing).not.toHaveBeenCalled()
-    await w.get('[data-testid=market-reserved_devices]').setValue('2')
-    // Concurrency 4: reserving 4 would leave buyers nothing.
-    await w.get('[data-testid=market-reserved_concurrency]').setValue('4')
-    await w.get('form').trigger('submit')
-    await flushPromises()
-    expect(market.putListing).not.toHaveBeenCalled()
-    expect(w.get('[data-testid=market-error]').text()).toContain('market.account.invalidField')
-  })
-
-  it('existing listing: shows status/version, keeps a tier that is no longer a tier, shows server errors', async () => {
+  it('existing listing: shows 共享中 status, the stored plan and the server-derived tiers read-only; keeps a plan with no live tier', async () => {
     market.getListing.mockResolvedValue(
       view({
-        listing: { allowed_group_ids: [3, 99], selected_group_id: 3, status: 'listed', version: 5, protection },
-        allowed_tiers: [{ group_id: 3, name: 'T1-Pro', rate_multiplier: 1.2, available: true, admin_member: false }]
+        listing: listing({ plan: 'legacy', status: 'listed', selected_group_id: 9, version: 5 }),
+        allowed_tiers: [{ group_id: 9, name: 'Old-Tier', rate_multiplier: 1.4, available: false, admin_member: false }]
       })
     )
     const w = await mountModal()
     expect(w.get('[data-testid=market-status-badge]').text()).toBe('market.status.listed')
     expect(w.get('[data-testid=market-version]').text()).toContain('"v":5')
-    expect(w.get('[data-testid=market-allow-99]').text()).toContain('market.account.tierGone')
-    market.putListing.mockRejectedValue({ status: 400, reason: 'MARKET_INVALID_PARAMS', message: 'reserved_devices must be at most the device limit - 1' })
+    expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('legacy')
+    expect(planValues(w)).toEqual(['', 'max', 'pro', 'legacy'])
+    expect(w.get('[data-testid=market-plan]').text()).toContain('market.account.planNoTier')
+    expect(w.get('[data-testid=market-tier-9]').text()).toContain('market.account.tierInactive')
+    market.putListing.mockRejectedValue({ status: 400, reason: 'MARKET_PLAN_UNKNOWN', message: 'no live, active market tier has this plan' })
     await w.get('form').trigger('submit')
     await flushPromises()
-    expect(w.get('[data-testid=market-error]').text()).toBe('market.errors.MARKET_INVALID_PARAMS（reserved_devices must be at most the device limit - 1）')
+    expect(market.putListing).toHaveBeenCalledWith(11, { plan: 'legacy' })
+    expect(w.get('[data-testid=market-error]').text()).toBe('market.errors.MARKET_PLAN_UNKNOWN')
+  })
+
+  it('a plan with no live tier in the preview says so', async () => {
+    market.getListing.mockResolvedValue(view({ listing: listing({ plan: 'legacy' }) }))
+    const w = await mountModal()
+    expect(w.find('[data-testid=market-derived-empty]').exists()).toBe(true)
+  })
+
+  it('a revoked listing: saving a plan re-grants (hint shown, PUT {plan})', async () => {
+    market.getListing.mockResolvedValue(view({ listing: listing({ status: 'revoked', version: 4 }) }))
+    const w = await mountModal()
+    expect(w.find('[data-testid=market-revoke]').exists()).toBe(false)
+    expect(w.find('[data-testid=market-regrant-hint]').exists()).toBe(true)
+    market.putListing.mockResolvedValue(view({ listing: listing({ version: 5 }) }))
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(market.putListing).toHaveBeenCalledWith(11, { plan: 'max' })
   })
 
   it('a stale form never saves: the listing changed since it was loaded (version / status) → reload, no PUT', async () => {
-    const loaded = view({ listing: { allowed_group_ids: [3], status: 'revoked', version: 4, protection } })
-    market.getListing.mockResolvedValueOnce(view({ listing: { allowed_group_ids: [3], status: 'unlisted', version: 3, protection } })).mockResolvedValueOnce(loaded)
+    const loaded = view({ listing: listing({ status: 'revoked', version: 4 }) })
+    market.getListing.mockResolvedValueOnce(view({ listing: listing({ version: 3 }) })).mockResolvedValueOnce(loaded)
     const w = await mountModal()
     await w.get('form').trigger('submit')
     await flushPromises()
@@ -122,7 +139,7 @@ describe('AccountMarketModal', () => {
   it('the owner changed since loading (no listing either time) → reload showing the new owner, no PUT', async () => {
     market.getListing.mockResolvedValueOnce(view({ owner_user_id: 7 })).mockResolvedValueOnce(view({ owner_user_id: 9 }))
     const w = await mountModal()
-    await w.get('[data-testid=market-allow-3] input').setValue(true)
+    await w.get('[data-testid=market-plan]').setValue('pro')
     await w.get('form').trigger('submit')
     await flushPromises()
     expect(market.putListing).not.toHaveBeenCalled()
@@ -141,15 +158,26 @@ describe('AccountMarketModal', () => {
   })
 
   it('revoke asks for confirmation first', async () => {
-    market.getListing.mockResolvedValue(view({ listing: { allowed_group_ids: [3], status: 'unlisted', version: 1, protection } }))
+    market.getListing.mockResolvedValue(view({ listing: listing() }))
     const w = await mountModal()
     await w.get('[data-testid=market-revoke]').trigger('click')
     expect(market.revokeListing).not.toHaveBeenCalled()
-    market.revokeListing.mockResolvedValue(view({ listing: { allowed_group_ids: [], status: 'revoked', version: 2, protection } }))
+    market.revokeListing.mockResolvedValue(view({ listing: listing({ status: 'revoked', version: 2 }) }))
     await w.get('[data-testid=confirm-yes]').trigger('click')
     await flushPromises()
     expect(market.revokeListing).toHaveBeenCalledWith(11)
     expect(w.find('[data-testid=market-revoke]').exists()).toBe(false)
+  })
+
+  it('a failed group read: an error with a retry; the stored plan stays selectable', async () => {
+    groups.getAll.mockRejectedValueOnce({ status: 500 })
+    market.getListing.mockResolvedValue(view({ listing: listing() }))
+    const w = await mountModal()
+    expect(w.find('[data-testid=market-tiers-failed]').exists()).toBe(true)
+    expect(planValues(w)).toEqual(['', 'max'])
+    await w.get('[data-testid=market-tiers-failed] button').trigger('click')
+    await flushPromises()
+    expect(planValues(w)).toEqual(['', 'max', 'pro'])
   })
 
   it('a failed read shows the error and a retry, never a form', async () => {

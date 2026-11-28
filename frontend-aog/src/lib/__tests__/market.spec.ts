@@ -3,16 +3,22 @@ import type { OwnerMarketView } from '@/api/market'
 import {
   canConvert,
   checkConvertAmount,
+  errorNextSwitchAt,
   errorReason,
   floorToCents,
   hasEarnings,
+  isCooldownError,
+  isTierRequiredError,
   KNOWN_REASONS,
+  marketClosed,
   marketErrorKey,
-  marketState,
   newRequestId,
   pickableTiers,
   reasonKey,
+  sharesOrCanShare,
+  shareState,
   units,
+  upstreamUsage,
   usdExact,
   visibleReasons
 } from '../market'
@@ -25,10 +31,15 @@ function view(over: Partial<OwnerMarketView> = {}): OwnerMarketView {
     status: 'unlisted',
     selected_group_id: null,
     version: 1,
+    plan: 'max',
+    mode: 'self_use',
+    cooldown_hours: 24,
+    next_switch_at: null,
     allowed_tiers: [{ group_id: 3, name: 'T1', rate_multiplier: 1.2, available: true, admin_member: false }],
-    protection: null,
     unavailable_reasons: [],
     can_list: true,
+    can_unlist: false,
+    upstream_windows: [],
     ...over
   }
 }
@@ -44,17 +55,44 @@ describe('market reasons', () => {
     expect(zh.market.reason_proxy_unavailable).toBe('代理不可用')
   })
 
-  it('derives 未获准 / 可上架 / 已上架 / 暂不可售', () => {
-    expect(marketState(view({ status: 'not_configured', can_list: false, unavailable_reasons: ['not_configured'] }))).toBe('notAllowed')
-    expect(marketState(view({ status: 'revoked', can_list: false, unavailable_reasons: ['not_configured'] }))).toBe('notAllowed')
-    expect(marketState(view())).toBe('canList')
-    expect(marketState(view({ status: 'listed', selected_group_id: 3 }))).toBe('listed')
-    expect(marketState(view({ can_list: false, unavailable_reasons: ['proxy_unavailable'] }))).toBe('unavailable')
-    expect(marketState(view({ status: 'listed', can_list: false, unavailable_reasons: ['market_disabled'] }))).toBe('unavailable')
+  it('derives 未开通 / 自用 / 共享中', () => {
+    expect(shareState(view({ status: 'not_configured', plan: null, can_list: false, unavailable_reasons: ['not_configured'] }))).toBe('notGranted')
+    expect(shareState(view({ status: 'revoked', can_list: false }))).toBe('notGranted')
+    expect(shareState(view({ plan: null, can_list: false, unavailable_reasons: ['no_plan'] }))).toBe('notGranted')
+    expect(shareState(view({ unavailable_reasons: ['no_plan'] }))).toBe('notGranted')
+    expect(shareState(view())).toBe('selfUse')
+    expect(shareState(view({ can_list: false, unavailable_reasons: ['proxy_unavailable'] }))).toBe('selfUse')
+    expect(shareState(view({ status: 'listed', mode: 'shared', selected_group_id: 3 }))).toBe('shared')
+    // Still shared after the plan went away: it can be switched back.
+    expect(shareState(view({ status: 'listed', mode: 'shared', plan: null, unavailable_reasons: ['no_plan'] }))).toBe('shared')
   })
 
-  it('hides the not_configured reason and duplicates', () => {
-    expect(visibleReasons(view({ unavailable_reasons: ['not_configured', 'market_disabled', 'market_disabled'] }))).toEqual(['market_disabled'])
+  it('market closed is its own signal, apart from the not-granted state', () => {
+    expect(marketClosed(view({ market_enabled: false }))).toBe(true)
+    expect(marketClosed(view({ unavailable_reasons: ['market_disabled'] }))).toBe(true)
+    expect(marketClosed(view())).toBe(false)
+  })
+
+  it('earnings are relevant when an account is shared or may be shared now', () => {
+    expect(sharesOrCanShare(view())).toBe(true)
+    expect(sharesOrCanShare(view({ can_list: false }))).toBe(false)
+    expect(sharesOrCanShare(view({ status: 'listed', mode: 'shared', can_list: false }))).toBe(true)
+    expect(sharesOrCanShare(view({ status: 'not_configured', plan: null }))).toBe(false)
+    expect(sharesOrCanShare(undefined)).toBe(false)
+  })
+
+  it('hides reasons said on their own line (not granted, market closed, cooldown with a time) and duplicates', () => {
+    expect(visibleReasons(view({ unavailable_reasons: ['not_configured', 'no_plan', 'market_disabled', 'proxy_unavailable', 'proxy_unavailable'] }))).toEqual(['proxy_unavailable'])
+    expect(visibleReasons(view({ unavailable_reasons: ['switch_cooldown'], next_switch_at: '2026-11-29T10:00:00Z' }))).toEqual([])
+    // Without a time the cooldown reason is the only hint.
+    expect(visibleReasons(view({ unavailable_reasons: ['switch_cooldown'] }))).toEqual(['switch_cooldown'])
+  })
+
+  it('upstream 5h / 7d utilization, unknown when there is no sample', () => {
+    expect(upstreamUsage(view())).toEqual({ fiveHour: null, sevenDay: null })
+    const w = (key: string, utilization: number | null) => ({ key, utilization, resets_at: null, expired: false, used_cost_usd: null, estimated_capacity_usd: null, estimate_sampled_at: null })
+    expect(upstreamUsage(view({ upstream_windows: [w('seven_day', 63.4), w('seven_day_sonnet', 90), w('five_hour', null)] }))).toEqual({ fiveHour: null, sevenDay: 63.4 })
+    expect(upstreamUsage(view({ upstream_windows: [w('five_hour', 42)] }))).toEqual({ fiveHour: 42, sevenDay: null })
   })
 
   it('only offers live tiers the account is not already an admin member of', () => {
@@ -79,6 +117,20 @@ describe('market errors', () => {
     expect(marketErrorKey({ status: 500, reason: 'SOMETHING_ELSE' })).toBe('market.errors.generic')
     expect(errorReason({ metadata: { reason: 'proxy_unavailable' } })).toBe('proxy_unavailable')
     expect(errorReason({ metadata: { reason: '<b>x</b>' } })).toBe('')
+    expect(marketErrorKey({ status: 429, reason: 'MARKET_SWITCH_COOLDOWN' })).toBe('market.errors.MARKET_SWITCH_COOLDOWN')
+    expect(marketErrorKey({ status: 400, reason: 'MARKET_TIER_REQUIRED' })).toBe('market.errors.MARKET_TIER_REQUIRED')
+  })
+
+  it('recognises the cooldown (with its next time) and the tier-required refusal', () => {
+    const cool = { status: 429, reason: 'MARKET_SWITCH_COOLDOWN', metadata: { next_switch_at: '2026-11-29T10:00:00Z' } }
+    expect(isCooldownError(cool)).toBe(true)
+    expect(errorNextSwitchAt(cool)).toBe('2026-11-29T10:00:00Z')
+    expect(errorNextSwitchAt({ ...cool, metadata: { next_switch_at: 'soon' } })).toBeNull()
+    expect(errorNextSwitchAt({ status: 429 })).toBeNull()
+    // A bare 429 (rate limit elsewhere) is not a cooldown.
+    expect(isCooldownError({ status: 429, message: 'slow down' })).toBe(false)
+    expect(isTierRequiredError({ status: 400, reason: 'MARKET_TIER_REQUIRED' })).toBe(true)
+    expect(isTierRequiredError({ status: 400, reason: 'MARKET_GROUP_NOT_ALLOWED' })).toBe(false)
   })
 })
 
