@@ -4266,6 +4266,7 @@ export default {
       marketPlanHint: 'With a plan, the owner can switch between self use and shared on the hosted page after approval (it starts as self use); without one it is self use only, and a plan can be set later in the account\'s sharing settings.',
       marketPlanEmpty: 'No sharing tier has a plan yet; only "No sharing" is possible.',
       groupsLoadFailed: 'Could not load the groups: only "No sharing" is possible now.',
+      marketPlanGone: 'The chosen plan is no longer available; pick again (or "No sharing").',
       approveHint: 'Defaults come from Settings → Hosted self-onboarding. After approval, verify with “Test account” on the Accounts page.',
       approved: 'Created account #{account} (owner hosted group #{group}).',
       approvedHint: 'Search for this ID on the Accounts page and verify it with “Test account”.',

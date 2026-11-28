@@ -136,6 +136,16 @@ describe('AccountMarketModal', () => {
     expect(w.get('[data-testid=market-status-badge]').text()).toBe('market.status.revoked')
   })
 
+  it('another admin changed only the plan (same version and status) → reload, no PUT that would write the old plan back', async () => {
+    market.getListing.mockResolvedValueOnce(view({ listing: listing({ plan: 'max', version: 3 }) })).mockResolvedValueOnce(view({ listing: listing({ plan: 'pro', version: 3 }) }))
+    const w = await mountModal()
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(market.putListing).not.toHaveBeenCalled()
+    expect(w.get('[data-testid=market-error]').text()).toBe('market.account.staleReload')
+    expect((w.get('[data-testid=market-plan]').element as HTMLSelectElement).value).toBe('pro')
+  })
+
   it('the owner changed since loading (no listing either time) → reload showing the new owner, no PUT', async () => {
     market.getListing.mockResolvedValueOnce(view({ owner_user_id: 7 })).mockResolvedValueOnce(view({ owner_user_id: 9 }))
     const w = await mountModal()

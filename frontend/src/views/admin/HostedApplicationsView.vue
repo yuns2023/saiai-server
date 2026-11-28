@@ -200,7 +200,10 @@
             {{ t('admin.hostedApplications.groupsLoadFailed') }}
             <button type="button" class="btn btn-secondary btn-sm" @click.prevent="loadPlanGroups">{{ t('admin.hostedApplications.retry') }}</button>
           </p>
-          <p v-else-if="planOptions.length === 1" class="mt-1 text-xs text-gray-500 dark:text-dark-400" data-testid="plan-none-available">
+          <p v-if="planGone" class="mt-1 text-xs text-red-600 dark:text-red-400" data-testid="plan-gone">
+            {{ t('admin.hostedApplications.marketPlanGone') }}
+          </p>
+          <p v-else-if="!planGroupsFailed && planOptions.length === 1" class="mt-1 text-xs text-gray-500 dark:text-dark-400" data-testid="plan-none-available">
             {{ t('admin.hostedApplications.marketPlanEmpty') }}
           </p>
         </div>
@@ -413,9 +416,14 @@ async function loadPlanGroups() {
     planGroups.value = (await adminAPI.groups.getAll()) ?? []
     planGroupsFailed.value = false
   } catch {
+    // Unknown tiers: offer only 不开通共享 rather than possibly stale plans.
+    planGroups.value = []
     planGroupsFailed.value = true
   }
 }
+
+/** The chosen 套餐 is no longer offered (tiers changed, or the group read failed): the admin picks again. */
+const planGone = computed(() => !!approveForm.market_plan && !planOptions.value.some((o) => o.value === approveForm.market_plan))
 
 const proxyOptions = computed(() => proxies.value.map((p) => ({ value: p.id, label: `${p.name} · ${p.protocol}://${p.host}:${p.port}` })))
 
@@ -459,6 +467,7 @@ async function confirmApprove() {
   if (!target || busy.value) return
   tried.value = true
   if (problems.value.length) return
+  if (planGone.value) return
   if (!contextReady.value || !switchOn.value) {
     appStore.showError(t('admin.hostedApplications.errors.SELF_ONBOARD_DISABLED'))
     return

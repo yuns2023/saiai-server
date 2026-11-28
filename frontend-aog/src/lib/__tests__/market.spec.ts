@@ -60,6 +60,8 @@ describe('market reasons', () => {
     expect(shareState(view({ status: 'revoked', can_list: false }))).toBe('notGranted')
     expect(shareState(view({ plan: null, can_list: false, unavailable_reasons: ['no_plan'] }))).toBe('notGranted')
     expect(shareState(view({ unavailable_reasons: ['no_plan'] }))).toBe('notGranted')
+    // not_configured as a reason (even on an unlisted row with a plan) is 未开通 too.
+    expect(shareState(view({ unavailable_reasons: ['not_configured'] }))).toBe('notGranted')
     expect(shareState(view())).toBe('selfUse')
     expect(shareState(view({ can_list: false, unavailable_reasons: ['proxy_unavailable'] }))).toBe('selfUse')
     expect(shareState(view({ status: 'listed', mode: 'shared', selected_group_id: 3 }))).toBe('shared')

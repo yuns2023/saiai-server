@@ -4422,6 +4422,7 @@ export default {
       marketPlanHint: '选了套餐，批准后号主可以在托管页自己切换「自用 / 共享」（先是自用）；不选则只能自用，之后可在账号的「共享设置」里补。',
       marketPlanEmpty: '还没有设置了套餐的共享档位，只能选「不开通共享」。',
       groupsLoadFailed: '分组列表读取失败：现在只能选「不开通共享」。',
+      marketPlanGone: '所选套餐已不可用，请重新选择（或选「不开通共享」）。',
       approveHint: '默认值来自系统设置「托管自助上号」。批准后可在账号管理里用「测试账号」验证。',
       approved: '已创建账号 #{account}（号主托管分组 #{group}）。',
       approvedHint: '可在账号管理里搜索该 ID 并用「测试账号」验证。',

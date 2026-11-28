@@ -14,7 +14,11 @@ import type { OwnerEarnings, OwnerMarketView } from '@/api/market'
  */
 export type ShareState = 'notGranted' | 'selfUse' | 'shared'
 
-/** Reason codes with their own message (under market.reason_<code>); others fall back to a generic text. */
+/**
+ * Reason codes with their own message (under market.reason_<code>); others fall back to a generic text.
+ * Account-configuration reasons (device / session limits, protection) say only that the configuration
+ * does not support sharing: owners never see device limits, concurrency or reservations.
+ */
 export const KNOWN_REASONS = [
   'market_disabled',
   'not_configured',
@@ -41,7 +45,7 @@ export function reasonKey(code: string): string {
 
 export function shareState(v: OwnerMarketView): ShareState {
   if (v.mode === 'shared' || v.status === 'listed') return 'shared'
-  if (v.status !== 'unlisted' || !v.plan || v.unavailable_reasons.includes('no_plan')) return 'notGranted'
+  if (v.status !== 'unlisted' || !v.plan || v.unavailable_reasons.includes('no_plan') || v.unavailable_reasons.includes('not_configured')) return 'notGranted'
   return 'selfUse'
 }
 

@@ -314,6 +314,41 @@ describe('Hosting applications (admin)', () => {
       expect(w.find('[data-testid=approve-dialog]').exists()).toBe(true)
     })
 
+    it('a chosen plan that disappeared on the re-read is not sent again: the admin picks again (不开通共享 still works)', async () => {
+      approve.mockRejectedValueOnce({ status: 400, reason: 'MARKET_PLAN_UNKNOWN', message: 'x' })
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      await planSelect(w).setValue('pro')
+      // The re-read after the error no longer has a pro tier.
+      groupsGetAll.mockResolvedValueOnce(planGroups.filter((g) => g.market_plan !== 'pro'))
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(w.get('[data-testid=plan-gone]').text()).toContain('admin.hostedApplications.marketPlanGone')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).toHaveBeenCalledTimes(1)
+      approve.mockResolvedValueOnce({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })
+      await planSelect(w).setValue('')
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).toHaveBeenCalledTimes(2)
+      expect(approve.mock.calls[1][1]).not.toHaveProperty('market_plan')
+    })
+
+    it('a failed group re-read drops the stale plans: a plan chosen before cannot be sent', async () => {
+      const w = await mountView()
+      await row(w, 1).get('[data-testid=approve]').trigger('click')
+      await planSelect(w).setValue('max')
+      groupsGetAll.mockRejectedValueOnce({ status: 500 })
+      await w.get('[data-testid=refresh]').trigger('click')
+      await flushPromises()
+      expect(w.find('[data-testid=plan-groups-failed]').exists()).toBe(true)
+      expect(w.find('[data-testid=plan-gone]').exists()).toBe(true)
+      await w.get('[data-testid=approve-dialog]').trigger('submit')
+      await flushPromises()
+      expect(approve).not.toHaveBeenCalled()
+    })
+
     it('a failed group read leaves only 不开通共享 (with a retry); approving still works', async () => {
       groupsGetAll.mockRejectedValueOnce({ status: 500, message: 'boom' })
       approve.mockResolvedValue({ application: { ...withProxy, status: 'approved', account_id: 91 }, account_id: 91, group_id: 15 })

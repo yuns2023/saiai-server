@@ -192,13 +192,13 @@ function reasonText(code: string): string {
   return te(`market.reasons.${code}`) ? t(`market.reasons.${code}`) : t('market.reasons.other', { code })
 }
 
-/** Whether the owner or the listing (version, status, created/removed) changed since the form was loaded. */
+/** Whether the owner or the listing (version, status, plan, created/removed) changed since the form was loaded. */
 function changedSince(loaded: AdminMarketListingView | null, latest: AdminMarketListingView): boolean {
   if ((loaded?.owner_user_id ?? null) !== (latest.owner_user_id ?? null)) return true
   const a = loaded?.listing ?? null
   const b = latest.listing
   if (!a || !b) return a !== b
-  return a.version !== b.version || a.status !== b.status
+  return a.version !== b.version || a.status !== b.status || (a.plan ?? null) !== (b.plan ?? null)
 }
 
 function applyView(v: AdminMarketListingView): void {

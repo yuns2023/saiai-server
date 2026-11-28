@@ -23,6 +23,7 @@ import HostedView from '../HostedView.vue'
 import { intlLocale } from '@/i18n'
 import { dateTime } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth'
+import { useHostedStore } from '@/stores/hosted'
 
 function account(over: Partial<OwnedAccount> = {}): OwnedAccount {
   return {
@@ -347,7 +348,7 @@ describe('HostedView sharing market', () => {
   it('MARKET_TIER_REQUIRED while only one tier is known here: the picker shows that tier and the PUT names it', async () => {
     const w = await mountView({ views: { 11: view() } })
     market.setListing.mockRejectedValueOnce({ status: 400, reason: 'MARKET_TIER_REQUIRED', message: 'x' })
-    market.getListing.mockResolvedValueOnce(view({ version: 3 }))
+    market.getListing.mockResolvedValueOnce(view())
     await card(w).get('[data-testid=market-share]').trigger('click')
     await card(w).get('dialog .btn-primary').trigger('click')
     await flushPromises()
@@ -357,6 +358,142 @@ describe('HostedView sharing market', () => {
     await card(w).get('dialog .btn-primary').trigger('click')
     await flushPromises()
     expect(market.setListing).toHaveBeenLastCalledWith(11, { listed: true, group_id: 4 })
+  })
+
+  it('after MARKET_TIER_REQUIRED, a new listing version with one tier decides again: the PUT omits group_id', async () => {
+    const w = await mountView({ views: { 11: view() } })
+    market.setListing.mockRejectedValueOnce({ status: 400, reason: 'MARKET_TIER_REQUIRED', message: 'x' })
+    market.getListing.mockResolvedValueOnce(view())
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(card(w).find('[data-testid=market-tier-4]').exists()).toBe(true)
+    // The listing changes (new version, still one tier).
+    market.getListing.mockResolvedValueOnce(view({ version: 3 }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    expect(card(w).find('[data-testid=market-tier-4]').exists()).toBe(false)
+    market.setListing.mockResolvedValueOnce(SHARED)
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(market.setListing).toHaveBeenLastCalledWith(11, { listed: true })
+  })
+
+  it('the listing changes while the confirmation is open (tier gone, new version): nothing is sent, the owner is asked to look again', async () => {
+    const w = await mountView({ views: { 11: view({ allowed_tiers: TWO_TIERS }) } })
+    await card(w).get('[data-testid=market-tier-3] input').setValue(true)
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    expect(dialogOpen()).toBe(true)
+    // A re-read lands meanwhile: tier 3 is gone, only tier 4 is left.
+    market.getListing.mockResolvedValueOnce(view({ version: 3 }))
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(market.setListing).not.toHaveBeenCalled()
+    expect(dialogOpen()).toBe(false)
+    expect(card(w).get('[data-testid=market-error]').text()).toBe('共享状态刚有变化，请看清后重新操作。')
+  })
+
+  it('permission lost while the confirmation is open (same version): nothing is sent', async () => {
+    const w = await mountView({ views: { 11: SHARED } })
+    await card(w).get('[data-testid=market-self-use]').trigger('click')
+    market.getListing.mockResolvedValueOnce({ ...SHARED, can_unlist: false, next_switch_at: NEXT })
+    useHostedStore().notifyListingChanged(11)
+    await flushPromises()
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(market.setListing).not.toHaveBeenCalled()
+  })
+
+  it('while its own switch is in flight, Esc does not hide the confirmation', async () => {
+    const w = await mountView({ views: { 11: view() } })
+    let resolve!: (v: unknown) => void
+    market.setListing.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await card(w).get('dialog').trigger('cancel')
+    expect(dialogOpen()).toBe(true)
+    resolve(SHARED)
+    await flushPromises()
+    expect(dialogOpen()).toBe(false)
+  })
+
+  it('when the cooldown ends, the view is read again (the server decides whether the switch is open)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      vi.setSystemTime(new Date('2026-11-28T10:00:00Z'))
+      const w = await mountView({ views: { 11: { ...SHARED, can_unlist: false, next_switch_at: '2026-11-28T10:00:30Z' } } })
+      expect(card(w).get('[data-testid=market-self-use]').attributes('disabled')).toBeDefined()
+      market.getListing.mockResolvedValueOnce({ ...SHARED, version: 3 })
+      const before = market.getListing.mock.calls.length
+      vi.advanceTimersByTime(29_000)
+      expect(market.getListing.mock.calls.length).toBe(before)
+      vi.advanceTimersByTime(3_000)
+      await flushPromises()
+      expect(market.getListing.mock.calls.length).toBe(before + 1)
+      expect(card(w).get('[data-testid=market-self-use]').attributes('disabled')).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an answer that arrives after sign-out / another sign-in shows nothing to the new session', async () => {
+    const w = await mountView({ views: { 11: view() } })
+    const notify = vi.spyOn((await import('@/stores/app')).useAppStore(), 'notify')
+    let resolve!: (v: unknown) => void
+    market.setListing.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    await card(w).get('[data-testid=market-share]').trigger('click')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    useHostedStore().reset()
+    useHostedStore().ownerBusy = 99
+    resolve(SHARED)
+    await flushPromises()
+    expect(notify).not.toHaveBeenCalled()
+    // The new session's lock is untouched.
+    expect(useHostedStore().ownerBusy).toBe(99)
+  })
+
+  it('shared with the plan cleared, its tier gone and the market closed: still 共享中 and can switch back', async () => {
+    const w = await mountView({
+      views: { 11: { ...SHARED, plan: null, market_enabled: false, allowed_tiers: [], unavailable_reasons: ['no_plan', 'market_disabled'] } }
+    })
+    expect(card(w).get('[data-testid=market-state]').text()).toBe('共享中')
+    expect(card(w).get('[data-testid=market-current-tier]').text()).toBe('档位：#4')
+    expect(card(w).get('[data-testid=market-closed]').exists()).toBe(true)
+    market.setListing.mockResolvedValueOnce(view({ version: 4, plan: null, allowed_tiers: [], can_list: false, unavailable_reasons: ['no_plan'] }))
+    await card(w).get('[data-testid=market-self-use]').trigger('click')
+    await card(w).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(market.setListing).toHaveBeenCalledWith(11, { listed: false })
+    expect(card(w).get('[data-testid=market-state]').text()).toBe('未开通')
+  })
+
+  it('account-configuration reasons never reveal device / session limits (list and error), each text once', async () => {
+    const w = await mountView({ views: { 11: view({ can_list: false, unavailable_reasons: ['unlimited_devices', 'max_sessions_enabled', 'protection_invalid'] }) } })
+    const items = card(w).findAll('[data-testid=market-reasons] li')
+    expect(items).toHaveLength(1)
+    expect(items[0].text()).toBe('· 账号设置暂不支持共享，请联系管理员')
+    expect(card(w).text()).not.toMatch(/设备|会话|并发|预留/)
+    w.unmount()
+    const w2 = await mountView({ views: { 11: view() } })
+    market.setListing.mockRejectedValueOnce({ status: 409, reason: 'MARKET_ACCOUNT_NOT_ELIGIBLE', metadata: { reason: 'unlimited_devices' }, message: 'x' })
+    await card(w2).get('[data-testid=market-share]').trigger('click')
+    await card(w2).get('dialog .btn-primary').trigger('click')
+    await flushPromises()
+    expect(card(w2).get('[data-testid=market-error]').text()).toBe('这个号暂时不能共享：账号设置暂不支持共享，请联系管理员')
+  })
+
+  it('two accounts: a failed read stays on its own line; the other card and the earnings section still show', async () => {
+    const w = await mountView({
+      accounts: [account(), account({ account_id: 12, display_name: 'Pro 号' })],
+      views: { 11: view(), 12: Object.assign(new Error('boom'), { status: 502 }) }
+    })
+    expect(w.get('[data-testid=market-error-12]').text()).toContain('共享状态读取失败')
+    expect(w.find('[data-testid=market-error-11]').exists()).toBe(false)
+    expect(card(w).get('[data-testid=market-state]').text()).toBe('自用')
+    expect(w.find('[data-testid=earnings]').exists()).toBe(true)
   })
 
   it('one listing action at a time per page: pause in flight disables sharing', async () => {

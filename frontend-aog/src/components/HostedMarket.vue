@@ -41,26 +41,40 @@ const hosted = useHostedStore()
  */
 const busy = computed(() => hosted.ownerBusy !== null)
 let mounted = true
+/** Re-read when the cooldown ends, so the switch unlocks without a page reload. */
+let cooldownTimer: ReturnType<typeof setTimeout> | null = null
 onUnmounted(() => {
   mounted = false
+  if (cooldownTimer) clearTimeout(cooldownTimer)
 })
 const { t, te } = useI18n()
 const app = useAppStore()
 
 const state = computed(() => shareState(props.view))
 const closed = computed(() => marketClosed(props.view))
-const reasons = computed(() => visibleReasons(props.view))
+/** Reason texts, each once (several configuration reasons share one neutral text). */
+const reasons = computed(() => [...new Set(visibleReasons(props.view).map((r) => t(reasonKey(r))))])
 const tiers = computed(() => props.view.allowed_tiers)
 const pickable = computed(() => pickableTiers(props.view))
 const usage = computed(() => upstreamUsage(props.view))
 const cooldown = computed(() => props.view.cooldown_hours)
 
-/** The server asked for an explicit tier (MARKET_TIER_REQUIRED): the picker shows even if one tier is known here. */
+/**
+ * The server asked for an explicit tier (MARKET_TIER_REQUIRED): the picker shows even if one tier is
+ * known here, until the listing changes (a new version decides again from its own tier list).
+ */
 const tierRequired = ref(false)
 /** Several tiers in the 套餐: the owner picks one and the switch names it; with one, the server uses it. */
 const needsPick = computed(() => state.value === 'selfUse' && (tiers.value.length > 1 || tierRequired.value))
 const choice = ref<number | null>(null)
 const confirming = ref<Direction | null>(null)
+/**
+ * What the owner confirms: the body built when the dialog opened and the listing version it was
+ * built from. If the view changes meanwhile (new version, tier gone, permission lost), nothing is sent.
+ */
+let asked: { version: number; body: OwnerMarketUpdate } | null = null
+/** This card's own switch is in flight (the dialog then stays open; Esc does not hide it). */
+const sending = ref(false)
 const error = ref('')
 /** A cooldown refusal: its time comes from the error, else from the view read again right after. */
 const cooldownHit = ref(false)
@@ -77,8 +91,33 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => props.view.version,
+  () => {
+    tierRequired.value = false
+  }
+)
+
 const canShare = computed(() => props.view.can_list && (!needsPick.value || (choice.value != null && pickable.value.some((x) => x.group_id === choice.value))))
 const canSelfUse = computed(() => props.view.can_unlist)
+
+// When the cooldown ends, read the view again: the server decides whether the switch is open now.
+watch(
+  () => props.view.next_switch_at,
+  (at) => {
+    if (cooldownTimer) clearTimeout(cooldownTimer)
+    cooldownTimer = null
+    const ms = at ? Date.parse(at) - Date.now() : NaN
+    // A second late (clock skew); beyond the longest cooldown (168 h) a reload of the page will do.
+    if (Number.isFinite(ms) && ms > 0 && ms <= 169 * 3600_000) {
+      cooldownTimer = setTimeout(() => {
+        cooldownTimer = null
+        if (mounted) emit('reload')
+      }, ms + 1000)
+    }
+  },
+  { immediate: true }
+)
 
 function when(iso: string): string {
   return dateTime(iso, intlLocale())
@@ -114,36 +153,67 @@ const confirmBody = computed(() => {
   return hours > 0 ? t('market.confirmShareBody', { hours }) : t('market.confirmShareBodyNoCooldown')
 })
 
+function buildBody(direction: Direction): OwnerMarketUpdate {
+  if (direction === 'self') return { listed: false }
+  return needsPick.value && choice.value != null ? { listed: true, group_id: choice.value } : { listed: true }
+}
+
+/** The switch is still allowed by the view on screen (the dialog may have stayed open across a re-read). */
+function stillAllowed(direction: Direction): boolean {
+  return direction === 'self' ? state.value === 'shared' && canSelfUse.value : state.value === 'selfUse' && canShare.value
+}
+
 function ask(direction: Direction): void {
-  if (busy.value) return
+  if (busy.value || !stillAllowed(direction)) return
+  asked = { version: props.view.version, body: buildBody(direction) }
   confirming.value = direction
+}
+
+function cancelConfirm(): void {
+  if (sending.value) return
+  confirming.value = null
+  asked = null
 }
 
 async function confirmSwitch(): Promise<void> {
   const direction = confirming.value
-  if (!direction) return
-  await send(direction === 'share')
-  confirming.value = null
+  const pending = asked
+  if (!direction || !pending) return
+  // The listing changed while the dialog was open: what was confirmed may no longer be what would be sent.
+  const now = buildBody(direction)
+  if (props.view.version !== pending.version || !stillAllowed(direction) || JSON.stringify(now) !== JSON.stringify(pending.body)) {
+    confirming.value = null
+    asked = null
+    error.value = t('market.changedReconfirm')
+    cooldownHit.value = false
+    return
+  }
+  sending.value = true
+  try {
+    await send(direction === 'share', pending.body)
+  } finally {
+    sending.value = false
+    confirming.value = null
+    asked = null
+  }
 }
 
-async function send(toShared: boolean): Promise<void> {
+async function send(toShared: boolean, body: OwnerMarketUpdate): Promise<void> {
   if (hosted.ownerBusy !== null) return
   error.value = ''
   cooldownHit.value = false
   cooldownAt.value = null
-  const body: OwnerMarketUpdate = !toShared
-    ? { listed: false }
-    : needsPick.value && choice.value != null
-      ? { listed: true, group_id: choice.value }
-      : { listed: true }
   hosted.ownerBusy = props.view.account_id
   const session = hosted.session()
   try {
     const view = await marketApi.setListing(props.view.account_id, body)
+    // Signed out / another user meanwhile: this answer is not theirs to see.
+    if (hosted.session() !== session) return
     tierRequired.value = false
     emit('updated', view)
     app.notify('ok', t(toShared ? 'market.sharedDone' : 'market.selfUseDone'))
   } catch (e) {
+    if (hosted.session() !== session) return
     if (isCooldownError(e)) {
       cooldownHit.value = true
       cooldownAt.value = errorNextSwitchAt(e)
@@ -188,16 +258,18 @@ async function send(toShared: boolean): Promise<void> {
       <p class="mt-1 text-xs text-ink-2" data-testid="market-mode-hint">{{ state === 'shared' ? t('market.sharedHint') : t('market.selfUseHint') }}</p>
       <p v-if="closed" class="mt-1 text-xs text-warn" data-testid="market-closed">{{ t('market.marketClosed') }}</p>
       <ul v-if="reasons.length" class="mt-2 space-y-0.5 text-xs text-warn" data-testid="market-reasons">
-        <li v-for="r in reasons" :key="r">· {{ t(reasonKey(r)) }}</li>
+        <li v-for="r in reasons" :key="r">· {{ r }}</li>
       </ul>
+    </template>
 
-      <!-- Upstream limit windows of this account -->
-      <p class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-2" data-testid="market-upstream">
-        <span>{{ t('market.upstream') }}</span>
-        <span class="num" data-testid="market-upstream-5h">{{ windowLabel('five_hour') }} {{ pct(usage.fiveHour) }}</span>
-        <span class="num" data-testid="market-upstream-7d">{{ windowLabel('seven_day') }} {{ pct(usage.sevenDay) }}</span>
-      </p>
+    <!-- Upstream limit windows of this account -->
+    <p class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-2" data-testid="market-upstream">
+      <span>{{ t('market.upstream') }}</span>
+      <span class="num" data-testid="market-upstream-5h">{{ windowLabel('five_hour') }} {{ pct(usage.fiveHour) }}</span>
+      <span class="num" data-testid="market-upstream-7d">{{ windowLabel('seven_day') }} {{ pct(usage.sevenDay) }}</span>
+    </p>
 
+    <template v-if="state !== 'notGranted'">
       <fieldset v-if="needsPick && tiers.length" class="mt-3" :disabled="busy">
         <legend class="label">{{ t('market.pickTier') }}</legend>
         <div class="mt-1 flex flex-wrap gap-2" role="radiogroup" :aria-label="t('market.pickTier')">
@@ -252,9 +324,9 @@ async function send(toShared: boolean): Promise<void> {
       </div>
     </template>
 
-    <p v-if="view.next_switch_at || (state !== 'notGranted' && cooldown > 0)" class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-3">
+    <p v-if="view.next_switch_at || cooldown > 0" class="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-ink-3">
       <span v-if="view.next_switch_at" :title="view.next_switch_at" data-testid="market-next-switch">{{ t('market.nextSwitch', { time: when(view.next_switch_at) }) }}</span>
-      <span v-if="state !== 'notGranted' && cooldown > 0" data-testid="market-cooldown-rule">{{ t('market.cooldownRule', { hours: cooldown }) }}</span>
+      <span v-if="cooldown > 0" data-testid="market-cooldown-rule">{{ t('market.cooldownRule', { hours: cooldown }) }}</span>
     </p>
     <p v-if="errorText" class="mt-2 text-sm text-seal" role="alert" data-testid="market-error">{{ errorText }}</p>
 
@@ -267,7 +339,7 @@ async function send(toShared: boolean): Promise<void> {
       :confirm-label="confirming === 'self' ? t('market.backToSelf') : t('market.startShare')"
       :busy="busy"
       @confirm="confirmSwitch"
-      @cancel="confirming = null"
+      @cancel="cancelConfirm"
     />
   </div>
 </template>
